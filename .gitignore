@@ -4,3 +4,8 @@ cache/
 chroot/
 binary/
 .build/
+config/binary
+config/bootstrap
+config/chroot
+config/common
+config/source
