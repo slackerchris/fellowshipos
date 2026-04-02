@@ -54,12 +54,14 @@ run "Creating LXC template" docker run --rm \
     bash -c "
         set -e
 
-        # Clean up live-boot specific bits that don't belong in a container
-        rm -rf chroot/lib/live chroot/etc/live 2>/dev/null || true
-        rm -f chroot/etc/fstab.d/live 2>/dev/null || true
+        # Remove live-boot/live-config — not needed in LXC, causes (live) prompt
+        chroot chroot dpkg --purge live-boot live-boot-initramfs-tools live-config live-config-systemd 2>/dev/null || true
 
         # Remove kernel and bootloader — not needed in LXC
         chroot chroot dpkg --purge linux-image-amd64 grub-efi grub-common 2>/dev/null || true
+
+        # Clean up leftover live artifacts
+        rm -rf chroot/lib/live chroot/etc/live chroot/etc/fstab.d/live 2>/dev/null || true
 
         # Tar up the rootfs in Proxmox-compatible format
         tar -czf ${TEMPLATE_NAME}_lxc.tar.gz \
