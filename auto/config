@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+lb config \
+    --architecture amd64 \
+    --distribution noble \
+    --archive-areas "main restricted universe multiverse" \
+    --debian-installer none \
+    --binary-images iso-hybrid \
+    --bootloaders "grub-efi,syslinux" \
+    --memtest none \
+    --apt-recommends false \
+    --iso-volid "HomelabOS" \
+    --iso-publisher "Chris" \
+    --iso-application "HomelabOS Base" \
+    "${@}"

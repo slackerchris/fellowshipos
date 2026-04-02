@@ -1,0 +1,32 @@
+#!/bin/bash
+# Run a HomelabOS flavor layer
+set -e
+
+FLAVOR_DIR="/usr/local/lib/flavors"
+FLAVOR="$1"
+
+if [ -z "$FLAVOR" ]; then
+    echo "Usage: homelabos-flavor <flavor>"
+    echo ""
+    echo "Available flavors:"
+    for f in "$FLAVOR_DIR"/*.sh; do
+        name=$(basename "$f" .sh)
+        desc=$(grep "^# Flavor:" "$f" | cut -d: -f2 | xargs)
+        printf "  %-20s %s\n" "$name" "$desc"
+    done
+    exit 1
+fi
+
+SCRIPT="$FLAVOR_DIR/${FLAVOR}.sh"
+
+if [ ! -f "$SCRIPT" ]; then
+    echo "Unknown flavor: $FLAVOR"
+    exit 1
+fi
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root: sudo homelabos-flavor $FLAVOR"
+    exit 1
+fi
+
+bash "$SCRIPT"

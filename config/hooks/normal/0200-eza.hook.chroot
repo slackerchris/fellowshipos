@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+
+# Install eza from GitHub releases
+EZA_VERSION="0.18.21"
+curl -fsSL "https://github.com/eza-community/eza/releases/download/v${EZA_VERSION}/eza_x86_64-unknown-linux-gnu.tar.gz" \
+    | tar -xz -C /usr/local/bin
+chmod +x /usr/local/bin/eza

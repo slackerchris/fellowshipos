@@ -1,0 +1,47 @@
+# Survival
+sudo
+vim
+nano
+htop
+btop
+curl
+wget
+git
+unzip
+zip
+bash-completion
+
+# Network + Diagnostics
+iproute2
+net-tools
+dnsutils
+traceroute
+mtr
+tcpdump
+nmap
+
+# Storage + Filesystem
+nfs-common
+cifs-utils
+smartmontools
+
+# SSH + Remote
+openssh-server
+mosh
+
+# QoL CLI
+fzf
+ripgrep
+bat
+tmux
+
+# Logs
+lnav
+
+# Time
+chrony
+
+# Data tools
+jq
+ncdu
+tree
