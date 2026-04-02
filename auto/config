@@ -10,7 +10,7 @@ lb config \
     --bootloader "syslinux" \
     --memtest none \
     --apt-recommends false \
-    --iso-volume "HomelabOS" \
+    --iso-volume "FellowshipOS" \
     --iso-publisher "Chris" \
-    --iso-application "HomelabOS Base" \
+    --iso-application "FellowshipOS Base" \
     "${@}"
