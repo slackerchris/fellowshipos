@@ -12,6 +12,8 @@ lb config noauto \
     --security false \
     --linux-packages "linux-image-amd64" \
     --linux-flavours amd64 \
+    --firmware-chroot false \
+    --firmware-binary false \
     --debian-installer none \
     --binary-images iso-hybrid \
     --bootloader "syslinux" \
