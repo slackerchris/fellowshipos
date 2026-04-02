@@ -1,4 +1,6 @@
 build.log
+chroot.*
+binary.*
 *.iso
 cache/
 chroot/
