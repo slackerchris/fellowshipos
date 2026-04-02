@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
-# Guard against recursive invocation by lb build
-[ -f .build/config ] && exit 0
+# Guard against recursive invocation - file persists across sudo boundary
+LOCK="/tmp/fellowshipos-lb-config.lock"
+[ -f "$LOCK" ] && exit 0
+touch "$LOCK"
+trap "rm -f $LOCK" EXIT
 
 lb config \
     --mode debian \
