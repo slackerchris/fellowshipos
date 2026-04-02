@@ -17,7 +17,7 @@ lb config noauto \
     --initsystem systemd \
     --debian-installer false \
     --binary-images iso-hybrid \
-    --bootloader "syslinux" \
+    --bootloader "grub" \
     --memtest none \
     --apt-recommends false \
     --iso-volume "FellowshipOS" \
