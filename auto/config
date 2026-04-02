@@ -15,7 +15,7 @@ lb config noauto \
     --firmware-chroot false \
     --firmware-binary false \
     --initsystem systemd \
-    --debian-installer none \
+    --debian-installer false \
     --binary-images iso-hybrid \
     --bootloader "syslinux" \
     --memtest none \
