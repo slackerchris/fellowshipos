@@ -1,0 +1,16 @@
+[Unit]
+Description=FellowshipOS First Boot Setup Wizard
+After=network.target
+ConditionPathExists=!/etc/fellowshipos/.setup-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fellowshipos-setup
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

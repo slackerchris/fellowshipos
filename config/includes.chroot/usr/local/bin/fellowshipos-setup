@@ -1,0 +1,318 @@
+#!/bin/bash
+# FellowshipOS First Boot Setup Wizard
+# Runs once on first boot via systemd, marks itself done on completion
+
+set -e
+
+DONE_FLAG="/etc/fellowshipos/.setup-complete"
+
+# Already ran
+[ -f "$DONE_FLAG" ] && exit 0
+
+# Colors
+RESET='\033[0m'
+BOLD='\033[1m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+DIM='\033[2m'
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+header() {
+    clear
+    echo -e "${YELLOW}${BOLD}"
+    echo "  ╔══════════════════════════════════════════════════════╗"
+    echo "  ║           Welcome to FellowshipOS Setup              ║"
+    echo "  ║                 First Boot Wizard                    ║"
+    echo "  ╚══════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+}
+
+section() {
+    echo ""
+    echo -e "${CYAN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+    echo -e "${CYAN}${BOLD} $1${RESET}"
+    echo -e "${CYAN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+}
+
+prompt() {
+    local label="$1"
+    local default="$2"
+    local var="$3"
+    local secret="$4"
+
+    if [ -n "$default" ]; then
+        echo -ne "  ${label} [${DIM}${default}${RESET}]: "
+    else
+        echo -ne "  ${label}: "
+    fi
+
+    if [ "$secret" = "1" ]; then
+        read -rs value
+        echo ""
+    else
+        read -r value
+    fi
+
+    value="${value:-$default}"
+    eval "$var=\"$value\""
+}
+
+confirm() {
+    local label="$1"
+    local default="${2:-Y}"
+    local var="$3"
+    echo -ne "  ${label} [${default}]: "
+    read -r value
+    value="${value:-$default}"
+    eval "$var=\"$value\""
+}
+
+# ─── System ───────────────────────────────────────────────────────────────────
+
+header
+
+section "System"
+
+prompt "Hostname" "fellowshipos" SETUP_HOSTNAME
+prompt "Timezone" "UTC" SETUP_TZ
+
+# ─── User ─────────────────────────────────────────────────────────────────────
+
+section "User"
+
+prompt "Username" "" SETUP_USER
+while [ -z "$SETUP_USER" ]; do
+    echo -e "  ${RED}Username is required.${RESET}"
+    prompt "Username" "" SETUP_USER
+done
+
+prompt "Full name" "" SETUP_FULLNAME
+
+while true; do
+    prompt "Password" "" SETUP_PASS 1
+    prompt "Confirm password" "" SETUP_PASS2 1
+    if [ "$SETUP_PASS" = "$SETUP_PASS2" ]; then
+        break
+    fi
+    echo -e "  ${RED}Passwords do not match. Try again.${RESET}"
+done
+
+confirm "Add to sudo group?" "Y" SETUP_SUDO
+
+# ─── SSH ──────────────────────────────────────────────────────────────────────
+
+section "SSH"
+
+confirm "Regenerate SSH host keys?" "Y" SETUP_REGEN_SSH
+prompt "Paste your public key (optional, enter to skip)" "" SETUP_PUBKEY
+
+# ─── Role ─────────────────────────────────────────────────────────────────────
+
+section "Role"
+
+echo ""
+echo "  Select a flavor:"
+echo "    1) Base only"
+echo "    2) Docker node"
+echo "    3) Server (web / app / database / proxy)"
+echo "    4) Monitor node"
+echo "    5) Storage node"
+echo "    6) Skip for now"
+echo ""
+prompt "Choice" "1" SETUP_FLAVOR_CHOICE
+
+# Server sub-menu
+SETUP_SERVER_COMPONENTS=""
+if [ "$SETUP_FLAVOR_CHOICE" = "3" ]; then
+    echo ""
+    echo -e "  ${BOLD}Server components:${RESET}"
+    echo "    1) Web server    (nginx)"
+    echo "    2) App server    (Node.js + Python)"
+    echo "    3) Database      (PostgreSQL + Redis)"
+    echo "    4) Reverse proxy (Traefik)"
+    echo "    5) All of the above"
+    echo ""
+    prompt "Select components (e.g. 1 3 for web + database)" "1" SETUP_SERVER_COMPONENTS
+fi
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+
+header
+section "Summary"
+
+case "$SETUP_FLAVOR_CHOICE" in
+    1) FLAVOR_LABEL="Base only" ;;
+    2) FLAVOR_LABEL="Docker node" ;;
+    3) FLAVOR_LABEL="Server" ;;
+    4) FLAVOR_LABEL="Monitor node" ;;
+    5) FLAVOR_LABEL="Storage node" ;;
+    6) FLAVOR_LABEL="Skip" ;;
+    *) FLAVOR_LABEL="Base only" ;;
+esac
+
+echo ""
+echo -e "  Hostname:   ${BOLD}$SETUP_HOSTNAME${RESET}"
+echo -e "  Timezone:   ${BOLD}$SETUP_TZ${RESET}"
+echo -e "  User:       ${BOLD}$SETUP_USER${RESET}$([ "${SETUP_SUDO^^}" = "Y" ] && echo ' (sudo)')"
+echo -e "  SSH keys:   ${BOLD}$([ "${SETUP_REGEN_SSH^^}" = "Y" ] && echo 'regenerate' || echo 'keep')${RESET}"
+echo -e "  Public key: ${BOLD}$([ -n "$SETUP_PUBKEY" ] && echo 'provided' || echo 'none')${RESET}"
+echo -e "  Flavor:     ${BOLD}$FLAVOR_LABEL${RESET}"
+
+if [ "$SETUP_FLAVOR_CHOICE" = "3" ] && [ -n "$SETUP_SERVER_COMPONENTS" ]; then
+    COMP_LABEL=""
+    for c in $SETUP_SERVER_COMPONENTS; do
+        case "$c" in
+            1) COMP_LABEL="$COMP_LABEL nginx" ;;
+            2) COMP_LABEL="$COMP_LABEL nodejs python3" ;;
+            3) COMP_LABEL="$COMP_LABEL postgresql redis" ;;
+            4) COMP_LABEL="$COMP_LABEL traefik" ;;
+            5) COMP_LABEL=" nginx nodejs python3 postgresql redis traefik" ;;
+        esac
+    done
+    echo -e "  Components:${BOLD}$COMP_LABEL${RESET}"
+fi
+
+echo ""
+confirm "Apply?" "Y" SETUP_CONFIRM
+
+if [[ ! "${SETUP_CONFIRM^^}" =~ ^Y ]]; then
+    echo ""
+    echo -e "  ${RED}Aborted. Run fellowshipos-setup to try again.${RESET}"
+    echo ""
+    exit 0
+fi
+
+# ─── Apply ────────────────────────────────────────────────────────────────────
+
+header
+section "Applying"
+echo ""
+
+# Hostname
+echo -ne "  Setting hostname... "
+hostnamectl set-hostname "$SETUP_HOSTNAME"
+echo "127.0.1.1 $SETUP_HOSTNAME" >> /etc/hosts
+echo -e "${GREEN}done${RESET}"
+
+# Timezone
+echo -ne "  Setting timezone... "
+timedatectl set-timezone "$SETUP_TZ" 2>/dev/null || ln -sf "/usr/share/zoneinfo/$SETUP_TZ" /etc/localtime
+echo -e "${GREEN}done${RESET}"
+
+# User
+echo -ne "  Creating user $SETUP_USER... "
+if id "$SETUP_USER" &>/dev/null; then
+    echo -e "${YELLOW}already exists${RESET}"
+else
+    useradd -m -s /bin/bash -c "$SETUP_FULLNAME" "$SETUP_USER"
+fi
+echo "$SETUP_USER:$SETUP_PASS" | chpasswd
+if [[ "${SETUP_SUDO^^}" =~ ^Y ]]; then
+    usermod -aG sudo "$SETUP_USER"
+fi
+echo -e "${GREEN}done${RESET}"
+
+# SSH host keys
+if [[ "${SETUP_REGEN_SSH^^}" =~ ^Y ]]; then
+    echo -ne "  Regenerating SSH host keys... "
+    rm -f /etc/ssh/ssh_host_*
+    dpkg-reconfigure -f noninteractive openssh-server > /dev/null 2>&1
+    echo -e "${GREEN}done${RESET}"
+fi
+
+# Public key
+if [ -n "$SETUP_PUBKEY" ]; then
+    echo -ne "  Installing public key... "
+    USER_HOME=$(getent passwd "$SETUP_USER" | cut -d: -f6)
+    mkdir -p "$USER_HOME/.ssh"
+    echo "$SETUP_PUBKEY" >> "$USER_HOME/.ssh/authorized_keys"
+    chmod 700 "$USER_HOME/.ssh"
+    chmod 600 "$USER_HOME/.ssh/authorized_keys"
+    chown -R "$SETUP_USER:$SETUP_USER" "$USER_HOME/.ssh"
+    echo -e "${GREEN}done${RESET}"
+fi
+
+# Flavor
+apply_flavor() {
+    local flavor="$1"
+    echo -ne "  Applying flavor: $flavor... "
+    if [ -x "/usr/local/lib/flavors/${flavor}.sh" ]; then
+        bash "/usr/local/lib/flavors/${flavor}.sh" > /tmp/flavor.log 2>&1 && \
+            echo -e "${GREEN}done${RESET}" || \
+            echo -e "${RED}failed (see /tmp/flavor.log)${RESET}"
+    else
+        echo -e "${RED}not found${RESET}"
+    fi
+}
+
+apply_server_component() {
+    local component="$1"
+    echo -ne "  Installing $component... "
+    case "$component" in
+        nginx)
+            apt-get install -y -qq nginx > /tmp/install.log 2>&1
+            systemctl enable nginx
+            ;;
+        nodejs)
+            apt-get install -y -qq nodejs npm > /tmp/install.log 2>&1
+            ;;
+        python3)
+            apt-get install -y -qq python3 python3-pip python3-venv > /tmp/install.log 2>&1
+            ;;
+        postgresql)
+            apt-get install -y -qq postgresql postgresql-client > /tmp/install.log 2>&1
+            systemctl enable postgresql
+            ;;
+        redis)
+            apt-get install -y -qq redis-server > /tmp/install.log 2>&1
+            systemctl enable redis-server
+            ;;
+        traefik)
+            curl -fsSL https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz \
+                | tar -xz -C /usr/local/bin traefik > /tmp/install.log 2>&1
+            chmod +x /usr/local/bin/traefik
+            ;;
+    esac
+    echo -e "${GREEN}done${RESET}"
+}
+
+case "$SETUP_FLAVOR_CHOICE" in
+    2) apply_flavor "docker-node" ;;
+    3)
+        apt-get update -qq
+        for c in $SETUP_SERVER_COMPONENTS; do
+            case "$c" in
+                1) apply_server_component nginx ;;
+                2) apply_server_component nodejs; apply_server_component python3 ;;
+                3) apply_server_component postgresql; apply_server_component redis ;;
+                4) apply_server_component traefik ;;
+                5)
+                    apply_server_component nginx
+                    apply_server_component nodejs
+                    apply_server_component python3
+                    apply_server_component postgresql
+                    apply_server_component redis
+                    apply_server_component traefik
+                    ;;
+            esac
+        done
+        ;;
+    4) apply_flavor "monitor-node" ;;
+    5) apply_flavor "storage-node" ;;
+esac
+
+# Mark complete
+mkdir -p /etc/fellowshipos
+touch "$DONE_FLAG"
+
+# Done
+echo ""
+echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+echo -e "${GREEN}${BOLD} FellowshipOS setup complete!${RESET}"
+echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+echo ""
+echo -e "  Login as ${BOLD}$SETUP_USER${RESET} on next session."
+echo ""

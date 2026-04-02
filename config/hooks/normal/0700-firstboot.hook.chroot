@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+chmod +x /usr/local/bin/fellowshipos-setup
+systemctl enable fellowshipos-setup.service
