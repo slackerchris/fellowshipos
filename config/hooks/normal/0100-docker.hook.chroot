@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Ensure ca-certificates is present before curl uses SSL
+apt-get install -y -qq ca-certificates
+
 # Add Docker's official GPG key and apt repo (Debian)
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
