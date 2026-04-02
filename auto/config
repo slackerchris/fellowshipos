@@ -7,8 +7,8 @@ export LB_AUTO_CONFIG_DONE=1
 
 lb config \
     --architecture amd64 \
-    --distribution noble \
-    --archive-areas "main restricted universe multiverse" \
+    --distribution trixie \
+    --archive-areas "main contrib non-free non-free-firmware" \
     --debian-installer none \
     --binary-images iso-hybrid \
     --bootloader "syslinux" \
