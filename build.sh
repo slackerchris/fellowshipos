@@ -25,7 +25,20 @@ run() {
 > "$LOG"
 
 run "Cleaning"    sudo lb clean
-run "Configuring" sudo lb config
+
+run "Configuring" sudo lb config \
+    --architecture amd64 \
+    --distribution noble \
+    --archive-areas "main restricted universe multiverse" \
+    --debian-installer none \
+    --binary-images iso-hybrid \
+    --bootloader "syslinux" \
+    --memtest none \
+    --apt-recommends false \
+    --iso-volume "FellowshipOS" \
+    --iso-publisher "Chris" \
+    --iso-application "FellowshipOS Base"
+
 run "Building"    sudo lb build
 
 ISO=$(ls -1 *.iso 2>/dev/null | head -1)
