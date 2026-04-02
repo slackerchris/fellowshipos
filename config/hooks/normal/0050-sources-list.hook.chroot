@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+# live-build 3.x hardcodes the old trixie/updates security format.
+# Write a correct sources.list for Debian Trixie.
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
+EOF
+
+apt-get update -qq
