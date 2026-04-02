@@ -2,13 +2,16 @@
 set -e
 
 # Guard against recursive invocation by lb build
-[ "${LB_AUTO_CONFIG_DONE}" = "1" ] && exit 0
-export LB_AUTO_CONFIG_DONE=1
+[ -f .build/config ] && exit 0
 
 lb config \
+    --mode debian \
     --architecture amd64 \
     --distribution trixie \
     --archive-areas "main contrib non-free non-free-firmware" \
+    --mirror-bootstrap http://deb.debian.org/debian/ \
+    --mirror-chroot http://deb.debian.org/debian/ \
+    --mirror-binary http://deb.debian.org/debian/ \
     --debian-installer none \
     --binary-images iso-hybrid \
     --bootloader "syslinux" \
