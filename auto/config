@@ -18,6 +18,7 @@ lb config noauto \
     --binary-images iso-hybrid \
     --bootloader "grub-efi" \
     --memtest none \
+    --win32-loader false \
     --apt-recommends false \
     --iso-volume "FellowshipOS" \
     --iso-publisher "Chris" \
