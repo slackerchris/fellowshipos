@@ -7,10 +7,10 @@ lb config \
     --archive-areas "main restricted universe multiverse" \
     --debian-installer none \
     --binary-images iso-hybrid \
-    --bootloaders "grub-efi,syslinux" \
+    --bootloader "syslinux" \
     --memtest none \
     --apt-recommends false \
-    --iso-volid "HomelabOS" \
+    --iso-volume "HomelabOS" \
     --iso-publisher "Chris" \
     --iso-application "HomelabOS Base" \
     "${@}"
