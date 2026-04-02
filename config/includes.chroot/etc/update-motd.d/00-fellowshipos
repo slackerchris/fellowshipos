@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Colors
+RESET='\033[0m'
+BOLD='\033[1m'
+DIM='\033[2m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+WHITE='\033[1;37m'
+
+echo ""
+echo -e "${YELLOW}${BOLD}"
+echo "   ███████╗███████╗██╗     ██╗      ██████╗ ██╗    ██╗███████╗██╗  ██╗██╗██████╗  ██████╗ ███████╗"
+echo "   ██╔════╝██╔════╝██║     ██║     ██╔═══██╗██║    ██║██╔════╝██║  ██║██║██╔══██╗██╔═══██╗██╔════╝"
+echo "   █████╗  █████╗  ██║     ██║     ██║   ██║██║ █╗ ██║███████╗███████║██║██████╔╝██║   ██║███████╗"
+echo "   ██╔══╝  ██╔══╝  ██║     ██║     ██║   ██║██║███╗██║╚════██║██╔══██║██║██╔═══╝ ██║   ██║╚════██║"
+echo "   ██║     ███████╗███████╗███████╗╚██████╔╝╚███╔███╔╝███████║██║  ██║██║██║     ╚██████╔╝███████║"
+echo "   ╚═╝     ╚══════╝╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝╚═╝╚═╝      ╚═════╝ ╚══════╝"
+echo -e "${RESET}"
+echo -e "${DIM}              ─────────────────────────────────────────────────────────────${RESET}"
+echo ""
+echo -e "        ${WHITE}You stand at the gates of FellowshipOS.${RESET}"
+echo -e "        ${RED}Only those with root may pass.${RESET}"
+echo ""
+echo -e "${DIM}              ─────────────────────────────────────────────────────────────${RESET}"
+echo ""
+
+# System info
+HOSTNAME=$(hostname)
+KERNEL=$(uname -r)
+UPTIME=$(uptime -p)
+LOAD=$(cut -d' ' -f1-3 /proc/loadavg)
+MEMORY=$(free -h | awk '/^Mem:/ {print $3 " / " $2}')
+DISK=$(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 " used)"}')
+IP=$(hostname -I | awk '{print $1}')
+
+echo -e "  ${CYAN}Hostname:${RESET}  $HOSTNAME"
+echo -e "  ${CYAN}Kernel:${RESET}    $KERNEL"
+echo -e "  ${CYAN}Uptime:${RESET}    $UPTIME"
+echo -e "  ${CYAN}Load:${RESET}      $LOAD"
+echo -e "  ${CYAN}Memory:${RESET}    $MEMORY"
+echo -e "  ${CYAN}Disk:${RESET}      $DISK"
+echo -e "  ${CYAN}IP:${RESET}        $IP"
+echo ""
+
+# Warn if not root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "  ${DIM}You are not root. Tread carefully, traveler.${RESET}"
+    echo ""
+fi

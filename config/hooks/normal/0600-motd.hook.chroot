@@ -1,0 +1,21 @@
+#!/bin/bash
+set -e
+
+# Make our MOTD executable
+chmod +x /etc/update-motd.d/00-fellowshipos
+
+# Disable default Ubuntu MOTD scripts we don't want
+for f in \
+    /etc/update-motd.d/10-help-text \
+    /etc/update-motd.d/50-motd-news \
+    /etc/update-motd.d/80-livepatch \
+    /etc/update-motd.d/90-updates-available \
+    /etc/update-motd.d/95-hwe-eol \
+    /etc/update-motd.d/97-overlayroot \
+    /etc/update-motd.d/98-fsck-at-reboot \
+    /etc/update-motd.d/98-reboot-required; do
+    [ -f "$f" ] && chmod -x "$f" || true
+done
+
+# Disable motd-news service
+systemctl disable motd-news.timer 2>/dev/null || true
