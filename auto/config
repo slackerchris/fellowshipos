@@ -12,5 +12,4 @@ lb config \
     --apt-recommends false \
     --iso-volume "FellowshipOS" \
     --iso-publisher "Chris" \
-    --iso-application "FellowshipOS Base" \
-    "${@}"
+    --iso-application "FellowshipOS Base"
