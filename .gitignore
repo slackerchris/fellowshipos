@@ -2,6 +2,7 @@ build.log
 chroot.*
 binary.*
 live-image-*
+*_lxc.tar.gz
 *.iso
 cache/
 chroot/
