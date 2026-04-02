@@ -4,6 +4,11 @@ set -e
 cd "$(dirname "$0")"
 
 LOG="$(pwd)/build.log"
+IMAGE="debian:trixie"
+WORKDIR="/build"
+
+echo "[fellowshipos] Checking for Docker image..."
+docker pull "$IMAGE" > /dev/null
 
 run() {
     local label="$1"
@@ -24,11 +29,19 @@ run() {
 
 > "$LOG"
 
-run "Cleaning"    sudo lb clean
-
-run "Configuring" sudo lb config
-
-run "Building"    sudo lb build
+run "Building ISO" docker run --rm \
+    --privileged \
+    -v "$(pwd):${WORKDIR}" \
+    -w "${WORKDIR}" \
+    "$IMAGE" \
+    bash -c '
+        set -e
+        apt-get update -qq
+        apt-get install -y -qq live-build
+        lb clean
+        lb config
+        lb build
+    '
 
 ISO=$(ls -1 *.iso 2>/dev/null | head -1)
 echo ""
