@@ -57,7 +57,7 @@ prompt() {
     fi
 
     value="${value:-$default}"
-    eval "$var=\"$value\""
+    printf -v "$var" '%s' "$value"
 }
 
 confirm() {
@@ -67,7 +67,7 @@ confirm() {
     echo -ne "  ${label} [${default}]: "
     read -r value
     value="${value:-$default}"
-    eval "$var=\"$value\""
+    printf -v "$var" '%s' "$value"
 }
 
 # ─── System ───────────────────────────────────────────────────────────────────
@@ -240,11 +240,15 @@ apply_flavor() {
     local flavor="$1"
     echo -ne "  Applying flavor: $flavor... "
     if [ -x "/usr/local/lib/flavors/${flavor}.sh" ]; then
-        bash "/usr/local/lib/flavors/${flavor}.sh" > /tmp/flavor.log 2>&1 && \
-            echo -e "${GREEN}done${RESET}" || \
+        if bash "/usr/local/lib/flavors/${flavor}.sh" > /tmp/flavor.log 2>&1; then
+            echo -e "${GREEN}done${RESET}"
+        else
             echo -e "${RED}failed (see /tmp/flavor.log)${RESET}"
+            return 1
+        fi
     else
         echo -e "${RED}not found${RESET}"
+        return 1
     fi
 }
 
@@ -274,6 +278,10 @@ apply_server_component() {
             curl -fsSL https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz \
                 | tar -xz -C /usr/local/bin traefik > /tmp/install.log 2>&1
             chmod +x /usr/local/bin/traefik
+            ;;
+        *)
+            echo -e "${RED}unknown component${RESET}"
+            return 1
             ;;
     esac
     echo -e "${GREEN}done${RESET}"

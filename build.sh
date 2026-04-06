@@ -8,6 +8,7 @@ IMAGE="debian:trixie"
 WORKDIR="/build"
 VERSION="1.0"
 TEMPLATE_NAME="fellowshipos-trixie-amd64-${VERSION}"
+ISO_NAME="live-image-amd64.hybrid.iso"
 
 echo "[fellowshipos] Checking for Docker image..."
 docker pull "$IMAGE" > /dev/null
@@ -30,6 +31,7 @@ run() {
 }
 
 > "$LOG"
+rm -f "${TEMPLATE_NAME}_lxc.tar.gz"
 
 run "Building" docker run --rm \
     --privileged \
@@ -75,8 +77,18 @@ run "Creating LXC template" docker run --rm \
             -C chroot .
     "
 
-ISO=$(ls -1 *.hybrid.iso 2>/dev/null | head -1)
-TEMPLATE=$(ls -1 *_lxc.tar.gz 2>/dev/null | head -1)
+ISO="$ISO_NAME"
+TEMPLATE="${TEMPLATE_NAME}_lxc.tar.gz"
+
+if [ ! -f "$ISO" ]; then
+    echo "[fellowshipos] FAILED: expected ISO not found: $ISO"
+    exit 1
+fi
+
+if [ ! -f "$TEMPLATE" ]; then
+    echo "[fellowshipos] FAILED: expected LXC template not found: $TEMPLATE"
+    exit 1
+fi
 
 echo ""
 echo "[fellowshipos] ISO:      ${ISO}"

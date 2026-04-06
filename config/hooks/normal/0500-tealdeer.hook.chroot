@@ -3,8 +3,16 @@ set -e
 
 # Install tealdeer (tldr) from GitHub releases
 TEALDEER_VERSION="1.6.1"
-curl -fsSL "https://github.com/dbrgn/tealdeer/releases/download/v${TEALDEER_VERSION}/tealdeer-linux-x86_64-musl" \
-    -o /usr/local/bin/tldr
+TEALDEER_SHA256="fc3b3e6c4cfb459718aea83c0f2ee57bb6e404d24c9d50879d7fdad709715e61"
+TEALDEER_URL="https://github.com/dbrgn/tealdeer/releases/download/v${TEALDEER_VERSION}/tealdeer-linux-x86_64-musl"
+
+TMP_TEALDEER="$(mktemp)"
+trap 'rm -f "$TMP_TEALDEER"' EXIT
+
+curl -fsSL "$TEALDEER_URL" -o "$TMP_TEALDEER"
+echo "${TEALDEER_SHA256}  ${TMP_TEALDEER}" | sha256sum -c -
+
+install -m 0755 "$TMP_TEALDEER" /usr/local/bin/tldr
 chmod +x /usr/local/bin/tldr
 
 # Pre-cache tldr pages

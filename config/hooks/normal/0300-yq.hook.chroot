@@ -3,6 +3,14 @@ set -e
 
 # Install yq from GitHub releases
 YQ_VERSION="4.44.1"
-curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
-    -o /usr/local/bin/yq
+YQ_SHA256="6dc2d0cd4e0caca5aeffd0d784a48263591080e4a0895abe69f3a76eb50d1ba3"
+YQ_URL="https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64"
+
+TMP_YQ="$(mktemp)"
+trap 'rm -f "$TMP_YQ"' EXIT
+
+curl -fsSL "$YQ_URL" -o "$TMP_YQ"
+echo "${YQ_SHA256}  ${TMP_YQ}" | sha256sum -c -
+
+install -m 0755 "$TMP_YQ" /usr/local/bin/yq
 chmod +x /usr/local/bin/yq

@@ -3,6 +3,14 @@ set -e
 
 # Install eza from GitHub releases
 EZA_VERSION="0.18.21"
-curl -fsSL "https://github.com/eza-community/eza/releases/download/v${EZA_VERSION}/eza_x86_64-unknown-linux-gnu.tar.gz" \
-    | tar -xz -C /usr/local/bin
+EZA_SHA256="b8792f36ec772c080fdb722613a229aa032061217ffbf5dee123565f4c87f725"
+EZA_URL="https://github.com/eza-community/eza/releases/download/v${EZA_VERSION}/eza_x86_64-unknown-linux-gnu.tar.gz"
+
+TMP_EZA="$(mktemp)"
+trap 'rm -f "$TMP_EZA"' EXIT
+
+curl -fsSL "$EZA_URL" -o "$TMP_EZA"
+echo "${EZA_SHA256}  ${TMP_EZA}" | sha256sum -c -
+
+tar -xzf "$TMP_EZA" -C /usr/local/bin eza
 chmod +x /usr/local/bin/eza
