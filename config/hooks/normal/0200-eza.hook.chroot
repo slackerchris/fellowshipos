@@ -12,5 +12,5 @@ trap 'rm -f "$TMP_EZA"' EXIT
 curl -fsSL "$EZA_URL" -o "$TMP_EZA"
 echo "${EZA_SHA256}  ${TMP_EZA}" | sha256sum -c -
 
-tar -xzf "$TMP_EZA" -C /usr/local/bin eza
+tar -xzf "$TMP_EZA" -C /usr/local/bin ./eza
 chmod +x /usr/local/bin/eza
