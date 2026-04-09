@@ -1,6 +1,8 @@
 [Unit]
 Description=FellowshipOS First Boot Setup Wizard
 After=network.target
+Before=getty.target
+Before=getty@tty1.service
 ConditionPathExists=!/etc/fellowshipos/.setup-complete
 
 [Service]

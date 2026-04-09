@@ -2,12 +2,15 @@
 # FellowshipOS First Boot Setup Wizard
 # Runs once on first boot via systemd, marks itself done on completion
 
-set -e
-
 DONE_FLAG="/etc/fellowshipos/.setup-complete"
+LOG_DIR="/var/log/fellowshipos"
+LOG_FILE="$LOG_DIR/setup.log"
 
 # Already ran
 [ -f "$DONE_FLAG" ] && exit 0
+
+mkdir -p "$LOG_DIR"
+echo "=== FellowshipOS setup started at $(date) ===" >> "$LOG_FILE"
 
 # Colors
 RESET='\033[0m'
@@ -60,14 +63,39 @@ prompt() {
     printf -v "$var" '%s' "$value"
 }
 
+# Loops until user enters Y or N (case-insensitive). Default shown in brackets.
 confirm() {
     local label="$1"
     local default="${2:-Y}"
     local var="$3"
-    echo -ne "  ${label} [${default}]: "
-    read -r value
-    value="${value:-$default}"
-    printf -v "$var" '%s' "$value"
+    local hint
+    [ "${default^^}" = "Y" ] && hint="Y/n" || hint="y/N"
+    while true; do
+        echo -ne "  ${label} [${hint}]: "
+        read -r value
+        value="${value:-$default}"
+        case "${value^^}" in
+            Y|YES) printf -v "$var" 'Y'; return ;;
+            N|NO)  printf -v "$var" 'N'; return ;;
+            *) echo -e "  ${RED}Please enter Y or N.${RESET}" ;;
+        esac
+    done
+}
+
+# ─── Validation ───────────────────────────────────────────────────────────────
+
+valid_username() {
+    # Must start with letter or underscore, 1-32 chars, only a-z 0-9 _ -
+    [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+}
+
+valid_hostname() {
+    # Standard hostname: alphanumeric and hyphens, no leading/trailing hyphen, max 63 chars
+    [[ "$1" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]
+}
+
+valid_timezone() {
+    [ -f "/usr/share/zoneinfo/$1" ]
 }
 
 # ─── System ───────────────────────────────────────────────────────────────────
@@ -76,23 +104,45 @@ header
 
 section "System"
 
-prompt "Hostname" "fellowshipos" SETUP_HOSTNAME
-prompt "Timezone" "UTC" SETUP_TZ
+while true; do
+    prompt "Hostname" "fellowshipos" SETUP_HOSTNAME
+    if valid_hostname "$SETUP_HOSTNAME"; then
+        break
+    fi
+    echo -e "  ${RED}Invalid hostname. Use letters, numbers, and hyphens only.${RESET}"
+done
+
+while true; do
+    prompt "Timezone" "UTC" SETUP_TZ
+    if valid_timezone "$SETUP_TZ"; then
+        break
+    fi
+    echo -e "  ${RED}Unknown timezone. Example: America/New_York, Europe/London, UTC${RESET}"
+done
 
 # ─── User ─────────────────────────────────────────────────────────────────────
 
 section "User"
 
-prompt "Username" "" SETUP_USER
-while [ -z "$SETUP_USER" ]; do
-    echo -e "  ${RED}Username is required.${RESET}"
+while true; do
     prompt "Username" "" SETUP_USER
+    if [ -z "$SETUP_USER" ]; then
+        echo -e "  ${RED}Username is required.${RESET}"
+    elif ! valid_username "$SETUP_USER"; then
+        echo -e "  ${RED}Invalid username. Use lowercase letters, numbers, hyphens, underscores. Must start with a letter or underscore.${RESET}"
+    else
+        break
+    fi
 done
 
 prompt "Full name" "" SETUP_FULLNAME
 
 while true; do
     prompt "Password" "" SETUP_PASS 1
+    if [ -z "$SETUP_PASS" ]; then
+        echo -e "  ${RED}Password cannot be empty.${RESET}"
+        continue
+    fi
     prompt "Confirm password" "" SETUP_PASS2 1
     if [ "$SETUP_PASS" = "$SETUP_PASS2" ]; then
         break
@@ -122,7 +172,14 @@ echo "    4) Monitor node"
 echo "    5) Storage node"
 echo "    6) Skip for now"
 echo ""
-prompt "Choice" "1" SETUP_FLAVOR_CHOICE
+
+while true; do
+    prompt "Choice" "1" SETUP_FLAVOR_CHOICE
+    case "$SETUP_FLAVOR_CHOICE" in
+        1|2|3|4|5|6) break ;;
+        *) echo -e "  ${RED}Please enter a number between 1 and 6.${RESET}" ;;
+    esac
+done
 
 # Server sub-menu
 SETUP_SERVER_COMPONENTS=""
@@ -135,7 +192,17 @@ if [ "$SETUP_FLAVOR_CHOICE" = "3" ]; then
     echo "    4) Reverse proxy (Traefik)"
     echo "    5) All of the above"
     echo ""
-    prompt "Select components (e.g. 1 3 for web + database)" "1" SETUP_SERVER_COMPONENTS
+    while true; do
+        prompt "Select components (e.g. 1 3 for web + database)" "1" SETUP_SERVER_COMPONENTS
+        valid=1
+        for c in $SETUP_SERVER_COMPONENTS; do
+            case "$c" in
+                1|2|3|4|5) ;;
+                *) echo -e "  ${RED}Invalid choice: $c. Enter numbers 1-5 separated by spaces.${RESET}"; valid=0; break ;;
+            esac
+        done
+        [ "$valid" = "1" ] && break
+    done
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
@@ -150,14 +217,13 @@ case "$SETUP_FLAVOR_CHOICE" in
     4) FLAVOR_LABEL="Monitor node" ;;
     5) FLAVOR_LABEL="Storage node" ;;
     6) FLAVOR_LABEL="Skip" ;;
-    *) FLAVOR_LABEL="Base only" ;;
 esac
 
 echo ""
 echo -e "  Hostname:   ${BOLD}$SETUP_HOSTNAME${RESET}"
 echo -e "  Timezone:   ${BOLD}$SETUP_TZ${RESET}"
-echo -e "  User:       ${BOLD}$SETUP_USER${RESET}$([ "${SETUP_SUDO^^}" = "Y" ] && echo ' (sudo)')"
-echo -e "  SSH keys:   ${BOLD}$([ "${SETUP_REGEN_SSH^^}" = "Y" ] && echo 'regenerate' || echo 'keep')${RESET}"
+echo -e "  User:       ${BOLD}$SETUP_USER${RESET}$([ "$SETUP_SUDO" = "Y" ] && echo ' (sudo)')"
+echo -e "  SSH keys:   ${BOLD}$([ "$SETUP_REGEN_SSH" = "Y" ] && echo 'regenerate' || echo 'keep')${RESET}"
 echo -e "  Public key: ${BOLD}$([ -n "$SETUP_PUBKEY" ] && echo 'provided' || echo 'none')${RESET}"
 echo -e "  Flavor:     ${BOLD}$FLAVOR_LABEL${RESET}"
 
@@ -178,9 +244,9 @@ fi
 echo ""
 confirm "Apply?" "Y" SETUP_CONFIRM
 
-if [[ ! "${SETUP_CONFIRM^^}" =~ ^Y ]]; then
+if [ "$SETUP_CONFIRM" != "Y" ]; then
     echo ""
-    echo -e "  ${RED}Aborted. Run fellowshipos-setup to try again.${RESET}"
+    echo -e "  ${YELLOW}Aborted. Run fellowshipos-setup to try again.${RESET}"
     echo ""
     exit 0
 fi
@@ -191,136 +257,216 @@ header
 section "Applying"
 echo ""
 
+APPLY_ERRORS=0
+
+# Run a command, log all output, print done/failed. Never exits on failure.
+run_step() {
+    local label="$1"; shift
+    echo -ne "  ${label}... "
+    if "$@" >> "$LOG_FILE" 2>&1; then
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
+}
+
 # Hostname
 echo -ne "  Setting hostname... "
-hostnamectl set-hostname "$SETUP_HOSTNAME"
-echo "127.0.1.1 $SETUP_HOSTNAME" >> /etc/hosts
-echo -e "${GREEN}done${RESET}"
+if hostnamectl set-hostname "$SETUP_HOSTNAME" >> "$LOG_FILE" 2>&1; then
+    # Only add if not already present (idempotent)
+    if ! grep -q "^127\.0\.1\.1[[:space:]]" /etc/hosts; then
+        echo "127.0.1.1 $SETUP_HOSTNAME" >> /etc/hosts
+    else
+        sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1 $SETUP_HOSTNAME/" /etc/hosts
+    fi
+    echo -e "${GREEN}done${RESET}"
+else
+    echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+    APPLY_ERRORS=$((APPLY_ERRORS + 1))
+fi
 
 # Timezone
-echo -ne "  Setting timezone... "
-timedatectl set-timezone "$SETUP_TZ" 2>/dev/null || ln -sf "/usr/share/zoneinfo/$SETUP_TZ" /etc/localtime
-echo -e "${GREEN}done${RESET}"
+run_step "Setting timezone" timedatectl set-timezone "$SETUP_TZ"
 
 # User
 echo -ne "  Creating user $SETUP_USER... "
 if id "$SETUP_USER" &>/dev/null; then
     echo -e "${YELLOW}already exists${RESET}"
 else
-    useradd -m -s /bin/bash -c "$SETUP_FULLNAME" "$SETUP_USER"
+    if useradd -m -s /bin/bash -c "$SETUP_FULLNAME" "$SETUP_USER" >> "$LOG_FILE" 2>&1; then
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
 fi
-echo "$SETUP_USER:$SETUP_PASS" | chpasswd
-if [[ "${SETUP_SUDO^^}" =~ ^Y ]]; then
-    usermod -aG sudo "$SETUP_USER"
+
+echo -ne "  Setting password... "
+if echo "$SETUP_USER:$SETUP_PASS" | chpasswd >> "$LOG_FILE" 2>&1; then
+    echo -e "${GREEN}done${RESET}"
+else
+    echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+    APPLY_ERRORS=$((APPLY_ERRORS + 1))
 fi
-echo -e "${GREEN}done${RESET}"
+
+if [ "$SETUP_SUDO" = "Y" ]; then
+    run_step "Adding $SETUP_USER to sudo" usermod -aG sudo "$SETUP_USER"
+fi
 
 # SSH host keys
-if [[ "${SETUP_REGEN_SSH^^}" =~ ^Y ]]; then
+if [ "$SETUP_REGEN_SSH" = "Y" ]; then
     echo -ne "  Regenerating SSH host keys... "
-    rm -f /etc/ssh/ssh_host_*
-    dpkg-reconfigure -f noninteractive openssh-server > /dev/null 2>&1
-    echo -e "${GREEN}done${RESET}"
+    if (rm -f /etc/ssh/ssh_host_* && dpkg-reconfigure -f noninteractive openssh-server) >> "$LOG_FILE" 2>&1; then
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
 fi
 
 # Public key
 if [ -n "$SETUP_PUBKEY" ]; then
     echo -ne "  Installing public key... "
     USER_HOME=$(getent passwd "$SETUP_USER" | cut -d: -f6)
-    mkdir -p "$USER_HOME/.ssh"
-    echo "$SETUP_PUBKEY" >> "$USER_HOME/.ssh/authorized_keys"
-    chmod 700 "$USER_HOME/.ssh"
-    chmod 600 "$USER_HOME/.ssh/authorized_keys"
-    chown -R "$SETUP_USER:$SETUP_USER" "$USER_HOME/.ssh"
-    echo -e "${GREEN}done${RESET}"
+    if [ -n "$USER_HOME" ]; then
+        mkdir -p "$USER_HOME/.ssh"
+        echo "$SETUP_PUBKEY" >> "$USER_HOME/.ssh/authorized_keys"
+        chmod 700 "$USER_HOME/.ssh"
+        chmod 600 "$USER_HOME/.ssh/authorized_keys"
+        chown -R "$SETUP_USER:$SETUP_USER" "$USER_HOME/.ssh"
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}could not determine home directory${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
 fi
 
-# Flavor
+# ─── Flavor ───────────────────────────────────────────────────────────────────
+
 apply_flavor() {
     local flavor="$1"
     echo -ne "  Applying flavor: $flavor... "
-    if [ -x "/usr/local/lib/flavors/${flavor}.sh" ]; then
-        if bash "/usr/local/lib/flavors/${flavor}.sh" > /tmp/flavor.log 2>&1; then
-            echo -e "${GREEN}done${RESET}"
-        else
-            echo -e "${RED}failed (see /tmp/flavor.log)${RESET}"
-            return 1
-        fi
+    if [ ! -x "/usr/local/lib/flavors/${flavor}.sh" ]; then
+        echo -e "${RED}flavor script not found${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+        return
+    fi
+    # Export so flavor scripts can reference the created user
+    export SUDO_USER="$SETUP_USER"
+    if bash "/usr/local/lib/flavors/${flavor}.sh" >> "$LOG_FILE" 2>&1; then
+        echo -e "${GREEN}done${RESET}"
     else
-        echo -e "${RED}not found${RESET}"
-        return 1
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
     fi
 }
 
 apply_server_component() {
     local component="$1"
     echo -ne "  Installing $component... "
+    local ok=1
     case "$component" in
         nginx)
-            apt-get install -y -qq nginx > /tmp/install.log 2>&1
-            systemctl enable nginx
+            apt-get install -y -qq nginx >> "$LOG_FILE" 2>&1 && \
+            systemctl enable nginx >> "$LOG_FILE" 2>&1 || ok=0
             ;;
         nodejs)
-            apt-get install -y -qq nodejs npm > /tmp/install.log 2>&1
+            apt-get install -y -qq nodejs npm >> "$LOG_FILE" 2>&1 || ok=0
             ;;
         python3)
-            apt-get install -y -qq python3 python3-pip python3-venv > /tmp/install.log 2>&1
+            apt-get install -y -qq python3 python3-pip python3-venv >> "$LOG_FILE" 2>&1 || ok=0
             ;;
         postgresql)
-            apt-get install -y -qq postgresql postgresql-client > /tmp/install.log 2>&1
-            systemctl enable postgresql
+            apt-get install -y -qq postgresql postgresql-client >> "$LOG_FILE" 2>&1 && \
+            systemctl enable postgresql >> "$LOG_FILE" 2>&1 || ok=0
             ;;
         redis)
-            apt-get install -y -qq redis-server > /tmp/install.log 2>&1
-            systemctl enable redis-server
+            apt-get install -y -qq redis-server >> "$LOG_FILE" 2>&1 && \
+            systemctl enable redis-server >> "$LOG_FILE" 2>&1 || ok=0
             ;;
         traefik)
-            curl -fsSL https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz \
-                | tar -xz -C /usr/local/bin traefik > /tmp/install.log 2>&1
-            chmod +x /usr/local/bin/traefik
+            local tmp
+            tmp=$(mktemp)
+            if curl -fsSL "https://github.com/traefik/traefik/releases/latest/download/traefik_linux_amd64.tar.gz" \
+                    -o "$tmp" >> "$LOG_FILE" 2>&1; then
+                tar -xz -C /usr/local/bin traefik -f "$tmp" >> "$LOG_FILE" 2>&1 && \
+                chmod +x /usr/local/bin/traefik || ok=0
+            else
+                ok=0
+            fi
+            rm -f "$tmp"
             ;;
         *)
             echo -e "${RED}unknown component${RESET}"
-            return 1
+            APPLY_ERRORS=$((APPLY_ERRORS + 1))
+            return
             ;;
     esac
-    echo -e "${GREEN}done${RESET}"
+    if [ "$ok" = "1" ]; then
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
 }
 
 case "$SETUP_FLAVOR_CHOICE" in
-    2) apply_flavor "docker-node" ;;
-    3)
-        apt-get update -qq
-        for c in $SETUP_SERVER_COMPONENTS; do
-            case "$c" in
-                1) apply_server_component nginx ;;
-                2) apply_server_component nodejs; apply_server_component python3 ;;
-                3) apply_server_component postgresql; apply_server_component redis ;;
-                4) apply_server_component traefik ;;
-                5)
-                    apply_server_component nginx
-                    apply_server_component nodejs
-                    apply_server_component python3
-                    apply_server_component postgresql
-                    apply_server_component redis
-                    apply_server_component traefik
-                    ;;
-            esac
-        done
+    2)
+        apt-get update -qq >> "$LOG_FILE" 2>&1
+        apply_flavor "docker-node"
         ;;
-    4) apply_flavor "monitor-node" ;;
-    5) apply_flavor "storage-node" ;;
+    3)
+        apt-get update -qq >> "$LOG_FILE" 2>&1
+        # If "5" (all) is in the list, skip individual parsing and install everything
+        if echo "$SETUP_SERVER_COMPONENTS" | grep -qw "5"; then
+            apply_server_component nginx
+            apply_server_component nodejs
+            apply_server_component python3
+            apply_server_component postgresql
+            apply_server_component redis
+            apply_server_component traefik
+        else
+            for c in $SETUP_SERVER_COMPONENTS; do
+                case "$c" in
+                    1) apply_server_component nginx ;;
+                    2) apply_server_component nodejs; apply_server_component python3 ;;
+                    3) apply_server_component postgresql; apply_server_component redis ;;
+                    4) apply_server_component traefik ;;
+                esac
+            done
+        fi
+        ;;
+    4)
+        apt-get update -qq >> "$LOG_FILE" 2>&1
+        apply_flavor "monitor-node"
+        ;;
+    5)
+        apt-get update -qq >> "$LOG_FILE" 2>&1
+        apply_flavor "storage-node"
+        ;;
 esac
 
-# Mark complete
+# ─── Mark complete ────────────────────────────────────────────────────────────
+
 mkdir -p /etc/fellowshipos
 touch "$DONE_FLAG"
+echo "=== FellowshipOS setup finished at $(date) (errors: $APPLY_ERRORS) ===" >> "$LOG_FILE"
 
-# Done
+# ─── Done ─────────────────────────────────────────────────────────────────────
+
 echo ""
-echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
-echo -e "${GREEN}${BOLD} FellowshipOS setup complete!${RESET}"
-echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+if [ "$APPLY_ERRORS" -gt 0 ]; then
+    echo -e "${YELLOW}${BOLD}──────────────────────────────────────────────────────${RESET}"
+    echo -e "${YELLOW}${BOLD} Setup completed with ${APPLY_ERRORS} error(s)${RESET}"
+    echo -e "${YELLOW}${BOLD}──────────────────────────────────────────────────────${RESET}"
+    echo ""
+    echo -e "  Check ${BOLD}${LOG_FILE}${RESET} for details."
+else
+    echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+    echo -e "${GREEN}${BOLD} FellowshipOS setup complete!${RESET}"
+    echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
+fi
 echo ""
 echo -e "  Login as ${BOLD}$SETUP_USER${RESET} on next session."
 echo ""
