@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+# live-build lists everything added after its install pass, which includes
+# packages from our chroot hooks such as Docker. Only remove the live system.
+printf '%s\n' live-boot live-boot-initramfs-tools live-config live-config-systemd user-setup \
+    > live/filesystem.packages-remove

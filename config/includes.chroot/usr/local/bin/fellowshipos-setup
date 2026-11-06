@@ -3,6 +3,7 @@
 # Runs once on first boot via systemd, marks itself done on completion
 
 DONE_FLAG="/etc/fellowshipos/.setup-complete"
+NAS_DONE_FLAG="/etc/fellowshipos/.nas-role-complete"
 LOG_DIR="/var/log/fellowshipos"
 LOG_FILE="$LOG_DIR/setup.log"
 
@@ -124,7 +125,17 @@ done
 
 section "User"
 
-while true; do
+# The installer creates the first user; only containers reach the prompts below
+EXISTING_USER=$(getent passwd 1000 | cut -d: -f1)
+
+if [ -n "$EXISTING_USER" ]; then
+    SETUP_USER="$EXISTING_USER"
+    SETUP_SUDO="N"
+    echo ""
+    echo -e "  Using existing user ${BOLD}$SETUP_USER${RESET}"
+fi
+
+while [ -z "$EXISTING_USER" ]; do
     prompt "Username" "" SETUP_USER
     if [ -z "$SETUP_USER" ]; then
         echo -e "  ${RED}Username is required.${RESET}"
@@ -135,9 +146,9 @@ while true; do
     fi
 done
 
-prompt "Full name" "" SETUP_FULLNAME
+[ -z "$EXISTING_USER" ] && prompt "Full name" "" SETUP_FULLNAME
 
-while true; do
+while [ -z "$EXISTING_USER" ]; do
     prompt "Password" "" SETUP_PASS 1
     if [ -z "$SETUP_PASS" ]; then
         echo -e "  ${RED}Password cannot be empty.${RESET}"
@@ -150,7 +161,7 @@ while true; do
     echo -e "  ${RED}Passwords do not match. Try again.${RESET}"
 done
 
-confirm "Add to sudo group?" "Y" SETUP_SUDO
+[ -z "$EXISTING_USER" ] && confirm "Add to sudo group?" "Y" SETUP_SUDO
 
 # ─── SSH ──────────────────────────────────────────────────────────────────────
 
@@ -169,15 +180,16 @@ echo "    1) Base only"
 echo "    2) Docker node"
 echo "    3) Server (web / app / database / proxy)"
 echo "    4) Monitor node"
-echo "    5) Storage node"
-echo "    6) Skip for now"
+echo "    5) Storage node (mergerfs + SnapRAID)"
+echo "    6) NAS / Home Server (ZFS + web UI)"
+echo "    7) Skip for now"
 echo ""
 
 while true; do
     prompt "Choice" "1" SETUP_FLAVOR_CHOICE
     case "$SETUP_FLAVOR_CHOICE" in
-        1|2|3|4|5|6) break ;;
-        *) echo -e "  ${RED}Please enter a number between 1 and 6.${RESET}" ;;
+        1|2|3|4|5|6|7) break ;;
+        *) echo -e "  ${RED}Please enter a number between 1 and 7.${RESET}" ;;
     esac
 done
 
@@ -216,7 +228,8 @@ case "$SETUP_FLAVOR_CHOICE" in
     3) FLAVOR_LABEL="Server" ;;
     4) FLAVOR_LABEL="Monitor node" ;;
     5) FLAVOR_LABEL="Storage node" ;;
-    6) FLAVOR_LABEL="Skip" ;;
+    6) FLAVOR_LABEL="NAS / Home Server" ;;
+    7) FLAVOR_LABEL="Skip" ;;
 esac
 
 echo ""
@@ -302,12 +315,14 @@ else
     fi
 fi
 
-echo -ne "  Setting password... "
-if echo "$SETUP_USER:$SETUP_PASS" | chpasswd >> "$LOG_FILE" 2>&1; then
-    echo -e "${GREEN}done${RESET}"
-else
-    echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
-    APPLY_ERRORS=$((APPLY_ERRORS + 1))
+if [ -z "$EXISTING_USER" ]; then
+    echo -ne "  Setting password... "
+    if echo "$SETUP_USER:$SETUP_PASS" | chpasswd >> "$LOG_FILE" 2>&1; then
+        echo -e "${GREEN}done${RESET}"
+    else
+        echo -e "${RED}failed (see ${LOG_FILE})${RESET}"
+        APPLY_ERRORS=$((APPLY_ERRORS + 1))
+    fi
 fi
 
 if [ "$SETUP_SUDO" = "Y" ]; then
@@ -445,6 +460,10 @@ case "$SETUP_FLAVOR_CHOICE" in
         apt-get update -qq >> "$LOG_FILE" 2>&1
         apply_flavor "storage-node"
         ;;
+    6)
+        apt-get update -qq >> "$LOG_FILE" 2>&1
+        apply_flavor "nas-node"
+        ;;
 esac
 
 # ─── Mark complete ────────────────────────────────────────────────────────────
@@ -468,5 +487,12 @@ else
     echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
 fi
 echo ""
+if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
+    echo -e "  ${YELLOW}NAS role did not finish. Retry with:${RESET} ${BOLD}sudo homelabos-flavor nas-node${RESET}"
+    echo ""
+fi
 echo -e "  Login as ${BOLD}$SETUP_USER${RESET} on next session."
 echo ""
+# The login prompt clears the screen as soon as this script exits
+echo -ne "  Press Enter to continue "
+read -r

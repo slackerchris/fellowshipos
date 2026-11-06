@@ -64,7 +64,9 @@ Build logs are written to:
 ### 1) Live ISO
 
 - File: `live-image-amd64.hybrid.iso`
-- Purpose: Bootable test/install media
+- Purpose: Live session, plus "Start installer" in the boot menu to install to disk
+
+The installer asks for the OS disk, first user and time zone. Partitioning erases the disk you choose, so check it carefully if data disks are attached.
 
 ### 2) Proxmox LXC Template
 
@@ -106,7 +108,7 @@ Flavor presets currently available in the script:
 
 ## First Boot Wizard
 
-A systemd oneshot service runs on first boot:
+A systemd oneshot service runs on first boot of an installed system or LXC container, but not in a live session:
 
 - Service: `fellowshipos-setup.service`
 - Script: `/usr/local/bin/fellowshipos-setup`
@@ -114,8 +116,7 @@ A systemd oneshot service runs on first boot:
 The wizard configures:
 
 - Hostname and timezone
-- Primary user account and password
-- Optional sudo membership
+- Primary user account and password, with optional sudo membership (LXC template only: the installer creates this user on disk installs)
 - Optional SSH host key regeneration
 - Optional SSH public key install
 - Optional node role/component installation
@@ -141,12 +142,13 @@ Available flavor scripts in this repo:
 - `docker-node`
 - `monitor-node`
 - `storage-node`
+- `nas-node` (full installs only; placeholder until FellowshipNAS Phase 1)
 - `gateway-node`
 - `dev-node`
 
 Notes:
 
-- The first-boot wizard currently offers `docker-node`, `monitor-node`, and `storage-node` directly.
+- The first-boot wizard currently offers `docker-node`, `monitor-node`, `storage-node`, and `nas-node` directly.
 - Server mode in the wizard can install nginx, Node.js, Python, PostgreSQL, Redis, and Traefik components.
 
 ## Customization Guide

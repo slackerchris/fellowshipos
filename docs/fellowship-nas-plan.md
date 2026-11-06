@@ -51,7 +51,7 @@ FellowshipNAS is a new "NAS / Home Server" role in FellowshipOS: ZFS storage, NF
 
 ## Repo baseline
 
-Confirmed from this repo:
+The repo before Phase 0:
 
 | Item | Current state |
 | --- | --- |
@@ -85,17 +85,25 @@ There are three separate stages, and each one owns its own decisions.
 
 | Stage | Runs on | Decides |
 | --- | --- | --- |
-| Debian installer | ISO, local console | OS disk only |
-| First-boot wizard | `tty1`, local console | Hostname, timezone, first user, SSH, role |
+| Debian installer | ISO, local console | OS disk, first user, time zone |
+| First-boot wizard | `tty1`, local console | Hostname, SSH, role (and the first user in the LXC template) |
 | NAS setup wizard | Web UI | Pools, datasets, first share, alerts |
 
-**Debian installer:** add `--debian-installer live` to `auto/config`, so the installer copies the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached at this point. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
+**Debian installer:** `--debian-installer live` in `auto/config` makes the installer copy the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached at this point. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
+
+The installer needs three corrections, all in place since Phase 0:
+
+- **Removal list:** live-build's list includes everything added after its install pass, so it would remove Docker and keep `live-boot`. A binary hook replaces it with just the live packages.
+- **Apt sources:** the installer leaves the install media as the only source, which means no security updates and no ZFS. A `late_command` restores `/usr/share/fellowshipos/sources.list`.
+- **Preseed loading:** the boot menu doesn't load `/install/preseed.cfg` by itself, so `--bootappend-install` passes it.
+
+With root login off, the installer always creates a first user, with `sudo`. The wizard reuses that user, which also leaves a working login if the wizard fails.
 
 **Changes to the base system**
 
-- The first-boot wizard must not run in a live session. Add a condition to `fellowshipos-setup.service` so it only runs on an installed system.
-- Order the service after `network-online.target`, because role installs need the network.
-- Confirm that the live packages are removed from the installed system, and that the LXC template still builds.
+- The first-boot wizard must not run in a live session, so `fellowshipos-setup.service` has a condition on the kernel command line.
+- The service is ordered after `network-online.target`, because role installs need the network.
+- The wizard pauses before it exits, because the login prompt clears the screen and would hide any failure message.
 
 **Console access:** the installer already needs a monitor and keyboard, so the `tty1` wizard adds no new requirement. After first boot, the machine can run headless.
 
@@ -176,7 +184,7 @@ ZFS is the only storage engine in v1: one data pool, separate from the OS disk, 
 Test this before relying on it, using the real pool.
 
 1. Export the pool from TrueNAS, and note its version and enabled feature flags.
-2. On FellowshipNAS, try `zpool import -o readonly=on` first. Debian's ZFS (2.3.2 on the package page) must support every active feature, or the import may be refused or read-only.
+2. On FellowshipNAS, try `zpool import -o readonly=on` first. Debian's ZFS (2.3.9 in Trixie at Phase 0) must support every active feature, or the import may be refused or read-only.
 3. Check dataset encryption, permissions, and that UIDs match the new system.
 4. Do a normal import only after that passes. Never run `zpool upgrade` as part of migration, because it blocks a return to TrueNAS.
 5. Keep a backup of anything irreplaceable until the migration has run cleanly for a while.
@@ -308,12 +316,15 @@ Also evaluate the Cockpit project's `cockpit-files` plugin as a base. If `cockpi
 FellowshipNAS lives on the `nas-edition` branch. This repo is a flat live-build project, so the NAS work goes in a new `nas/` folder, plus small changes to the existing build.
 
 ```
-auto/config                  add --debian-installer live
+auto/config                  installer and preseed boot options
 build.sh                     build Fellowship packages; remove the local repo from the LXC template
 config/includes.chroot/
   usr/local/bin/fellowshipos-setup       new role option and retry message
   usr/local/lib/flavors/nas-node.sh      new flavor
+  usr/share/fellowshipos/sources.list    apt sources restored after install
   etc/systemd/system/fellowshipos-setup.service
+config/hooks/normal/0800-installer-remove-list.hook.binary
+config/preseed/fellowshipos.cfg.installer
 CLAUDE.md                    rules for Claude Code
 docs/
 nas/
@@ -324,7 +335,7 @@ nas/
     fellowship-desktop/      Cockpit plugin: desktop shell + all apps
   theme/                     icons, wallpaper, colour tokens
   tests/
-    vm/                      QEMU scripts: install from ISO with 4 virtual disks
+    vm/                      vm.sh: install from the ISO's boot menu with 4 virtual disks
     checklist.md             manual failure tests
 ```
 
@@ -401,8 +412,6 @@ Access:
 
 **Still to confirm**
 
-- [ ] Does `--debian-installer live` remove the live packages from the installed system, and does it leave the LXC build unchanged?
-- [ ] Does networking come up on the installed system with the current base packages (`ifupdown`, `dhcpcd-base`)?
 - [ ] Is `wsdd2` in Trixie, or should the plan use `wsdd`?
 - [ ] Can Samba's `vfs_shadow_copy2` match all of Sanoid's snapshot names (the period is a suffix), and does `shadow:localtime` need setting?
 - [ ] How does Cockpit let a plugin replace the default landing page?
@@ -424,4 +433,4 @@ Access:
 | UID mismatch on NFS | Permission errors, confusing for users | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**First message to Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 0. Confirm the installer questions in a VM before writing any NAS code."
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 1."

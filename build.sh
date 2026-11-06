@@ -57,7 +57,7 @@ run "Creating LXC template" docker run --rm \
         set -e
 
         # Remove live-boot/live-config — not needed in LXC, causes (live) prompt
-        chroot chroot dpkg --purge live-boot live-boot-initramfs-tools live-config live-config-systemd 2>/dev/null || true
+        chroot chroot dpkg --purge live-boot live-boot-initramfs-tools live-config live-config-systemd user-setup 2>/dev/null || true
 
         # Remove kernel and bootloader — not needed in LXC
         chroot chroot dpkg --purge linux-image-amd64 grub-efi grub-common 2>/dev/null || true

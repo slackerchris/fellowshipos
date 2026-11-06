@@ -14,7 +14,9 @@ lb config noauto \
     --linux-flavours "amd64" \
     --firmware-chroot false \
     --firmware-binary false \
-    --debian-installer false \
+    --debian-installer live \
+    --debian-installer-gui false \
+    --bootappend-install "file=/cdrom/install/preseed.cfg" \
     --binary-images iso-hybrid \
     --bootloader "grub-efi" \
     --memtest none \
