@@ -1,0 +1,27 @@
+#!/bin/sh
+# Runs after a kernel or its headers install, which can happen in either order.
+# With no ZFS module yet, stay on the running kernel. The module arriving later
+# releases that, so a false alarm clears itself.
+version="$1"
+running="$(uname -r)"
+grub_cfg=/boot/grub/grub.cfg
+
+[ -n "$version" ] || exit 0
+
+if ls "/lib/modules/$version/updates/dkms/"zfs.ko* > /dev/null 2>&1; then
+    grub-editenv - unset saved_entry
+    exit 0
+fi
+
+logger -p daemon.err -t fellowship-nas "no ZFS module for kernel $version"
+[ "$version" != "$running" ] || exit 0
+
+# Entry ids, unlike titles, don't change with the language or the distro name
+parent=$(grep -o "gnulinux-advanced-[0-9a-fA-F-]*" "$grub_cfg" | head -1)
+entry=$(grep -o "gnulinux-$running-advanced-[0-9a-fA-F-]*" "$grub_cfg" | head -1)
+if [ -z "$parent" ] || [ -z "$entry" ]; then
+    logger -p daemon.err -t fellowship-nas "can't find kernel $running in $grub_cfg"
+    exit 0
+fi
+grub-set-default "$parent>$entry"
+logger -p daemon.warning -t fellowship-nas "staying on kernel $running until ZFS builds for $version"

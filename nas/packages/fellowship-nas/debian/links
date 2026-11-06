@@ -1,0 +1,2 @@
+usr/lib/fellowship-nas/zfs-kernel-check etc/kernel/postinst.d/zz-fellowship-zfs
+usr/lib/fellowship-nas/zfs-kernel-check etc/kernel/header_postinst.d/zz-fellowship-zfs

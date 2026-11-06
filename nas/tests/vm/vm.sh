@@ -4,6 +4,7 @@
 #   vm.sh boot      Boot the installed disk (monitor socket in the work dir)
 #   vm.sh live      Boot the ISO's live session
 #   vm.sh clean     Delete the VM disks
+# FELLOWSHIP_DISK_ORDER="4 3 2 1" attaches the data disks in a different order.
 set -e
 
 cd "$(dirname "$0")"
@@ -19,7 +20,7 @@ qemu() {
     # Listed first so the OS disk is /dev/vda, the installer's default choice
     local disks=(-drive "file=$WORK/os.qcow2,if=none,id=os"
                  -device "virtio-blk-pci,drive=os,serial=FELLOWSHIP-OS,bootindex=1") i
-    for i in 1 2 3 4; do
+    for i in ${FELLOWSHIP_DISK_ORDER:-1 2 3 4}; do
         disks+=(-drive "file=$WORK/data$i.qcow2,if=none,id=data$i"
                 -device "virtio-blk-pci,drive=data$i,serial=FELLOWSHIP-DATA-$i")
     done
@@ -28,7 +29,7 @@ qemu() {
         -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
         -drive "if=pflash,format=raw,file=$WORK/vars.fd" \
         "${disks[@]}" \
-        -nic user,model=virtio-net-pci \
+        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22 \
         -display none \
         -serial "file:$WORK/serial-$MODE.log" \
         -monitor "unix:$WORK/monitor.sock,server,nowait" \
@@ -99,7 +100,7 @@ case "$MODE" in
         rm -rf "$WORK"
         ;;
     *)
-        sed -n '2,6p' "$0"
+        sed -n '2,7p' "$0"
         exit 1
         ;;
 esac

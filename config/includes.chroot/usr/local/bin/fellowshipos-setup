@@ -505,6 +505,10 @@ if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
     echo -e "  ${YELLOW}NAS role did not finish. Retry with:${RESET} ${BOLD}sudo homelabos-flavor nas-node${RESET}"
     echo ""
 fi
+if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ -f "$NAS_DONE_FLAG" ] && [ ! -d /sys/module/zfs ]; then
+    echo -e "  ${YELLOW}Reboot before using the NAS role:${RESET} ZFS was built for a newer kernel."
+    echo ""
+fi
 echo -e "  Login as ${BOLD}$SETUP_USER${RESET} on next session."
 echo ""
 # The login prompt clears the screen as soon as this script exits

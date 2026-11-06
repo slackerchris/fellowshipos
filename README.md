@@ -142,7 +142,7 @@ Available flavor scripts in this repo:
 - `docker-node`
 - `monitor-node`
 - `storage-node`
-- `nas-node` (full installs only; placeholder until FellowshipNAS Phase 1)
+- `nas-node` (full installs only: installs ZFS and the `fnas` tool)
 - `gateway-node`
 - `dev-node`
 
@@ -150,6 +150,21 @@ Notes:
 
 - The first-boot wizard currently offers `docker-node`, `monitor-node`, `storage-node`, and `nas-node` directly.
 - Server mode in the wizard can install nginx, Node.js, Python, PostgreSQL, Redis, and Traefik components.
+
+## NAS Storage
+
+The `nas-node` role installs ZFS from the local apt repo on the ISO. Manage pools with `fnas`, which hides the OS disk and refuses disks that are in use:
+
+```bash
+sudo fnas disk list
+sudo fnas pool scan
+sudo fnas pool import tank --readonly
+sudo fnas pool create tank raidz1 SERIAL1 SERIAL2 SERIAL3 --confirm "erase 3 disks"
+```
+
+Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
+
+To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with four data disks.
 
 ## Customization Guide
 

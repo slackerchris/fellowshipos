@@ -1,0 +1,13 @@
+Source: fellowship-nas-tools
+Section: admin
+Priority: optional
+Maintainer: slackerchris <slackerchris@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+
+Package: fellowship-nas-tools
+Architecture: all
+Depends: python3, util-linux, zfsutils-linux, ${misc:Depends}
+Description: FellowshipNAS command line tools
+ The fnas helper, which validates and carries out storage changes for the
+ FellowshipNAS web interface and for use over SSH.

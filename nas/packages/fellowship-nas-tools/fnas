@@ -1,0 +1,359 @@
+#!/usr/bin/python3
+"""fnas: storage helper for FellowshipNAS.
+
+This is the privilege boundary for the web UI, so every argument is validated
+here and commands are never built through a shell. It never passes -f to zpool:
+ZFS keeps refusing whatever it thinks is unsafe, and old data is only cleared
+by an explicit --wipe.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+BY_ID_DIR = "/dev/disk/by-id"
+OS_MOUNTS = {"/", "/boot", "/boot/efi", "/usr", "/var"}
+POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
+POOL_PROPERTIES = ["ashift=12"]
+DATASET_PROPERTIES = ["compression=lz4", "atime=off", "xattr=sa",
+                      "acltype=posixacl", "dnodesize=auto"]
+DEFAULT_DATASETS = ["shares", "home", "backups", "fellowship-config"]
+LAYOUT_MIN_DISKS = {"single": 1, "mirror": 2, "raidz1": 3, "raidz2": 4}
+# Stable names first: wwn and eui links exist alongside these on most disks
+BY_ID_PREFERENCE = ("ata-", "nvme-", "scsi-", "virtio-", "usb-", "wwn-")
+
+
+class FnasError(Exception):
+    pass
+
+
+def run(*command, check=True):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
+    except FileNotFoundError:
+        raise FnasError(f"{command[0]} is not installed") from None
+    if check and result.returncode != 0:
+        raise FnasError(result.stderr.strip() or f"{command[0]} failed")
+    return result
+
+
+def human_size(size):
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1000:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1000
+    return f"{value:.1f} PB"
+
+
+def by_id_links():
+    """Map each whole-disk device to its preferred /dev/disk/by-id path."""
+    links = {}
+    if not os.path.isdir(BY_ID_DIR):
+        return links
+    for name in sorted(os.listdir(BY_ID_DIR)):
+        if "-part" in name or not name.startswith(BY_ID_PREFERENCE):
+            continue
+        rank = next(i for i, p in enumerate(BY_ID_PREFERENCE) if name.startswith(p))
+        path = os.path.join(BY_ID_DIR, name)
+        device = os.path.realpath(path)
+        if device not in links or rank < links[device][0]:
+            links[device] = (rank, path)
+    return {device: path for device, (_, path) in links.items()}
+
+
+def imported_pool_devices():
+    """Map each device in an imported pool to its pool's name."""
+    devices = {}
+    pool = None
+    for line in run("zpool", "list", "-vHPL").stdout.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if not line[0].isspace():
+            pool = fields[0]
+        elif fields[0].startswith("/dev/"):
+            devices[fields[0]] = pool
+    return devices
+
+
+def walk(device):
+    yield device
+    for child in device.get("children", []):
+        yield from walk(child)
+
+
+def classify(device, pool_devices):
+    """Return a disk's state: os, in-use, has-data or empty, plus the reason."""
+    tree = list(walk(device))
+    mounts = {m for d in tree for m in d.get("mountpoints") or [] if m}
+    if mounts & OS_MOUNTS:
+        return "os", "holds the operating system"
+    for d in tree:
+        if d["path"] in pool_devices:
+            return "in-use", f"in pool {pool_devices[d['path']]}"
+    if mounts:
+        return "in-use", "mounted at " + ", ".join(sorted(mounts))
+    fstypes = sorted({d["fstype"] for d in tree if d.get("fstype")})
+    if "zfs_member" in fstypes:
+        return "has-data", "has a ZFS label"
+    if fstypes:
+        return "has-data", "has a filesystem: " + ", ".join(fstypes)
+    if len(tree) > 1:
+        return "has-data", "has partitions"
+    return "empty", ""
+
+
+def list_disks():
+    output = run("lsblk", "-J", "-b", "-o",
+                 "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINTS").stdout
+    links = by_id_links()
+    pool_devices = imported_pool_devices()
+    disks = []
+    for device in json.loads(output)["blockdevices"]:
+        # zd is a ZFS volume, fd a floppy drive, and an empty card reader has size 0
+        if device["type"] != "disk" or device["name"].startswith(("zd", "fd")) or not device["size"]:
+            continue
+        state, reason = classify(device, pool_devices)
+        disks.append({
+            "path": device["path"],
+            "by_id": links.get(device["path"]),
+            "size": device["size"],
+            "model": (device.get("model") or "").strip(),
+            "serial": (device.get("serial") or "").strip(),
+            "state": state,
+            "reason": reason,
+            "partitions": [d["path"] for d in walk(device)][1:],
+        })
+    return disks
+
+
+def scan_pools():
+    """Return pools that could be imported, with what ZFS says about each."""
+    result = run("zpool", "import", "-d", BY_ID_DIR, check=False)
+    pools = []
+    key = None
+    for line in result.stdout.splitlines():
+        match = re.match(r"^\s*(pool|id|state|status|action|comment): ?(.*)$", line)
+        if match:
+            key = match.group(1)
+            if key == "pool":
+                pools.append({})
+            if pools:
+                pools[-1][key] = match.group(2).strip()
+        elif re.match(r"^\s*(config|see):", line):
+            key = None
+        elif key and pools and line.strip():
+            pools[-1][key] = f"{pools[-1].get(key, '')} {line.strip()}".strip()
+    if result.returncode != 0 and not pools and "no pools available" not in result.stderr:
+        raise FnasError(result.stderr.strip() or "zpool import failed")
+    return pools
+
+
+def list_pools():
+    fields = ("name", "size", "allocated", "free", "health", "readonly")
+    output = run("zpool", "list", "-Hp", "-o", ",".join(fields)).stdout
+    pools = [dict(zip(fields, line.split("\t"))) for line in output.splitlines()]
+    for pool in pools:
+        for key in ("size", "allocated", "free"):
+            pool[key] = int(pool[key])
+    return pools
+
+
+def check_pool_name(name):
+    if not POOL_NAME.match(name):
+        raise FnasError("pool names use lowercase letters, numbers, - and _, "
+                        "start with a letter, and are at most 32 characters")
+    if name.startswith(RESERVED_POOL_PREFIXES):
+        raise FnasError(f"{name} starts with a word ZFS reserves")
+
+
+def find_disk(disks, wanted):
+    matches = [d for d in disks if wanted and wanted in (d["path"], d["by_id"], d["serial"])]
+    if len(matches) != 1:
+        raise FnasError(f"no such disk: {wanted}")
+    return matches[0]
+
+
+def vdev_args(layout, paths):
+    minimum = LAYOUT_MIN_DISKS[layout]
+    if len(paths) < minimum:
+        raise FnasError(f"{layout} needs at least {minimum} disks")
+    if layout == "single":
+        if len(paths) != 1:
+            raise FnasError("single takes exactly 1 disk")
+        return paths
+    if layout == "mirror":
+        if len(paths) % 2:
+            raise FnasError("mirror takes an even number of disks")
+        args = []
+        for i in range(0, len(paths), 2):
+            args += ["mirror", paths[i], paths[i + 1]]
+        return args
+    return [layout] + paths
+
+
+def confirmation_for(count):
+    return f"erase {count} disk" + ("" if count == 1 else "s")
+
+
+def wipe(disk):
+    """Clear old signatures, so zpool create doesn't need -f."""
+    for partition in disk["partitions"]:
+        run("zpool", "labelclear", "-f", partition, check=False)
+        run("wipefs", "-a", partition)
+    run("wipefs", "-a", disk["path"])
+
+
+def create_pool(name, layout, wanted, confirm, wipe_disks):
+    check_pool_name(name)
+    disks = list_disks()
+    chosen = [find_disk(disks, w) for w in wanted]
+    if len({d["path"] for d in chosen}) != len(chosen):
+        raise FnasError("the same disk is listed twice")
+    for disk in chosen:
+        if disk["state"] in ("os", "in-use"):
+            raise FnasError(f"{disk['path']} can't be used: {disk['reason']}")
+        if disk["state"] == "has-data" and not wipe_disks:
+            raise FnasError(f"{disk['path']} {disk['reason']}: check it, then pass --wipe to erase it")
+        if not disk["by_id"]:
+            raise FnasError(f"{disk['path']} has no stable name in {BY_ID_DIR}")
+    vdevs = vdev_args(layout, [d["by_id"] for d in chosen])
+    known = [p["name"] for p in list_pools()] + [p.get("pool") for p in scan_pools()]
+    if name in known:
+        raise FnasError(f"a pool named {name} already exists")
+    expected = confirmation_for(len(chosen))
+    if confirm != expected:
+        raise FnasError(f'confirm by passing --confirm "{expected}"')
+
+    if wipe_disks:
+        for disk in chosen:
+            wipe(disk)
+    command = ["zpool", "create"]
+    for prop in POOL_PROPERTIES:
+        command += ["-o", prop]
+    for prop in DATASET_PROPERTIES:
+        command += ["-O", prop]
+    run(*command, name, *vdevs)
+    for dataset in DEFAULT_DATASETS:
+        run("zfs", "create", f"{name}/{dataset}")
+
+
+def import_pool(pool, readonly):
+    if not any(pool in (p.get("pool"), p.get("id")) for p in scan_pools()):
+        raise FnasError(f"no importable pool: {pool}")
+    command = ["zpool", "import", "-d", BY_ID_DIR]
+    if readonly:
+        command += ["-o", "readonly=on"]
+    run(*command, pool)
+
+
+def export_pool(name):
+    if name not in [p["name"] for p in list_pools()]:
+        raise FnasError(f"no imported pool: {name}")
+    run("zpool", "export", name)
+
+
+def print_disks(disks, show_all):
+    for disk in disks:
+        if disk["state"] == "os" and not show_all:
+            continue
+        print(f"{disk['by_id'] or disk['path']}")
+        print(f"    {human_size(disk['size'])}  {disk['model'] or 'unknown model'}  "
+              f"serial {disk['serial'] or 'unknown'}")
+        print(f"    {disk['state']}" + (f": {disk['reason']}" if disk["reason"] else ""))
+
+
+def print_pools(pools):
+    if not pools:
+        print("No pools imported")
+    for pool in pools:
+        mode = "  read-only" if pool["readonly"] == "on" else ""
+        print(f"{pool['name']}  {pool['health']}  {human_size(pool['allocated'])} used "
+              f"of {human_size(pool['size'])}{mode}")
+
+
+def print_scan(pools):
+    if not pools:
+        print("No importable pools found")
+    for pool in pools:
+        print(f"{pool.get('pool')}  id {pool.get('id')}  {pool.get('state')}")
+        for key in ("status", "action"):
+            if key in pool:
+                print(f"    {key}: {pool[key]}")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="fnas", description="FellowshipNAS storage helper")
+    parser.add_argument("--json", action="store_true", help="print lists as JSON")
+    area = parser.add_subparsers(dest="area", required=True)
+
+    disk = area.add_parser("disk", help="show disks").add_subparsers(dest="action", required=True)
+    disk_list = disk.add_parser("list", help="list disks, hiding the OS disk")
+    disk_list.add_argument("--all", action="store_true", help="include the OS disk")
+
+    pool = area.add_parser("pool", help="manage pools").add_subparsers(dest="action", required=True)
+    pool.add_parser("list", help="list imported pools")
+    pool.add_parser("scan", help="find pools that can be imported")
+    status = pool.add_parser("status", help="show pool health in detail")
+    status.add_argument("name", nargs="?")
+    create = pool.add_parser("create", help="create a pool, erasing its disks")
+    create.add_argument("name")
+    create.add_argument("layout", choices=LAYOUT_MIN_DISKS)
+    create.add_argument("disks", nargs="+", metavar="disk", help="by-id path, device path or serial")
+    create.add_argument("--confirm", default="", help='type "erase N disks"')
+    create.add_argument("--wipe", action="store_true", help="erase disks that hold old data")
+    import_ = pool.add_parser("import", help="import a pool by name or id")
+    import_.add_argument("pool")
+    import_.add_argument("--readonly", action="store_true", help="import without writing to the pool")
+    export = pool.add_parser("export", help="export a pool")
+    export.add_argument("name")
+    return parser
+
+
+def dispatch(args):
+    def show(data, printer, *extra):
+        if args.json:
+            print(json.dumps(data, indent=2))
+        else:
+            printer(data, *extra)
+
+    if args.area == "disk":
+        show(list_disks(), print_disks, args.all)
+    elif args.action == "list":
+        show(list_pools(), print_pools)
+    elif args.action == "scan":
+        show(scan_pools(), print_scan)
+    elif args.action == "status":
+        if args.name:
+            check_pool_name(args.name)
+        print(run("zpool", "status", "-P", *([args.name] if args.name else [])).stdout, end="")
+    elif args.action == "create":
+        create_pool(args.name, args.layout, args.disks, args.confirm, args.wipe)
+        print(f"Created pool {args.name}")
+    elif args.action == "import":
+        import_pool(args.pool, args.readonly)
+        print(f"Imported {args.pool}" + (" read-only" if args.readonly else ""))
+    elif args.action == "export":
+        export_pool(args.name)
+        print(f"Exported {args.name}")
+
+
+def main():
+    args = build_parser().parse_args()
+    try:
+        if os.geteuid() != 0:
+            raise FnasError("run as root: sudo fnas ...")
+        dispatch(args)
+    except FnasError as error:
+        print(f"fnas: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -120,10 +120,10 @@ NFS is always installed. Alerts need no sub-option: `msmtp` is a small dependenc
 
 **Role install:** a new `nas-node.sh` flavor runs these steps in order:
 
-1. Stop with a clear message if this is a container, or if Secure Boot is on (`mokutil --sb-state`).
+1. Stop with a clear message if this is a container, or if Secure Boot is on (read from the EFI variable, so `mokutil` isn't needed).
 2. Check the network and Debian mirror access.
 3. Install `fellowship-nas`, and `fellowship-nas-smb` if selected.
-4. Confirm the ZFS module built and loads.
+4. Confirm the ZFS module built and loads. If the role pulled in a newer kernel, the module only has to exist for that kernel, and the wizard asks for a reboot.
 5. Write `/etc/fellowshipos/.nas-role-complete`.
 
 The flavor must be safe to run twice. Today, the wizard writes `.setup-complete` even when a step fails. So if the marker in step 5 is missing, the wizard shows the failure and the retry command, `sudo homelabos-flavor nas-node`.
@@ -144,12 +144,12 @@ The flavor must be safe to run twice. Today, the wizard writes `.setup-complete`
 
 ZFS is the only storage engine in v1: one data pool, separate from the OS disk, with sensible defaults set once by the wizard.
 
-**Packages:** `zfsutils-linux`, `zfs-dkms` and `linux-headers-amd64`. The headers meta-package keeps headers matched to future kernels. All of these install during the role, so the module compiles at that point. It isn't baked into the image, because the LXC template is built from the same chroot.
+**Packages:** `zfsutils-linux`, `zfs-dkms`, `zfs-zed`, `linux-image-amd64` and `linux-headers-amd64`. `zfs-zed` is listed because this image turns off apt's Recommends. The headers meta-package keeps headers matched to future kernels, and the image meta-package stops them running ahead of the installed kernel on an older ISO. All of these install during the role, so the module compiles at that point. It isn't baked into the image, because the LXC template is built from the same chroot.
 
 **Kernel and ZFS updates:** there's no version pin, so kernel security updates keep flowing. Debian stable ships a matched kernel and ZFS, and backports stay off.
 
-- A `/etc/kernel/postinst.d` hook checks that the ZFS module built for each new kernel.
-- If it failed, the hook sets GRUB's default back to the last good kernel and raises an alert.
+- `zfs-kernel-check` runs from both `/etc/kernel/postinst.d` and `header_postinst.d`, because a kernel and its headers can install in either order.
+- With no module for the new kernel, it sets GRUB's default to the running kernel and logs an error (alerts arrive in Phase 3). When the module appears, it clears that default.
 - `unattended-upgrades` never reboots automatically.
 - `GRUB_DEFAULT=saved` is set by the role. Old kernels are kept until the new one has booted with its pool imported.
 
@@ -177,7 +177,7 @@ ZFS is the only storage engine in v1: one data pool, separate from the OS disk, 
 
 **Disk replacement:** the Storage app has a guided flow for a failed disk: identify it by serial, choose the replacement, run `zpool replace`, and show resilver progress.
 
-**Maintenance:** a monthly scrub through the `zfsutils-linux` scheduled job Debian already ships (check its timing), with results shown on the dashboard. Pool import at boot uses the standard `zfs-import-cache` service.
+**Maintenance:** a monthly scrub through the `zfsutils-linux` cron job Debian already ships (the second Sunday of each month), with results shown on the dashboard. Pool import at boot uses the standard `zfs-import-cache` service.
 
 ## Migrating from TrueNAS
 
@@ -336,7 +336,7 @@ nas/
   theme/                     icons, wallpaper, colour tokens
   tests/
     vm/                      vm.sh: install from the ISO's boot menu with 4 virtual disks
-    checklist.md             manual failure tests
+    unit/                    fnas tests that never touch a real disk
 ```
 
 **Build:** each package builds with `dpkg-buildpackage`; the desktop is bundled first with esbuild. The ISO carries the built `.deb` files as a local apt repo for v1.
@@ -422,7 +422,7 @@ Access:
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Wrong disk chosen in the installer | Data loss | Manual partitioning only; docs recommend unplugging data disks |
+| Wrong disk chosen in the installer | Data loss | Partitioning is never preseeded, so a person always picks the disk; docs recommend unplugging data disks |
 | Existing pool mistaken for empty disks | Data loss | Pool scan runs first; ZFS labels are flagged |
 | ZFS module fails to build after a kernel update | Pool not mounted after reboot | Post-install check, last good kernel as boot default, alert |
 | Role install fails on first boot | Half-built system | Network check first, safe to rerun, separate completion marker |
@@ -433,4 +433,4 @@ Access:
 | UID mismatch on NFS | Permission errors, confusing for users | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 1."
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 2." Phase 1 still needs the read-only import of a real TrueNAS pool.

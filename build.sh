@@ -41,7 +41,8 @@ run "Building" docker run --rm \
     bash -c '
         set -e
         apt-get update -qq
-        apt-get install -y -qq live-build
+        apt-get install -y -qq live-build debhelper
+        nas/packages/build.sh
         lb clean
         lb config
         lb build
@@ -65,6 +66,9 @@ run "Creating LXC template" docker run --rm \
         # Clean up leftover live artifacts
         rm -rf chroot/lib/live chroot/etc/live chroot/etc/fstab.d/live 2>/dev/null || true
         rm -f chroot/etc/debian_chroot
+
+        # The NAS role is ISO-only
+        rm -rf chroot/usr/share/fellowshipos/nas-repo
 
         # Tar up the rootfs in Proxmox-compatible format
         tar -czf ${TEMPLATE_NAME}_lxc.tar.gz \

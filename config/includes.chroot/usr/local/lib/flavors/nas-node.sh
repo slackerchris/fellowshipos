@@ -24,7 +24,23 @@ if ! curl -fsI --max-time 15 http://deb.debian.org/debian/dists/trixie/Release >
     exit 1
 fi
 
-# Phase 1 installs the fellowship-nas packages here
+echo "deb [trusted=yes] file:/usr/share/fellowshipos/nas-repo ./" > /etc/apt/sources.list.d/fellowship-nas.list
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y fellowship-nas
+
+# The role can pull in a newer kernel than the one running
+NEWEST_KERNEL=$(ls -v /lib/modules | tail -1)
+if modprobe zfs; then
+    # zfsutils starts its services before zfs-dkms has built the module
+    systemctl reset-failed zfs-load-module.service
+    systemctl start zfs-import.target zfs.target
+elif [ "$NEWEST_KERNEL" != "$(uname -r)" ] && modinfo -k "$NEWEST_KERNEL" zfs > /dev/null; then
+    echo "[flavor] ZFS built for kernel $NEWEST_KERNEL: reboot to load it"
+else
+    echo "[flavor] the ZFS module didn't build: see /var/lib/dkms/zfs/*/build/make.log"
+    exit 1
+fi
 
 mkdir -p /etc/fellowshipos
 touch "$DONE_FLAG"

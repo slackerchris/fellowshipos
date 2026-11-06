@@ -1,0 +1,14 @@
+Source: fellowship-nas
+Section: admin
+Priority: optional
+Maintainer: slackerchris <slackerchris@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+
+Package: fellowship-nas
+Architecture: all
+Depends: fellowship-nas-tools (= ${binary:Version}), zfsutils-linux, zfs-dkms,
+ zfs-zed, linux-image-amd64, linux-headers-amd64, ${misc:Depends}
+Description: FellowshipNAS home server role
+ Everything the FellowshipNAS role needs: ZFS, its tools, and a check that
+ keeps the system on a kernel with a working ZFS module.
