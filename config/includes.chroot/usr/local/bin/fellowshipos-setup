@@ -181,14 +181,25 @@ echo "    2) Docker node"
 echo "    3) Server (web / app / database / proxy)"
 echo "    4) Monitor node"
 echo "    5) Storage node (mergerfs + SnapRAID)"
-echo "    6) NAS / Home Server (ZFS + web UI)"
+# Containers can't load ZFS or own disks
+if systemd-detect-virt --container --quiet; then
+    NAS_AVAILABLE="N"
+    echo "    6) NAS / Home Server (full installs only)"
+else
+    NAS_AVAILABLE="Y"
+    echo "    6) NAS / Home Server (ZFS + web UI)"
+fi
 echo "    7) Skip for now"
 echo ""
 
 while true; do
     prompt "Choice" "1" SETUP_FLAVOR_CHOICE
     case "$SETUP_FLAVOR_CHOICE" in
-        1|2|3|4|5|6|7) break ;;
+        6)
+            [ "$NAS_AVAILABLE" = "Y" ] && break
+            echo -e "  ${RED}The NAS role needs a full install from the ISO. Choose another option.${RESET}"
+            ;;
+        1|2|3|4|5|7) break ;;
         *) echo -e "  ${RED}Please enter a number between 1 and 7.${RESET}" ;;
     esac
 done
@@ -339,6 +350,9 @@ if [ "$SETUP_REGEN_SSH" = "Y" ]; then
         APPLY_ERRORS=$((APPLY_ERRORS + 1))
     fi
 fi
+
+# Templates ship without host keys, so sshd has given up by now
+run_step "Starting SSH" bash -c 'ssh-keygen -A && systemctl reset-failed ssh && systemctl restart ssh'
 
 # Public key
 if [ -n "$SETUP_PUBKEY" ]; then
