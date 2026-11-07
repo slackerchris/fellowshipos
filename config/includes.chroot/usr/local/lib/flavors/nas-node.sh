@@ -27,7 +27,7 @@ fi
 echo "deb [trusted=yes] file:/usr/share/fellowshipos/nas-repo ./" > /etc/apt/sources.list.d/fellowship-nas.list
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y fellowship-nas
+apt-get install -y fellowship-nas fellowship-nas-smb
 
 # The role can pull in a newer kernel than the one running
 NEWEST_KERNEL=$(ls -v /lib/modules | tail -1)

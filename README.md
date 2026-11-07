@@ -164,6 +164,23 @@ sudo fnas pool create tank raidz1 SERIAL1 SERIAL2 SERIAL3 --confirm "erase 3 dis
 
 Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
 
+## NAS Shares
+
+Each share is a dataset in `POOL/shares`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard:
+
+```bash
+sudo fnas share create media tank --mode shared --nfs --smb
+sudo fnas share create chris tank --mode matched --owner chris --nfs
+sudo fnas share list
+sudo fnas share set media --smb off
+sudo fnas lan set 192.168.1.0/24
+```
+
+- `shared`: everyone reads and writes as the `nas-share` account, so each protocol can edit the other's files. Use it for media and family folders.
+- `matched`: only the owner gets in, and NFS clients need the same numeric user ID as the NAS. Use it for personal folders.
+
+Anyone connecting over SMB needs a Samba password, set with `sudo smbpasswd -a USER` for an existing user. `share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
+
 To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with four data disks.
 
 ## Customization Guide

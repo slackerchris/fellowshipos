@@ -210,9 +210,9 @@ NFS is the primary protocol and is managed by ZFS itself; SMB is optional and ma
 **SMB (optional)**
 
 - `fnas` writes one file per share, plus a generated master file that lists them. `smb.conf` includes only that master file, because Samba can't include a whole directory. ZFS's `sharesmb` property is not used.
-- `wsdd2` so shares show up in Windows Network (check it's in Trixie; fall back to `wsdd`), and Avahi for macOS
+- `wsdd2` so shares show up in Windows Network, and Avahi for macOS
 - SMB passwords set alongside the system password from the Users app (`smbpasswd`)
-- `vfs_shadow_copy2` mapped to Sanoid's snapshot names, so ZFS snapshots appear as "Previous Versions" in Windows File Explorer. See the Phase 2 test below.
+- `vfs_shadow_copy2` mapped to Sanoid's snapshot names, so ZFS snapshots appear as "Previous Versions" in Windows File Explorer. See the Phase 2 test below. `shadow:snapprefix` keeps the real names, because Sanoid's period suffix can't be rebuilt from a time format. Snapshots must be taken by `sanoid.service`, which runs in UTC: a hand-run `sanoid` uses local time, and Samba can't open those.
 
 **One dataset on both protocols** works when it uses `acltype=posixacl` and `xattr=sa` (set by default), and the web UI warns if a share is set to "Matched users" on NFS while SMB users have no matching UID.
 
@@ -412,8 +412,6 @@ Access:
 
 **Still to confirm**
 
-- [ ] Is `wsdd2` in Trixie, or should the plan use `wsdd`?
-- [ ] Can Samba's `vfs_shadow_copy2` match all of Sanoid's snapshot names (the period is a suffix), and does `shadow:localtime` need setting?
 - [ ] How does Cockpit let a plugin replace the default landing page?
 - [ ] Does your TrueNAS pool import read-only on Debian's ZFS?
 - [ ] Where will the signed apt repo be hosted?
@@ -433,4 +431,4 @@ Access:
 | UID mismatch on NFS | Permission errors, confusing for users | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 2." Phase 1 still needs the read-only import of a real TrueNAS pool.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 3." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

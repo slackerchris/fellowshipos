@@ -85,6 +85,11 @@ confirm() {
 
 # ─── Validation ───────────────────────────────────────────────────────────────
 
+valid_subnet() {
+    # fnas checks this properly: here it only needs to be a private subnet
+    [[ "$1" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+/([89]|[12][0-9]|30)$ ]]
+}
+
 valid_username() {
     # Must start with letter or underscore, 1-32 chars, only a-z 0-9 _ -
     [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
@@ -228,6 +233,22 @@ if [ "$SETUP_FLAVOR_CHOICE" = "3" ]; then
     done
 fi
 
+# NAS shares are only offered to this subnet
+SETUP_NAS_LAN=""
+if [ "$SETUP_FLAVOR_CHOICE" = "6" ]; then
+    NAS_LAN_DEVICE=$(ip -4 route show default | awk '{print $5; exit}')
+    NAS_LAN_DEFAULT=""
+    [ -n "$NAS_LAN_DEVICE" ] && NAS_LAN_DEFAULT=$(ip -4 route show dev "$NAS_LAN_DEVICE" scope link | awk '{print $1; exit}')
+    echo ""
+    while true; do
+        prompt "LAN subnet that may use shares" "$NAS_LAN_DEFAULT" SETUP_NAS_LAN
+        valid_subnet "$SETUP_NAS_LAN" && break
+        # Nothing to detect without a network, and the role needs one anyway
+        [ -z "$SETUP_NAS_LAN" ] && [ -z "$NAS_LAN_DEFAULT" ] && break
+        echo -e "  ${RED}Enter a private subnet, like 192.168.1.0/24.${RESET}"
+    done
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 header
@@ -250,6 +271,7 @@ echo -e "  User:       ${BOLD}$SETUP_USER${RESET}$([ "$SETUP_SUDO" = "Y" ] && ec
 echo -e "  SSH keys:   ${BOLD}$([ "$SETUP_REGEN_SSH" = "Y" ] && echo 'regenerate' || echo 'keep')${RESET}"
 echo -e "  Public key: ${BOLD}$([ -n "$SETUP_PUBKEY" ] && echo 'provided' || echo 'none')${RESET}"
 echo -e "  Flavor:     ${BOLD}$FLAVOR_LABEL${RESET}"
+[ -n "$SETUP_NAS_LAN" ] && echo -e "  LAN subnet: ${BOLD}$SETUP_NAS_LAN${RESET}"
 
 if [ "$SETUP_FLAVOR_CHOICE" = "3" ] && [ -n "$SETUP_SERVER_COMPONENTS" ]; then
     COMP_LABEL=""
@@ -476,6 +498,8 @@ case "$SETUP_FLAVOR_CHOICE" in
         ;;
     6)
         apt-get update -qq >> "$LOG_FILE" 2>&1
+        mkdir -p /etc/fellowshipos
+        [ -z "$SETUP_NAS_LAN" ] || echo "$SETUP_NAS_LAN" > /etc/fellowshipos/nas-lan
         apply_flavor "nas-node"
         ;;
 esac

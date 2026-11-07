@@ -1,8 +1,17 @@
 #!/bin/sh
 set -e
 
-if [ "$1" = "configure" ] && [ -x /usr/sbin/update-grub ]; then
-    update-grub
+if [ "$1" = "configure" ]; then
+    [ ! -x /usr/sbin/update-grub ] || update-grub
+
+    # Shared folders are owned by this account on every protocol. The ID is
+    # fixed so files on a moved pool keep their owner.
+    getent group nas-share > /dev/null || groupadd --system --gid 3000 nas-share
+    getent passwd nas-share > /dev/null || useradd --system --uid 3000 --gid 3000 \
+        --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin nas-share
+
+    # Picks up the NFSv4-only setting
+    systemctl try-restart nfs-server.service
 fi
 
 #DEBHELPER#

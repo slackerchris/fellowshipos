@@ -1,7 +1,8 @@
 #!/bin/bash
 # Install FellowshipOS into a VM with 4 data disks, then boot it.
 #   vm.sh install   Install through the ISO's boot menu, with timed keystrokes
-#   vm.sh boot      Boot the installed disk (monitor socket in the work dir)
+#   vm.sh boot      Boot the installed disk (monitor socket in the work dir);
+#                   extra arguments go to QEMU, such as a second network card
 #   vm.sh live      Boot the ISO's live session
 #   vm.sh clean     Delete the VM disks
 # FELLOWSHIP_DISK_ORDER="4 3 2 1" attaches the data disks in a different order.
@@ -90,7 +91,8 @@ case "$MODE" in
         wait "$VM"
         ;;
     boot)
-        qemu
+        shift
+        qemu "$@"
         ;;
     live)
         create_disks
@@ -100,7 +102,7 @@ case "$MODE" in
         rm -rf "$WORK"
         ;;
     *)
-        sed -n '2,7p' "$0"
+        sed -n '2,8p' "$0"
         exit 1
         ;;
 esac

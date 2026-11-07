@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Samba can't include a whole directory, so fnas writes this master file
+    mkdir -p /etc/samba/fellowship/shares
+    [ -e /etc/samba/fellowship/shares.conf ] || : > /etc/samba/fellowship/shares.conf
+    grep -q '^include = /etc/samba/fellowship/shares.conf$' /etc/samba/smb.conf ||
+        echo 'include = /etc/samba/fellowship/shares.conf' >> /etc/samba/smb.conf
+    systemctl try-reload-or-restart smbd.service
+fi
+
+#DEBHELPER#

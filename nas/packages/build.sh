@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 REPO="$(pwd)/../../config/includes.chroot/usr/share/fellowshipos/nas-repo"
 WORK="$(mktemp -d)"
 
-for package in fellowship-nas-tools fellowship-nas; do
+for package in fellowship-nas-tools fellowship-nas fellowship-nas-smb; do
     cp -r "$package" "$WORK/"
     (cd "$WORK/$package" && dpkg-buildpackage -b -us -uc)
 done

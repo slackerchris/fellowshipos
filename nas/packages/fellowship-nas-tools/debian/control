@@ -9,5 +9,5 @@ Package: fellowship-nas-tools
 Architecture: all
 Depends: python3, util-linux, zfsutils-linux, ${misc:Depends}
 Description: FellowshipNAS command line tools
- The fnas helper, which validates and carries out storage changes for the
- FellowshipNAS web interface and for use over SSH.
+ The fnas helper, which validates and carries out storage and sharing changes
+ for the FellowshipNAS web interface and for use over SSH.

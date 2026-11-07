@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    [ ! -e /etc/samba/smb.conf ] || sed -i '\|^include = /etc/samba/fellowship/shares.conf$|d' /etc/samba/smb.conf
+fi
+
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/samba/fellowship
+fi
+
+#DEBHELPER#

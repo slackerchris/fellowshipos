@@ -1,0 +1,14 @@
+Source: fellowship-nas-smb
+Section: admin
+Priority: optional
+Maintainer: slackerchris <slackerchris@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+
+Package: fellowship-nas-smb
+Architecture: all
+Depends: fellowship-nas-tools (= ${binary:Version}), samba, wsdd2, avahi-daemon,
+ ${misc:Depends}
+Description: FellowshipNAS SMB sharing
+ Samba for FellowshipNAS shares, plus the discovery services that show the
+ server in Windows Network and in the macOS Finder.
