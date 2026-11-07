@@ -1,3 +1,11 @@
 zfs-kernel-check usr/lib/fellowship-nas
 grub-saved-default.cfg etc/default/grub.d
 nfs-v4-only.conf etc/nfs.conf.d
+smartd.conf usr/lib/fellowship-nas
+smartmontools.service.d usr/lib/systemd/system
+smart-alert usr/lib/fellowship-nas
+all-fellowship.sh etc/zfs/zed.d
+fellowship-nas-check.service usr/lib/systemd/system
+fellowship-nas-check.timer usr/lib/systemd/system
+fellowship-nas-backup.service usr/lib/systemd/system
+fellowship-nas-backup.timer usr/lib/systemd/system

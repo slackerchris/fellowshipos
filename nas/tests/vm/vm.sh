@@ -6,6 +6,7 @@
 #   vm.sh live      Boot the ISO's live session
 #   vm.sh clean     Delete the VM disks
 # FELLOWSHIP_DISK_ORDER="4 3 2 1" attaches the data disks in a different order.
+# FELLOWSHIP_KEEP_DATA=1 keeps the data disks through an install, to test a reinstall.
 set -e
 
 cd "$(dirname "$0")"
@@ -23,7 +24,7 @@ qemu() {
                  -device "virtio-blk-pci,drive=os,serial=FELLOWSHIP-OS,bootindex=1") i
     for i in ${FELLOWSHIP_DISK_ORDER:-1 2 3 4}; do
         disks+=(-drive "file=$WORK/data$i.qcow2,if=none,id=data$i"
-                -device "virtio-blk-pci,drive=data$i,serial=FELLOWSHIP-DATA-$i")
+                -device "virtio-blk-pci,id=dev$i,drive=data$i,serial=FELLOWSHIP-DATA-$i")
     done
     qemu-system-x86_64 \
         -enable-kvm -cpu host -m 4096 -smp 2 \
@@ -40,6 +41,7 @@ qemu() {
 create_disks() {
     cp "$OVMF_VARS" "$WORK/vars.fd"
     qemu-img create -q -f qcow2 "$WORK/os.qcow2" 20G
+    [ -n "$FELLOWSHIP_KEEP_DATA" ] && return
     for i in 1 2 3 4; do
         qemu-img create -q -f qcow2 "$WORK/data$i.qcow2" 2G
     done
@@ -82,12 +84,27 @@ case "$MODE" in
         sleep 3;  type_line vmtest              # Password
         sleep 3;  type_line vmtest
         sleep 15; keys ret                      # Time zone
-        sleep 15; keys ret                      # Guided, entire disk
+        sleep 15
+        # Kept data disks have free space, so the menu gains a first entry
+        # ("largest continuous free space") and the default moves onto it
+        [ -n "$FELLOWSHIP_KEEP_DATA" ] && keys down
+        keys ret                                # Guided, entire disk
         sleep 3;  keys ret                      # First disk: the OS disk
         sleep 3;  keys ret                      # All files in one partition
         sleep 3;  keys ret                      # Finish partitioning
         sleep 3;  keys tab ret                  # Write changes
         sleep 240; keys ret                     # Installation complete
+        # A keystroke that lands on the wrong screen leaves the installer
+        # waiting forever, so give up rather than hang
+        for _ in $(seq 120); do
+            kill -0 "$VM" 2> /dev/null || break
+            sleep 5
+        done
+        if kill -0 "$VM" 2> /dev/null; then
+            echo "Install did not finish; the screen is waiting for input" >&2
+            kill "$VM"
+            exit 1
+        fi
         wait "$VM"
         ;;
     boot)
@@ -102,7 +119,7 @@ case "$MODE" in
         rm -rf "$WORK"
         ;;
     *)
-        sed -n '2,8p' "$0"
+        sed -n '2,9p' "$0"
         exit 1
         ;;
 esac

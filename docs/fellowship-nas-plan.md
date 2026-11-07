@@ -149,7 +149,7 @@ ZFS is the only storage engine in v1: one data pool, separate from the OS disk, 
 **Kernel and ZFS updates:** there's no version pin, so kernel security updates keep flowing. Debian stable ships a matched kernel and ZFS, and backports stay off.
 
 - `zfs-kernel-check` runs from both `/etc/kernel/postinst.d` and `header_postinst.d`, because a kernel and its headers can install in either order.
-- With no module for the new kernel, it sets GRUB's default to the running kernel and logs an error (alerts arrive in Phase 3). When the module appears, it clears that default.
+- With no module for the new kernel, it sets GRUB's default to the running kernel and logs an error, and `fnas check` raises an alert. When the module appears, it clears that default.
 - `unattended-upgrades` never reboots automatically.
 - `GRUB_DEFAULT=saved` is set by the role. Old kernels are kept until the new one has booted with its pool imported.
 
@@ -245,6 +245,17 @@ Snapshots protect against deleted files, not against losing the pool. v1 include
 - Always: the dashboard's notification centre, stored locally
 
 The Alerts app has a "Send test alert" button so setup can be checked in one click.
+
+**As built in Phase 3**
+
+- Sanoid's daily and monthly runs are moved to 23:30 and 00:15 UTC, so hourly, daily and monthly snapshots don't share a timestamp. The very first run still makes all three at once.
+- `smartd` runs inside VMs too (Debian's unit skips them), using its own config that calls `fellowship-nas-notify` directly.
+- Alerts that can't be delivered, such as one raised before the network is up, are kept and retried by the hourly check for up to a day.
+- Settings are copied to `POOL/fellowship-config` after every change, without passwords or tokens. A fresh install never overwrites a copy it hasn't restored, and a restore validates everything on the disk before using it.
+- After a reinstall, `fnas pool import --force` imports a pool the old system never exported, but never one that another running system has imported (ZFS multihost).
+- Restore and alert setup are CLI only until the Phase 4 pages.
+
+Not checked in the VM: `smartd` reacting to a real disk fault (the alert hook was tested directly), and the snapshot timing across a day and month boundary.
 
 ## Web UI
 
@@ -431,4 +442,4 @@ Access:
 | UID mismatch on NFS | Permission errors, confusing for users | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 3." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 4." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

@@ -40,7 +40,7 @@ class Fake:
         self.devices, self.pools, self.imports, self.import_rc = devices, pools, imports, import_rc
         self.calls = []
 
-    def __call__(self, *command, check=True):
+    def __call__(self, *command, check=True, stdin=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[0] == "lsblk":
             ok.stdout = json.dumps({"blockdevices": self.devices})
@@ -254,10 +254,37 @@ class Import(Base):
             fnas.import_pool("-f", False)
         self.assertEqual(fake.calls, [])
 
+    FOREIGN = (IMPORTS + " status: The pool was last accessed by another system.\n"
+               " action: The pool can be imported using its name or numeric identifier and\n"
+               "\tthe '-f' flag.\n")
+    ACTIVE = IMPORTS + " status: The pool is currently imported by another system.\n"
 
-def share_line(name, mode="shared", sharenfs="off", smb="off", pool="tank"):
+    def test_foreign_pool_needs_force(self):
+        fake = self.use(Fake([], imports=self.FOREIGN, import_rc=0))
+        with self.assertRaisesRegex(fnas.FnasError, "pass --force"):
+            fnas.import_pool("tank", False)
+        self.assertEqual(fake.calls, [])
+
+    def test_foreign_pool_with_force(self):
+        fake = self.use(Fake([], imports=self.FOREIGN, import_rc=0))
+        fnas.import_pool("tank", False, force=True)
+        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "-f", "tank")])
+
+    def test_never_forces_a_pool_in_use(self):
+        fake = self.use(Fake([], imports=self.ACTIVE, import_rc=0))
+        with self.assertRaisesRegex(fnas.FnasError, "in use by another system"):
+            fnas.import_pool("tank", False, force=True)
+        self.assertEqual(fake.calls, [])
+
+    def test_force_is_not_used_when_not_needed(self):
+        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
+        fnas.import_pool("tank", False, force=True)
+        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "tank")])
+
+
+def share_line(name, mode="shared", sharenfs="off", smb="off", pool="tank", policy="-", readonly="off"):
     dataset = f"{pool}/shares/{name}"
-    return f"{dataset}\t/{dataset}\t{sharenfs}\t{mode}\t{smb}\n"
+    return f"{dataset}\t/{dataset}\t{sharenfs}\t{mode}\t{smb}\t{policy}\t{readonly}\n"
 
 
 class ShareFake(Fake):
@@ -267,7 +294,7 @@ class ShareFake(Fake):
         super().__init__([])
         self.datasets, self.snapshots, self.existing = datasets, snapshots, existing
 
-    def __call__(self, *command, check=True):
+    def __call__(self, *command, check=True, stdin=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[:2] == ("zpool", "list") and "-Hp" in command:
             ok.stdout = "tank\t100\t1\t99\tONLINE\toff\n"
@@ -388,13 +415,14 @@ class Sharing(Base):
         self.assertEqual(fake.calls, [("zpool", "export", "tank"), ("zfs", "share", "-a")])
 
     def test_list_ignores_other_datasets(self):
-        other = "tank/shares\t/tank/shares\toff\t-\t-\ntank/home\t/tank/home\toff\t-\t-\n"
+        other = "tank/shares\t/tank/shares\toff\t-\t-\t-\toff\ntank/home\t/tank/home\toff\t-\t-\t-\toff\n"
         nested = share_line("media/old")
         unmanaged = share_line("plain", mode="-")
         self.use(ShareFake(other + nested + unmanaged + share_line("media", sharenfs="rw=@x", smb="on")))
         self.assertEqual(fnas.list_shares(), [{
             "name": "media", "pool": "tank", "dataset": "tank/shares/media",
-            "path": "/tank/shares/media", "mode": "shared", "nfs": True, "smb": True}])
+            "path": "/tank/shares/media", "mode": "shared", "nfs": True, "smb": True,
+            "policy": fnas.DEFAULT_POLICY, "readonly": False}])
 
     def test_smb_files_follow_zfs(self):
         self.use(ShareFake(share_line("media", smb="on") + share_line("chris", "matched", smb="on")
@@ -464,6 +492,518 @@ class Sharing(Base):
             with self.subTest(value), self.assertRaises(fnas.FnasError):
                 fnas.check_subnet(value)
         self.assertEqual(fnas.check_subnet("192.168.1.77/24"), "192.168.1.0/24")
+
+
+class ProtectionFake(ShareFake):
+    """Adds what snapshots, backups, checks and saved settings read."""
+
+    def __init__(self, datasets="", pools="tank\t100\t1\t99\tONLINE\toff\n", snapshots="",
+                 status="", created=0, sanoid_failed=False, syncoid_error="", config_dir=None):
+        super().__init__(datasets)
+        self.pool_lines, self.dated_snapshots, self.status = pools, snapshots, status
+        self.created, self.sanoid_failed = created, sanoid_failed
+        self.syncoid_error, self.config_dir = syncoid_error, config_dir
+        self.backups, self.mail = "", None
+
+    def __call__(self, *command, check=True, stdin=None):
+        ok = SimpleNamespace(stdout="", stderr="", returncode=0)
+        if command[:2] == ("zpool", "list") and "-Hp" in command:
+            ok.stdout = self.pool_lines
+        elif command[:2] == ("zpool", "status"):
+            ok.stdout = self.status
+        elif command[:3] == ("zfs", "list", "-Hp"):
+            ok.stdout = self.dated_snapshots
+        elif command[:2] == ("zfs", "get") and "creation" in command:
+            ok.stdout = f"{self.created}\n"
+        elif command[:2] == ("zfs", "get") and "mountpoint" in command:
+            ok.stdout = f"{self.config_dir}\n"
+            ok.returncode = 0 if self.config_dir else 1
+        elif "-r" in command and command[:2] == ("zfs", "list"):
+            ok.stdout = self.backups
+            ok.returncode = 0 if self.backups else 1
+        elif command[0] == "systemctl":
+            ok.returncode = 0 if self.sanoid_failed else 1
+        elif command[0] == "syncoid":
+            self.calls.append(command)
+            ok.stderr, ok.returncode = self.syncoid_error, 1 if self.syncoid_error else 0
+        elif command[0] == "msmtp":
+            self.mail = stdin
+        else:
+            return super().__call__(*command, check=check)
+        return ok
+
+
+class Protection(Base):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = directory.name
+        self.pool_dir = os.path.join(self.root, "pool-config")
+        os.mkdir(self.pool_dir)
+        os.mkdir(os.path.join(self.root, "modules"))
+        lan_file = self.path("nas-lan")
+        with open(lan_file, "w") as file:
+            file.write("192.168.1.0/24\n")
+        paths = {"LAN_FILE": lan_file, "SANOID_FILE": self.path("sanoid", "sanoid.conf"),
+                 "SMB_DIR": "/nonexistent", "MODULES_DIR": self.path("modules")}
+        for name in ("BACKUP_FILE", "BACKUP_STATE", "BACKUP_LOCK", "ALERTS_FILE", "SECRETS_FILE",
+                     "MSMTP_FILE", "ALERT_LOG", "ALERT_LOCK", "CHECK_STATE", "INSTALL_ID_FILE"):
+            paths[name] = self.path(name)
+        for name, value in paths.items():
+            patcher = mock.patch.object(fnas, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def path(self, *parts):
+        return os.path.join(self.root, *parts)
+
+    def fake(self, *args, **kwargs):
+        return self.use(ProtectionFake(*args, config_dir=self.pool_dir, **kwargs))
+
+    def alerts(self):
+        return fnas.read_json(fnas.ALERT_LOG, [])
+
+    def titles(self):
+        return [alert["title"] for alert in self.alerts()]
+
+    def saved(self):
+        return fnas.read_json(os.path.join(self.pool_dir, "config.json"))
+
+    def write_saved(self, **fields):
+        data = {"version": 1, "install": "old", "saved": 1, "lan": None, "backup": None,
+                "alerts": {}, "shares": [], "users": [], **fields}
+        fnas.write_json(os.path.join(self.pool_dir, "config.json"), data)
+
+    # Snapshots
+
+    def test_sanoid_keeps_each_period_on_its_own_run(self):
+        config = fnas.sanoid_config([], None)
+        self.assertIn("hourly_min = 0\n", config)
+        self.assertIn("daily_min = 30\n", config)
+        self.assertIn("monthly_min = 15\n", config)
+
+    def test_sanoid_follows_each_share(self):
+        self.fake(share_line("media") + share_line("docs", policy="1,2,3")
+                  + share_line("off", policy="0,0,0") + share_line("old", readonly="on"))
+        fnas.write_sanoid_config()
+        with open(fnas.SANOID_FILE) as file:
+            config = file.read()
+        self.assertIn("[tank/shares/media]\nuse_template = fellowship\nhourly = 24\ndaily = 30\n", config)
+        self.assertIn("[tank/shares/docs]\nuse_template = fellowship\nhourly = 1\ndaily = 2\n", config)
+        self.assertNotIn("tank/shares/off", config)
+        self.assertNotIn("tank/shares/old", config)
+
+    def test_sanoid_only_prunes_a_connected_backup_pool(self):
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        self.fake(pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n")
+        fnas.write_sanoid_config()
+        with open(fnas.SANOID_FILE) as file:
+            self.assertIn("[usb/fellowship-backup]\nuse_template = fellowship\nrecursive = yes\n"
+                          "autosnap = no\n", file.read())
+        self.fake()
+        fnas.write_sanoid_config()
+        with open(fnas.SANOID_FILE) as file:
+            self.assertNotIn("usb", file.read())
+
+    def test_policy_changes_only_what_was_asked(self):
+        fake = self.fake(share_line("media", policy="1,2,3"))
+        fnas.set_policy("media", None, 9, None)
+        self.assertIn(("zfs", "set", f"{fnas.POLICY_PROPERTY}=1,9,3", "tank/shares/media"), fake.calls)
+
+    def test_policy_refusals(self):
+        fake = self.fake(share_line("media"))
+        for args, message in ((("media", None, None, None), "nothing to change"),
+                              (("media", -1, None, None), "between"),
+                              (("media", None, 1001, None), "between")):
+            with self.subTest(args), self.assertRaisesRegex(fnas.FnasError, message):
+                fnas.set_policy(*args)
+        self.assertEqual(fake.calls, [])
+
+    def test_damaged_policy_falls_back_to_the_default(self):
+        for value in ("-", "1,2", "a,b,c", "1,2,3,4"):
+            self.assertEqual(fnas.parse_policy(value), fnas.DEFAULT_POLICY)
+
+    # Backup
+
+    def two_pools(self):
+        return self.fake(pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n")
+
+    def test_backup_needs_a_second_writable_pool(self):
+        fake = self.fake(pools="tank\t100\t1\t99\tONLINE\toff\nold\t100\t1\t99\tONLINE\ton\n")
+        for source, target, message in (("tank", "tank", "second pool"), ("tank", "usb", "usb"),
+                                        ("tank", "old", "old")):
+            with self.subTest(target), self.assertRaisesRegex(fnas.FnasError, message):
+                fnas.set_backup(source, target)
+        self.assertEqual(fake.calls, [])
+        self.assertIsNone(fnas.read_json(fnas.BACKUP_FILE))
+
+    def test_backup_dataset_is_never_mounted(self):
+        fake = self.two_pools()
+        fnas.set_backup("tank", "usb")
+        self.assertIn(("zfs", "create", "-o", "mountpoint=none", "usb/fellowship-backup"), fake.calls)
+
+    def test_backup_keeps_properties_and_its_own_snapshot(self):
+        fake = self.two_pools()
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        fnas.run_backup()
+        syncoid = [c for c in fake.calls if c[0] == "syncoid"][0]
+        self.assertIn("--sendoptions=p", syncoid)
+        self.assertNotIn("--no-sync-snap", syncoid)
+        self.assertEqual(syncoid[-2:], ("tank/shares", "usb/fellowship-backup/tank/shares"))
+        self.assertIn("last_success", fnas.read_json(fnas.BACKUP_STATE))
+
+    def test_failed_backup_alerts_and_keeps_the_last_success(self):
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        fnas.write_json(fnas.BACKUP_STATE, {"last_success": 5})
+        self.use(ProtectionFake(pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n",
+                                syncoid_error="CRITICAL: no space", created=int(fnas.time.time())))
+        with self.assertRaisesRegex(fnas.FnasError, "no space"):
+            fnas.run_backup()
+        self.assertEqual(fnas.read_json(fnas.BACKUP_STATE)["last_success"], 5)
+        self.assertEqual(self.titles(), ["Backup failed"])
+
+    def test_missing_backup_pool_fails_without_running_syncoid(self):
+        fake = self.fake(created=int(fnas.time.time()))
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        with self.assertRaisesRegex(fnas.FnasError, "usb isn't imported"):
+            fnas.run_backup()
+        self.assertFalse([c for c in fake.calls if c[0] == "syncoid"])
+
+    def backup_fake(self, datasets=""):
+        fake = self.use(ProtectionFake(
+            datasets, pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n"))
+        fake.backups = ("usb/fellowship-backup\nusb/fellowship-backup/tank\n"
+                        "usb/fellowship-backup/tank/shares\nusb/fellowship-backup/tank/shares/media\n")
+        return fake
+
+    def test_restore_never_replaces_a_share(self):
+        fake = self.backup_fake(share_line("Media"))
+        with self.assertRaisesRegex(fnas.FnasError, "never replaces"):
+            fnas.restore_backup("media", "usb", None)
+        self.assertEqual(fake.calls, [])
+
+    def test_restore_uses_the_current_subnet(self):
+        fake = self.backup_fake()
+        real = fake.__class__.__call__
+
+        def restored(*command, check=True, stdin=None):
+            if command[0] == "syncoid":
+                fake.datasets = share_line("media", sharenfs="rw=@10.9.9.0/24")
+                fake.existing = False
+            return real(fake, *command, check=check, stdin=stdin)
+
+        self.use(restored)
+        fnas.restore_backup("media", "usb", None)
+        self.assertIn(("syncoid", "--quiet", "--no-sync-snap", "--sendoptions=p",
+                       "usb/fellowship-backup/tank/shares/media", "tank/shares/media"), fake.calls)
+        value = fnas.sharenfs_value("shared", "192.168.1.0/24")
+        self.assertIn(("zfs", "set", f"sharenfs={value}", "tank/shares/media"), fake.calls)
+
+    def test_restore_of_an_unknown_backup(self):
+        self.backup_fake()
+        with self.assertRaisesRegex(fnas.FnasError, "no backup of docs"):
+            fnas.restore_backup("docs", "usb", None)
+
+    # Alerts
+
+    def test_alerts_are_kept_with_no_channels(self):
+        self.assertEqual(fnas.send_alert("warning", "Two\nlines", "body"), [])
+        self.assertEqual(self.titles(), ["Two lines"])
+
+    def test_alert_log_stays_bounded(self):
+        with mock.patch.object(fnas, "MAX_ALERTS", 3):
+            for number in range(5):
+                fnas.send_alert("info", str(number), "body")
+        self.assertEqual(self.titles(), ["2", "3", "4"])
+
+    def test_email_reaches_msmtp(self):
+        fake = self.fake()
+        fnas.set_email("me@example.com", None, "mail.example.com", 587, "me", "starttls", 'pa"ss')
+        self.assertEqual(fnas.send_alert("critical", "Pool bad", "body"), [])
+        self.assertIn("Subject: [", fake.mail)
+        self.assertIn("To: me@example.com", fake.mail)
+
+    def test_undelivered_alert_is_still_kept(self):
+        fnas.set_alert_channel("ntfy", {"url": "http://127.0.0.1:9/topic"})
+        failures = fnas.send_alert("critical", "Pool bad", "body")
+        self.assertIn("ntfy", failures[0])
+        self.assertEqual(self.alerts()[0]["undelivered"], failures)
+
+    def test_undelivered_alerts_are_retried_where_they_failed(self):
+        fnas.set_alert_channel("email", {"to": "a@b.c", "from": "a@b.c"})
+        fnas.set_alert_channel("ntfy", {"url": "http://x/y"})
+        sent = []
+        down = mock.Mock(side_effect=fnas.FnasError("ntfy: unreachable"))
+        with mock.patch.object(fnas, "send_email", lambda *a: sent.append("email")), \
+                mock.patch.object(fnas, "send_ntfy", down):
+            fnas.send_alert("critical", "Pool bad", "body")
+        self.assertEqual(sent, ["email"])
+
+        with mock.patch.object(fnas, "send_email", lambda *a: sent.append("email")), \
+                mock.patch.object(fnas, "send_ntfy", lambda *a: sent.append("ntfy")):
+            fnas.retry_alerts(fnas.time.time())
+            fnas.retry_alerts(fnas.time.time())
+        self.assertEqual(sent, ["email", "ntfy"])
+        self.assertEqual(self.alerts()[0]["undelivered"], [])
+
+    def test_old_undelivered_alerts_are_dropped(self):
+        fnas.set_alert_channel("ntfy", {"url": "http://x/y"})
+        with mock.patch.object(fnas, "send_ntfy", side_effect=fnas.FnasError("ntfy: unreachable")):
+            fnas.send_alert("critical", "Pool bad", "body")
+        with mock.patch.object(fnas, "send_ntfy") as ntfy:
+            fnas.retry_alerts(fnas.time.time() + fnas.RETRY_FOR + 1)
+        ntfy.assert_not_called()
+
+    def test_mail_password_stays_private_and_escaped(self):
+        fnas.set_email("me@example.com", None, "mail.example.com", 587, "me", "starttls", 'a"b\\c')
+        for path in (fnas.MSMTP_FILE, fnas.SECRETS_FILE):
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        with open(fnas.MSMTP_FILE) as file:
+            self.assertIn('password "a\\"b\\\\c"\n', file.read())
+        with open(fnas.ALERTS_FILE) as file:
+            self.assertNotIn('a\\"b', file.read())
+
+    def test_mail_settings_cant_add_config_lines(self):
+        cases = [("a@b.c\npasswordeval x", "mail.example.com", ""),
+                 ("me@example.com", "mail\neval x", ""),
+                 ("me@example.com", "mail.example.com", "me\npasswordeval x")]
+        for to, host, user in cases:
+            with self.subTest(to), self.assertRaises(fnas.FnasError):
+                fnas.set_email(to, None, host, 587, user, "starttls", None)
+        with self.assertRaises(fnas.FnasError):
+            fnas.set_email("me@example.com", None, "m.example.com", 587, "me", "on", "a\nb")
+        self.assertFalse(os.path.exists(fnas.MSMTP_FILE))
+
+    def test_ntfy_needs_a_web_address(self):
+        for url in ("ftp://x/y", "file:///etc/passwd", "ntfy.sh/topic", "http://a b/c"):
+            with self.subTest(url), self.assertRaises(fnas.FnasError):
+                fnas.set_ntfy(url, None)
+
+    def test_turning_email_off_removes_its_password(self):
+        fnas.set_email("me@example.com", None, "m.example.com", 587, "me", "on", "secret")
+        fnas.turn_off_email()
+        self.assertEqual(fnas.read_json(fnas.SECRETS_FILE), {})
+        self.assertFalse(os.path.exists(fnas.MSMTP_FILE))
+        self.assertEqual(fnas.alert_channels(), {})
+
+    # Checks
+
+    def healthy(self, **kwargs):
+        kwargs.setdefault("created", int(fnas.time.time()))
+        return self.fake(**kwargs)
+
+    def test_quiet_when_all_is_well(self):
+        self.healthy()
+        self.assertEqual(fnas.run_checks(), [])
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_full_pool_alerts_once_then_daily_then_clears(self):
+        self.healthy(pools="tank\t100\t85\t15\tONLINE\toff\n")
+        fnas.run_checks()
+        fnas.run_checks()
+        self.assertEqual(self.titles(), ["Pool tank is 85% full"])
+
+        state = fnas.read_json(fnas.CHECK_STATE)
+        state["pool-full-warning-tank"]["sent"] -= fnas.REMIND_AFTER
+        fnas.write_json(fnas.CHECK_STATE, state)
+        fnas.run_checks()
+        self.assertEqual(len(self.alerts()), 2)
+
+        self.healthy()
+        fnas.run_checks()
+        self.assertEqual(self.titles()[-1], "Resolved: Pool tank is 85% full")
+        self.assertEqual(fnas.read_json(fnas.CHECK_STATE), {})
+
+    def test_a_nearly_full_pool_is_critical(self):
+        found = fnas.pool_findings([{"name": "tank", "allocated": 95, "size": 100}])
+        self.assertEqual(found[0]["severity"], "critical")
+
+    def test_scrub_age_comes_from_zpool_status(self):
+        status = ("  pool: tank\n state: ONLINE\n  scan: scrub repaired 0B in 00:00:01 with 0 errors "
+                  "on Sun Nov  8 00:24:01 2026\nconfig:\n")
+        self.healthy(status=status)
+        expected = fnas.datetime.datetime(2026, 11, 8, 0, 24, 1).timestamp()
+        self.assertEqual(fnas.last_scrub("tank"), expected)
+        self.assertEqual(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE - 1), [])
+        self.assertEqual(len(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE + 1)), 1)
+
+    def test_resilver_is_not_a_scrub(self):
+        self.healthy(status="  scan: resilvered 1G in 00:01:00 with 0 errors on Sun Nov  8 00:24:01 2026\n",
+                     created=77)
+        self.assertEqual(fnas.last_scrub("tank"), 77)
+
+    def test_a_never_scrubbed_pool_counts_from_its_creation(self):
+        self.healthy(status="  scan: none requested\n", created=77)
+        self.assertEqual(fnas.last_scrub("tank"), 77)
+
+    def share(self, policy=None, readonly=False):
+        return {"name": "media", "dataset": "tank/shares/media", "readonly": readonly,
+                "policy": policy or dict(fnas.DEFAULT_POLICY)}
+
+    def test_snapshots_that_stop_are_noticed(self):
+        now = 1000 * fnas.DAY
+        self.fake(snapshots=f"tank/shares/media@autosnap_a\t{now - 4 * fnas.HOUR}\t0\n")
+        self.assertEqual(len(fnas.snapshot_findings([self.share()], now)), 1)
+        self.assertEqual(fnas.snapshot_findings([self.share()], now - 2 * fnas.HOUR), [])
+
+    def test_syncoids_snapshots_dont_count_as_sanoid_working(self):
+        now = 1000 * fnas.DAY
+        self.fake(snapshots=f"tank/shares/media@syncoid_fellowship_x\t{now}\t0\n")
+        self.assertEqual(len(fnas.snapshot_findings([self.share()], now)), 1)
+
+    def test_a_new_share_gets_time_for_its_first_snapshot(self):
+        now = 1000 * fnas.DAY
+        self.fake(created=now - fnas.HOUR)
+        self.assertEqual(fnas.snapshot_findings([self.share()], now), [])
+
+    def test_shares_without_snapshots_are_left_alone(self):
+        self.fake(created=0)
+        off = self.share({"hourly": 0, "daily": 0, "monthly": 0})
+        self.assertEqual(fnas.snapshot_findings([off, self.share(readonly=True)], 1000 * fnas.DAY), [])
+
+    def test_a_failed_snapshot_service_is_critical(self):
+        self.fake(sanoid_failed=True)
+        self.assertEqual(fnas.snapshot_findings([], 0)[0]["key"], "sanoid-failed")
+
+    def test_backup_overdue(self):
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        self.assertEqual(fnas.backup_findings(fnas.BACKUP_MAX_AGE - 1), [])
+        self.assertEqual(fnas.backup_findings(fnas.BACKUP_MAX_AGE + 1)[0]["key"], "backup-overdue")
+        fnas.write_json(fnas.BACKUP_STATE, {"last_success": fnas.BACKUP_MAX_AGE})
+        self.assertEqual(fnas.backup_findings(fnas.BACKUP_MAX_AGE + 1), [])
+
+    def test_no_backup_job_means_no_backup_alerts(self):
+        self.assertEqual(fnas.backup_findings(10 ** 10), [])
+
+    def test_newest_kernel_needs_a_zfs_module(self):
+        for kernel in ("6.12.9-amd64", "6.12.10-amd64"):
+            os.mkdir(self.path("modules", kernel))
+        self.assertIn("6.12.10-amd64", fnas.kernel_findings()[0]["title"])
+        os.makedirs(self.path("modules", "6.12.10-amd64", "updates", "dkms"))
+        with open(self.path("modules", "6.12.10-amd64", "updates", "dkms", "zfs.ko.xz"), "w"):
+            pass
+        self.assertEqual(fnas.kernel_findings(), [])
+
+    # Saved settings
+
+    def test_settings_reach_the_pool_without_secrets(self):
+        self.fake(share_line("media"))
+        fnas.set_email("me@example.com", None, "m.example.com", 587, "me", "on", "hunter2")
+        fnas.set_secret("ntfy_token", "tk_private")
+        fnas.save_config()
+        with open(os.path.join(self.pool_dir, "config.json")) as file:
+            text = file.read()
+        self.assertNotIn("hunter2", text)
+        self.assertNotIn("tk_private", text)
+        self.assertEqual(self.saved()["lan"], "192.168.1.0/24")
+        self.assertEqual(self.saved()["shares"][0]["name"], "media")
+
+    def test_a_fresh_install_cant_overwrite_what_it_hasnt_restored(self):
+        self.fake()
+        self.write_saved(lan="10.0.0.0/24")
+        fnas.after_change()
+        self.assertEqual(self.saved()["lan"], "10.0.0.0/24")
+        self.assertEqual(fnas.foreign_config_pools(), ["tank"])
+
+    def test_read_only_pools_are_left_alone(self):
+        self.fake(pools="tank\t100\t1\t99\tONLINE\ton\n")
+        fnas.save_config()
+        self.assertIsNone(self.saved())
+
+    def test_unrestored_settings_raise_an_alert(self):
+        self.healthy()
+        self.write_saved()
+        self.assertEqual(fnas.run_checks()[0]["key"], "config-tank")
+
+    def test_restore_brings_settings_back_and_claims_the_pool(self):
+        self.fake()
+        self.write_saved(lan="10.0.0.0/24", backup={"source": "tank", "target": "usb", "since": 1},
+                         alerts={"email": {"to": "me@example.com", "from": "me@example.com",
+                                           "host": "m.example.com", "port": 587, "user": "me",
+                                           "tls": "on"},
+                                 "ntfy": {"url": "https://ntfy.sh/topic"}})
+        notes = fnas.restore_config("tank")
+        self.assertEqual(fnas.lan_subnet(), "10.0.0.0/24")
+        self.assertEqual(fnas.read_json(fnas.BACKUP_FILE)["target"], "usb")
+        self.assertIn("password", notes[0])
+        self.assertTrue(fnas.alert_channels()["email"]["needs_password"])
+        self.assertEqual(fnas.foreign_config_pools(), [])
+
+    def test_restore_claims_every_pool_the_old_install_saved_to(self):
+        self.fake(pools="".join(f"{p}\t100\t1\t99\tONLINE\toff\n" for p in ("tank", "usb", "spare")))
+        paths = {}
+        for pool, install in (("tank", "old"), ("usb", "old"), ("spare", "someone-else")):
+            paths[pool] = os.path.join(self.root, f"{pool}.json")
+            fnas.write_json(paths[pool], {"version": 1, "install": install, "saved": 1, "lan": None,
+                                          "backup": None, "alerts": {}, "shares": [], "users": []})
+        with mock.patch.object(fnas, "config_path", side_effect=paths.get):
+            fnas.restore_config("tank")
+            self.assertEqual(fnas.foreign_config_pools(), ["spare"])
+
+    def test_restore_trusts_nothing_on_the_disk(self):
+        email_settings = {"to": "a@b.c", "from": "a@b.c", "host": "m\npasswordeval evil", "port": 25,
+                          "user": "", "tls": "on"}
+        cases = [{"alerts": {"email": email_settings}},
+                 {"alerts": {"ntfy": {"url": "file:///etc/shadow"}}},
+                 {"backup": {"source": "../x", "target": "usb"}},
+                 {"lan": "0.0.0.0/0"}]
+        user = {"name": "sam", "uid": 1001, "gid": 1001, "group": "sam", "comment": ""}
+        for fields in cases:
+            self.fake()
+            self.write_saved(users=[user], **fields)
+            with self.subTest(fields), self.assertRaises(fnas.FnasError), \
+                    mock.patch.object(fnas, "restore_user") as restore_user:
+                fnas.restore_config("tank")
+            restore_user.assert_not_called()
+            self.assertFalse(os.path.exists(fnas.MSMTP_FILE))
+
+    def test_restore_needs_saved_settings_it_understands(self):
+        self.fake()
+        with self.assertRaisesRegex(fnas.FnasError, "no saved settings"):
+            fnas.restore_config("tank")
+        self.write_saved(version=99)
+        with self.assertRaisesRegex(fnas.FnasError, "different version"):
+            fnas.restore_config("tank")
+
+    def test_restored_users_keep_their_ids(self):
+        fake = self.fake()
+        user = {"name": "sam", "uid": 1001, "gid": 1001, "group": "sam", "comment": "Sam"}
+        with mock.patch.object(fnas.pwd, "getpwnam", side_effect=KeyError), \
+                mock.patch.object(fnas.pwd, "getpwuid", side_effect=KeyError), \
+                mock.patch.object(fnas.grp, "getgrgid", side_effect=KeyError):
+            self.assertIn("set a password", fnas.restore_user(user))
+        self.assertIn(("groupadd", "--gid", "1001", "sam"), fake.calls)
+        self.assertIn(("useradd", "--uid", "1001", "--gid", "1001", "--comment", "Sam",
+                       "--create-home", "--shell", "/bin/bash", "sam"), fake.calls)
+
+    def test_user_clashes_are_reported_and_nothing_changes(self):
+        fake = self.fake()
+        user = {"name": "sam", "uid": 1001, "gid": 1001, "group": "sam", "comment": ""}
+        other = SimpleNamespace(pw_uid=1000, pw_name="tester")
+        with mock.patch.object(fnas.pwd, "getpwnam", return_value=other):
+            self.assertIn("files won't match", fnas.restore_user(user))
+        with mock.patch.object(fnas.pwd, "getpwnam", side_effect=KeyError), \
+                mock.patch.object(fnas.pwd, "getpwuid", return_value=other):
+            self.assertIn("belongs to tester", fnas.restore_user(user))
+        self.assertEqual(fake.calls, [])
+
+    def test_saved_users_are_checked(self):
+        fake = self.fake()
+        for user in ({"name": "root", "uid": 0, "gid": 0, "group": "root"},
+                     {"name": "a;b", "uid": 1001, "gid": 1001, "group": "a"},
+                     {"name": "sam", "uid": 1001, "gid": 1001, "group": None}):
+            with self.subTest(user):
+                self.assertIn("skipped", fnas.restore_user(user))
+        self.assertEqual(fake.calls, [])
+
+    def test_adopt_needs_confirmation(self):
+        self.fake()
+        self.write_saved()
+        with self.assertRaisesRegex(fnas.FnasError, "replace saved settings on tank"):
+            fnas.adopt_config("tank", "yes")
+        self.assertEqual(self.saved()["install"], "old")
+        fnas.adopt_config("tank", "replace saved settings on tank")
+        self.assertEqual(self.saved()["install"], fnas.install_id())
 
 
 class Parser(unittest.TestCase):

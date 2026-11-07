@@ -1,0 +1,4 @@
+#!/bin/sh
+# smartd runs this for each disk problem
+exec /usr/sbin/fellowship-nas-notify --severity critical \
+    "Disk ${SMARTD_DEVICE:-unknown}: ${SMARTD_FAILTYPE:-SMART warning}" "${SMARTD_MESSAGE:-See smartctl -a}"

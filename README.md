@@ -181,6 +181,48 @@ sudo fnas lan set 192.168.1.0/24
 
 Anyone connecting over SMB needs a Samba password, set with `sudo smbpasswd -a USER` for an existing user. `share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
 
+## NAS Protection
+
+**Snapshots** start on their own for every share. Each keeps 24 hourly, 30 daily and 6 monthly snapshots, which appear in Windows as Previous Versions:
+
+```bash
+sudo fnas snapshot list media
+sudo fnas snapshot policy media --hourly 48 --monthly 12
+```
+
+A policy of all zeros stops new snapshots and keeps the ones already there.
+
+**Backup** copies every share to a second pool, such as a USB disk, at 3am each night. If the pool is unplugged, the backup fails and an alert says so, and the next run picks up where the last one stopped:
+
+```bash
+sudo fnas backup set tank usb
+sudo fnas backup run
+sudo fnas backup show
+sudo fnas backup list
+sudo fnas backup restore media
+```
+
+`restore` brings back a share that no longer exists, with its snapshots and settings, and never replaces one. Add `--to POOL` to restore to a new pool.
+
+**Alerts** cover failing disks, pool faults and errors, pools over 80% full, stopped snapshots, overdue scrubs and backups, and kernels with no ZFS module. They're always kept on the NAS, and can also go to email or an [ntfy](https://ntfy.sh) topic:
+
+```bash
+sudo fnas alert list
+echo 'PASSWORD' | sudo fnas alert email-set --to me@example.com --host smtp.example.com --user me@example.com --password-stdin
+sudo fnas alert ntfy-set https://ntfy.sh/a-long-private-topic
+sudo fnas alert test
+sudo fnas check
+```
+
+**Saved settings:** every pool keeps a copy of the LAN subnet, users and their IDs, alert channels without passwords, and the backup job. After reinstalling, import the pool and bring them back:
+
+```bash
+sudo fnas pool import tank --force
+sudo fnas config restore tank
+```
+
+`--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the ones to set again, and SMB users need `sudo smbpasswd -a USER`. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
+
 To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with four data disks.
 
 ## Customization Guide

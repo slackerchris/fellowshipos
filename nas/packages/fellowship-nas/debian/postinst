@@ -12,6 +12,11 @@ if [ "$1" = "configure" ]; then
 
     # Picks up the NFSv4-only setting
     systemctl try-restart nfs-server.service
+
+    # Picks up the alert hook
+    systemctl try-restart zfs-zed.service
+    systemctl daemon-reload
+    systemctl restart smartmontools.service || true
 fi
 
 #DEBHELPER#

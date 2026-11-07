@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up FellowshipNAS shares to the second pool
+After=zfs.target
+ConditionPathExists=/etc/fellowshipos/nas-backup.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fnas backup run

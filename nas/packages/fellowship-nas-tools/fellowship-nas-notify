@@ -1,0 +1,3 @@
+#!/bin/sh
+# The one way in for alerts: fellowship-nas-notify [--severity LEVEL] TITLE MESSAGE
+exec /usr/sbin/fnas alert send "$@"

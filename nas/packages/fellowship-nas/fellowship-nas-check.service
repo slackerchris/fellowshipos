@@ -1,0 +1,7 @@
+[Unit]
+Description=Look for FellowshipNAS problems
+After=zfs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fnas check
