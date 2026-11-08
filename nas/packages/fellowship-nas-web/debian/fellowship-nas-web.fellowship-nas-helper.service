@@ -1,0 +1,13 @@
+[Unit]
+Description=FellowshipNAS desktop helper (passwords and fnas)
+
+[Service]
+# Unsandboxed on purpose: it runs fnas, which manages disks, services and
+# accounts. It only listens on a socket the web front's account can reach.
+ExecStart=/usr/lib/fellowship-nas-web/fellowship-nas-helper
+RuntimeDirectory=fellowship-nas-web
+RuntimeDirectoryMode=0750
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

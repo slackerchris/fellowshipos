@@ -234,7 +234,22 @@ The desktop is the interface from the start. Every app opens in a window; there 
 - **Phone:** windows open full-screen and the taskbar becomes a bottom bar.
 - **Built with:** TypeScript, Preact 10 and esbuild (chosen in Phase 4). Phase 4's Setup, Storage, Shares and Health code moves into windows.
 - **Non-admins** see only Files and their own settings.
-- **Look:** FellowshipOS's own palette, icons and wallpaper; light and dark themes. Inspired by the windowed feel of DSM and FygoOS, without copied icons, layouts or artwork.
+- **Look (chosen by Chris):** a dark forest palette, with the fantasy in the atmosphere only. Controls stay clean and readable: solid panels, softly rounded windows, crisp icons, gold used sparingly. The theme follows the device; the light theme is the same palette in daylight.
+
+  | Element | Colour |
+  | --- | --- |
+  | Desktop background | Midnight forest `#101A17` |
+  | Windows and panels | Dark pine `#1B2923` |
+  | Raised surfaces | Moss charcoal `#29392F` |
+  | Borders | Weathered green `#405247` |
+  | Primary text | Pale parchment `#EFE7D5` |
+  | Secondary text | Muted linen `#B7B29E` |
+  | Buttons and selection | Aged gold `#C5A465` |
+  | Healthy | Leaf green `#86B88A` |
+  | Warnings | Amber `#E0A452` |
+  | Errors | Muted vermilion `#D87667` |
+
+  Misty mountain wallpaper, generated at build time, and a restrained serif for the FellowshipOS wordmark. Nothing is copied from DSM or FygoOS.
 
 **Apps in v1**
 
@@ -310,8 +325,8 @@ No phase starts until the previous gate passes in a VM. From Phase 6 on, the VM 
 | 2. Sharing | NFS, SMB, user ID modes | Mount from Linux and Windows; "Previous Versions" works | Done, except a real Windows client |
 | 3. Protection | Snapshots, backup, health, alerts, config copy | Failure tests pass from the CLI; a reinstall restores config | Done |
 | 4. Cockpit pages | Transfer test; Setup, Storage, Shares and Health on Cockpit | Superseded by revision 3 | Code carries over to Phase 5 |
-| 5. Web server and desktop | `fellowship-nas-web` with login, sessions, the helper split and the API; the desktop shell; Setup, Storage, Shares, Health, Alerts and Settings in windows; Cockpit removed | Full setup from the desktop in a browser; web security tests pass; non-admins can't reach admin apps or the API; no Cockpit installed | Next |
-| 6. Many drives and ZFS depth | Drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | 16-disk VM: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
+| 5. Web server and desktop | `fellowship-nas-web` with login, sessions, the helper split and the API; the desktop shell; Setup, Storage, Shares, Health, Alerts and Settings in windows; Cockpit removed | Full setup from the desktop in a browser; web security tests pass; non-admins can't reach admin apps or the API; no Cockpit installed | Done. Progress over server-sent events moves to Phase 6, with the long jobs it reports on |
+| 6. Many drives and ZFS depth | Progress for long jobs (server-sent events), drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | 16-disk VM: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
 | 7. mergerfs + SnapRAID | Engine, sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create, share, sync; fail a data disk and rebuild it; alerts for a missed sync | |
 | 8. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
 | 9. Files and remaining apps | Files, Snapshots and backup, Users | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
@@ -381,4 +396,4 @@ Web and access:
 | UID mismatch on NFS | Confusing permission errors | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 5." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 6." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

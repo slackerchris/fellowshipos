@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 REPO="$(pwd)/../../config/includes.chroot/usr/share/fellowshipos/nas-repo"
 WORK="$(mktemp -d)"
 
-for package in fellowship-nas-tools fellowship-nas fellowship-nas-smb fellowship-desktop; do
+for package in fellowship-nas-tools fellowship-nas fellowship-nas-smb fellowship-nas-web; do
     cp -r "$package" "$WORK/"
     if [ -d "$WORK/$package/web" ]; then
         # Bundled here, so the .deb needs no Node and the checkout gets no build files

@@ -531,7 +531,7 @@ if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
 fi
 if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ -f "$NAS_DONE_FLAG" ]; then
     NAS_ADDRESS=$(ip -4 route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
-    echo -e "  Finish setting up the NAS in a browser: ${BOLD}https://${NAS_ADDRESS:-this-machine}:9090${RESET}"
+    echo -e "  Finish setting up the NAS in a browser: ${BOLD}https://${NAS_ADDRESS:-this-machine}${RESET}"
     echo -e "  (log in as ${BOLD}$SETUP_USER${RESET}, then open NAS Setup)"
     echo ""
 fi

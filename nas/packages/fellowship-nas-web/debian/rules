@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+export GOCACHE := $(CURDIR)/debian/.gocache
+export GOFLAGS := -buildvcs=false -trimpath
+export GOTOOLCHAIN := local
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	go build -o debian/bin/ ./cmd/fellowship-nas-web ./cmd/fellowship-nas-helper
+
+override_dh_auto_test:
+	go test ./...
+
+override_dh_auto_install:
+
+override_dh_dwz:
+
+override_dh_installsystemd:
+	dh_installsystemd --name=fellowship-nas-helper
+	dh_installsystemd --name=fellowship-nas-web
+
+override_dh_auto_clean:
+	rm -rf debian/bin debian/.gocache
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

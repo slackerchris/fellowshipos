@@ -151,15 +151,28 @@ Notes:
 - The first-boot wizard currently offers `docker-node`, `monitor-node`, `storage-node`, and `nas-node` directly.
 - Server mode in the wizard can install nginx, Node.js, Python, PostgreSQL, Redis, and Traefik components.
 
-## NAS Web Pages
+## NAS Desktop
 
-These pages run on Cockpit for now. Phase 5 of [the plan](docs/fellowship-nas-plan.md) replaces Cockpit with FellowshipNAS's own web server and a desktop in the browser.
+FellowshipNAS has its own web server, `fellowship-nas-web`, which serves a desktop in the browser. After the wizard, open `https://NAS-ADDRESS` (the wizard prints it) and log in with your account on the NAS, the same one you use for SSH. The browser warns about the self-signed certificate until you accept it. **Settings → Certificate** shows its fingerprint to check, and takes your own certificate instead.
 
-After the wizard, open `https://NAS-ADDRESS:9090` (the wizard prints it), log in as the wizard's user and choose **NAS Setup**. It walks through storage, the LAN subnet, shares and SMB passwords, alerts and the nightly backup. **Storage**, **Shares** and **Health** stay in the menu afterwards, and Cockpit's own pages (logs, services, terminal) sit alongside them. The browser warns about Cockpit's self-signed certificate until you trust it.
+Apps open in windows that you can move, resize, minimise and maximise. The desktop remembers where they were in each browser. **Setup** walks through storage, the LAN subnet, shares and SMB passwords, alerts and the nightly backup. **Storage**, **Shares**, **Health**, **Alerts** and **Settings** sit on the desktop, with status widgets and a notification centre for problems. On a phone, windows open full screen.
 
-Only members of `nas-admins` can make changes; the wizard adds its user. Add someone else with `sudo usermod -aG nas-admins NAME`, and they log in again. A polkit rule lets that group run `fnas` and nothing else as root, so every change from the browser goes through the same checks as the CLI.
+Only members of `nas-admins` see the management apps; the wizard adds its user. Add someone else with `sudo usermod -aG nas-admins NAME`. Everyone else sees Settings, where they can set their own SMB password. Sessions end after 30 minutes idle or 12 hours, and repeated wrong passwords slow down and raise an alert.
 
-To work on the pages: `cd nas/packages/fellowship-desktop/web && npm install && npm run watch`, then copy `dist/` to `~/.local/share/cockpit/fellowship-desktop` on a test machine.
+The server runs as two processes:
+
+- `fellowship-nas-web` faces the network as the unprivileged `fnas-web` account.
+- `fellowship-nas-helper` runs as root behind a local socket. It checks passwords with PAM, keeps the sessions, and runs `fnas` for `nas-admins`, so every change from the browser goes through the same checks as the CLI.
+
+Check either with `systemctl status fellowship-nas-web fellowship-nas-helper`.
+
+To work on the desktop, run the real server with a stand-in `fnas` and sample data in a container:
+
+```bash
+nas/packages/fellowship-nas-web/dev/run.sh
+```
+
+Then open `http://localhost:8080` (the script lists the test accounts) and run `npm run watch` in `nas/packages/fellowship-nas-web/web`.
 
 ## NAS Storage
 

@@ -7,7 +7,7 @@ Standards-Version: 4.7.0
 
 Package: fellowship-nas-tools
 Architecture: all
-Depends: python3, util-linux, zfsutils-linux, smartmontools, ${misc:Depends}
+Depends: python3, util-linux, zfsutils-linux, smartmontools, openssl, systemd, ${misc:Depends}
 Description: FellowshipNAS command line tools
  The fnas helper, which validates and carries out storage, sharing and
  protection changes

@@ -1,0 +1,17 @@
+Source: fellowship-nas-web
+Section: admin
+Priority: optional
+Maintainer: slackerchris <slackerchris@gmail.com>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~), libpam0g-dev
+Standards-Version: 4.7.0
+
+Package: fellowship-nas-web
+Architecture: any
+Depends: fellowship-nas-tools (= ${source:Version}), libpam-runtime, adduser, ${shlibs:Depends}, ${misc:Depends}
+Conflicts: fellowship-desktop
+Replaces: fellowship-desktop
+Description: FellowshipNAS desktop in the browser
+ A web server, written for FellowshipNAS, that serves a windowed desktop for
+ managing storage, shares, health and alerts. The part facing the network runs
+ without special rights; a small helper checks passwords with PAM and runs
+ fnas for members of the nas-admins group.

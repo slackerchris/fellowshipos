@@ -1,0 +1,172 @@
+#!/usr/bin/python3
+"""A stand-in for fnas with sample data, so the desktop can be worked on
+without disks. Changes are kept in /tmp/fake-fnas.json. Never install this."""
+import json
+import os
+import sys
+import time
+
+STATE = "/tmp/fake-fnas.json"
+GB = 10 ** 9
+NOW = int(time.time())
+
+
+def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=()):
+    return {"path": f"/dev/sd{n}", "by_id": f"/dev/disk/by-id/ata-{model.replace(' ', '_')}_SN{n.upper()}0042",
+            "size": size, "model": model, "serial": f"SN{n.upper()}0042", "state": state, "reason": reason,
+            "temperature": temp, "hours": 18000, "verdict": verdict, "notes": list(notes)}
+
+
+DEFAULT = {
+    "pools": [{"name": "tank", "size": 16 * 10 ** 12, "allocated": 9 * 10 ** 12, "free": 7 * 10 ** 12,
+               "health": "ONLINE", "readonly": "off"}],
+    "shares": [
+        {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/tank/shares/media",
+         "mode": "shared", "nfs": True, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
+         "readonly": False},
+        {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/tank/shares/family",
+         "mode": "matched", "nfs": False, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
+         "readonly": False},
+    ],
+    "disks": [disk("a", 256 * GB, "Samsung SSD 870", "os", "holds the system"),
+              disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36),
+              disk("c", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 38),
+              disk("d", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 41, "watch",
+                   ["8 reallocated sectors: keep a spare disk ready"]),
+              disk("e", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 39),
+              disk("f", 4 * 10 ** 12, "WDC WD40EFRX", "empty", "", 33),
+              disk("g", 4 * 10 ** 12, "WDC WD40EFRX", "has-data", "has an ext4 file system", 32)],
+    "lan": "192.168.1.0/24",
+    "alerts": [{"time": NOW - 86400 * 2, "severity": "info", "title": "Test alert",
+                "message": "Alerts from this NAS are reaching you.", "undelivered": []},
+               {"time": NOW - 3600 * 5, "severity": "warning", "title": "Disk to watch",
+                "message": "ST8000VN004 SNDO042 has 8 reallocated sectors.", "undelivered": []}],
+    "channels": {"ntfy": {"url": "https://ntfy.sh/example-private-topic", "token": False}},
+    "backup": None,
+    "hostname": "fellowship",
+    "timezone": "Europe/London",
+}
+
+
+def fail(text):
+    print(f"fnas: {text}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main(args):
+    try:
+        with open(STATE) as file:
+            state = json.load(file)
+    except FileNotFoundError:
+        state = DEFAULT
+    as_json = args[:1] == ["--json"]
+    args = args[1:] if as_json else args
+    area, action = (args + ["", ""])[:2]
+    rest = args[2:]
+    out = None
+
+    if area == "pool" and action == "list":
+        out = state["pools"]
+    elif area == "pool" and action == "scan":
+        out = []
+    elif area == "pool" and action == "status":
+        out = "  pool: tank\n state: ONLINE\n  scan: scrub repaired 0B with 0 errors\nconfig:\n\ttank  ONLINE\n"
+    elif area == "pool" and action == "create":
+        name, chosen = rest[0], [a for a in rest[2:] if a.startswith("/dev")]
+        phrase = f"erase {len(chosen)} disk{'s' if len(chosen) != 1 else ''}"
+        if "--confirm" not in rest or rest[rest.index("--confirm") + 1] != phrase:
+            fail(f'confirm by passing --confirm "{phrase}"')
+        state["pools"].append({"name": name, "size": 4 * 10 ** 12, "allocated": 0, "free": 4 * 10 ** 12,
+                               "health": "ONLINE", "readonly": "off"})
+        for d in state["disks"]:
+            if d["by_id"] in chosen or d["path"] in chosen:
+                d["state"], d["reason"] = "in-use", f"in pool {name}"
+        out = f"Created pool {name}"
+    elif area == "pool" and action in ("scrub", "export"):
+        out = f"{action} {rest[0]}: done"
+    elif area == "disk":
+        out = [d for d in state["disks"] if "--all" in rest or d["state"] != "os"]
+    elif area == "share" and action == "list":
+        out = state["shares"]
+    elif area == "share" and action == "create":
+        name, pool = rest[0], rest[1]
+        state["shares"].append({"name": name, "pool": pool, "dataset": f"{pool}/shares/{name}",
+                                "path": f"/{pool}/shares/{name}", "mode": rest[rest.index("--mode") + 1],
+                                "nfs": "--nfs" in rest, "smb": "--smb" in rest,
+                                "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "readonly": False})
+        out = f"Created share {name}"
+    elif area == "share" and action == "set":
+        share = next(s for s in state["shares"] if s["name"] == rest[0])
+        for protocol in ("nfs", "smb"):
+            if f"--{protocol}" in rest:
+                share[protocol] = rest[rest.index(f"--{protocol}") + 1] == "on"
+        out = f"Updated share {rest[0]}"
+    elif area == "share" and action == "delete":
+        phrase = f"delete {rest[0]} and 3 snapshots"
+        if "--confirm" not in rest or rest[rest.index("--confirm") + 1] != phrase:
+            fail(f"this destroys {rest[0]} and its snapshots:\n    tank/shares/{rest[0]}@hourly-1\n"
+                 f"    tank/shares/{rest[0]}@daily-1\n    tank/shares/{rest[0]}@monthly-1\n"
+                 f'confirm by passing --confirm "{phrase}"')
+        state["shares"] = [s for s in state["shares"] if s["name"] != rest[0]]
+        out = f"Deleted share {rest[0]}"
+    elif area == "snapshot" and action == "policy":
+        out = f"{rest[0]} keeps " + " ".join(rest[1:])
+    elif area == "lan":
+        if action == "set":
+            state["lan"] = rest[0]
+        out = state["lan"]
+    elif area == "user":
+        sys.stdin.read()
+        out = f"{rest[0]} can log in to SMB shares"
+    elif area == "health":
+        out = {"problems": [{"key": "disk-watch", "severity": "warning", "title": "A disk needs watching",
+                             "message": "ST8000VN004 SND0042 has 8 reallocated sectors."}],
+               "disks": state["disks"]}
+    elif area == "alert" and action == "list":
+        out = state["alerts"]
+    elif area == "alert" and action == "show":
+        out = state["channels"]
+    elif area == "alert":
+        sys.stdin.read()
+        out = "Done"
+    elif area == "backup" and action == "show":
+        out = {"job": state["backup"]}
+    elif area == "backup" and action == "set":
+        state["backup"] = {"source": rest[0], "target": rest[1]}
+        out = f"Backing up {rest[0]} to {rest[1]} every night"
+    elif area == "system" and action == "show":
+        out = {"hostname": state["hostname"], "timezone": state["timezone"], "time": int(time.time()), "ntp": True,
+               "uptime": 86400 * 12 + 3600 * 5,
+               "certificate": {"subject": f"CN={state['hostname']}", "issuer": f"CN={state['hostname']}",
+                               "expires": NOW + 86400 * 3600, "fingerprint": "AB:CD:EF:01:23:45:67:89" * 4,
+                               "self_signed": True}}
+    elif area == "system" and action == "timezones":
+        out = ["America/Chicago", "America/New_York", "Europe/London", "UTC"]
+    elif area == "system" and action == "hostname":
+        state["hostname"] = rest[0]
+        out = f"This NAS is now called {rest[0]}"
+    elif area == "system" and action == "timezone":
+        state["timezone"] = rest[0]
+        out = f"The time zone is now {rest[0]}"
+    elif area == "system" and action in ("restart", "shutdown"):
+        phrase = "restart the NAS" if action == "restart" else "shut down the NAS"
+        if rest[-1:] != [phrase]:
+            fail(f'confirm by passing --confirm "{phrase}"')
+        out = "Not really: this is the fake fnas"
+    elif area == "system" and action == "certificate":
+        sys.stdin.read()
+        out = "The desktop restarts with the new certificate in a moment: reload the page"
+    else:
+        fail(f"the fake fnas doesn't know {' '.join(args)}")
+
+    # The desktop asks several things at once, so never leave a half-written file
+    with open(f"{STATE}.{os.getpid()}", "w") as file:
+        json.dump(state, file)
+    os.replace(f"{STATE}.{os.getpid()}", STATE)
+    if isinstance(out, str):
+        print(out)
+    else:
+        print(json.dumps(out, indent=2))
+
+
+main(sys.argv[1:])

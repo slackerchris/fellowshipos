@@ -1,0 +1,3 @@
+# The FellowshipNAS desktop accepts the same passwords as SSH
+@include common-auth
+@include common-account

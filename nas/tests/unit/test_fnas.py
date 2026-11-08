@@ -1094,3 +1094,74 @@ class SmbPassword(unittest.TestCase):
             with self.subTest(password), self.account(1000), self.assertRaises(fnas.FnasError):
                 fnas.set_smb_password("sam", password)
         self.run_mock.assert_not_called()
+
+
+class System(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        for name, value in {"WEB_DIR": self.dir, "WEB_CERT": f"{self.dir}/cert.pem",
+                            "WEB_KEY": f"{self.dir}/key.pem", "WEB_SELF_SIGNED": f"{self.dir}/self-signed"}.items():
+            patch = mock.patch.object(fnas, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.chown = mock.patch.object(fnas.os, "chown").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def make_pair(self, name):
+        key, cert = f"{self.dir}/{name}.key", f"{self.dir}/{name}.crt"
+        fnas.run("openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+                 "-nodes", "-days", "30", "-subj", f"/CN={name}", "-keyout", key, "-out", cert)
+        with open(cert) as c, open(key) as k:
+            return c.read(), k.read()
+
+    def test_accepts_a_matching_certificate_and_key(self):
+        cert, key = self.make_pair("nas.example")
+        open(fnas.WEB_SELF_SIGNED, "w").close()
+        fnas.set_certificate(key + cert)
+        info = fnas.certificate_info()
+        self.assertIn("nas.example", info["subject"])
+        self.assertFalse(info["self_signed"])
+        self.assertEqual(os.stat(fnas.WEB_KEY).st_mode & 0o777, 0o640)
+
+    def test_refuses_a_key_from_another_certificate(self):
+        cert, _ = self.make_pair("one")
+        _, other_key = self.make_pair("two")
+        with self.assertRaisesRegex(fnas.FnasError, "doesn't belong"):
+            fnas.set_certificate(cert + other_key)
+        self.assertFalse(os.path.exists(fnas.WEB_CERT))
+
+    def test_refuses_incomplete_bundles(self):
+        cert, key = self.make_pair("one")
+        for pem in ("", cert, key, cert + key + key):
+            with self.subTest(pem[:20]), self.assertRaisesRegex(fnas.FnasError, "PEM"):
+                fnas.set_certificate(pem)
+
+    def test_self_signed_names_the_host(self):
+        with mock.patch.object(fnas.socket, "gethostname", return_value="vault"):
+            fnas.make_self_signed()
+        info = fnas.certificate_info()
+        self.assertIn("CN=vault", info["subject"])
+        self.assertTrue(info["self_signed"])
+
+    def test_hostname_is_checked(self):
+        with mock.patch.object(fnas, "run") as run:
+            for name in ("", "-nas", "nas-", "NAS", "my_nas", "a" * 64, "nas.local"):
+                with self.subTest(name), self.assertRaises(fnas.FnasError):
+                    fnas.set_hostname(name)
+            run.assert_not_called()
+
+    def test_unknown_time_zone(self):
+        with mock.patch.object(fnas, "run", return_value=SimpleNamespace(stdout="Europe/London\nUTC\n")) as run, \
+                self.assertRaisesRegex(fnas.FnasError, "unknown time zone"):
+            fnas.set_timezone("Mars/Olympus")
+        self.assertEqual(run.call_count, 1)
+
+    def test_power_needs_the_phrase(self):
+        with mock.patch.object(fnas, "run") as run:
+            with self.assertRaisesRegex(fnas.FnasError, '"restart the NAS"'):
+                fnas.power("restart", "yes")
+            run.assert_not_called()
+            fnas.power("shutdown", "shut down the NAS")
+        self.assertEqual(run.call_args.args[-2:], ("systemctl", "poweroff"))

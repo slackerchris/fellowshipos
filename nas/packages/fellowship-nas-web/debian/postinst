@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # nas-admins manage the NAS from the desktop; fnas-web runs the part facing the network
+    getent group nas-admins > /dev/null || groupadd --system nas-admins
+    getent passwd fnas-web > /dev/null || adduser --system --group --home /nonexistent --no-create-home fnas-web
+fi
+
+#DEBHELPER#

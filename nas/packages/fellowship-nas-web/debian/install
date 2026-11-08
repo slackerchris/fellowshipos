@@ -1,0 +1,3 @@
+debian/bin/fellowship-nas-web usr/lib/fellowship-nas-web
+debian/bin/fellowship-nas-helper usr/lib/fellowship-nas-web
+web/dist/* usr/share/fellowship-nas-web
