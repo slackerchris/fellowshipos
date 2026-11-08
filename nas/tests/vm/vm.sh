@@ -31,7 +31,7 @@ qemu() {
         -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
         -drive "if=pflash,format=raw,file=$WORK/vars.fd" \
         "${disks[@]}" \
-        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22 \
+        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:9090-:9090 \
         -display none \
         -serial "file:$WORK/serial-$MODE.log" \
         -monitor "unix:$WORK/monitor.sock,server,nowait" \

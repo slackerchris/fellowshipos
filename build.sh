@@ -41,7 +41,7 @@ run "Building" docker run --rm \
     bash -c '
         set -e
         apt-get update -qq
-        apt-get install -y -qq live-build debhelper
+        apt-get install -y -qq live-build debhelper nodejs npm
         nas/packages/build.sh
         lb clean
         lb config

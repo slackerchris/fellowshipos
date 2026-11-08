@@ -1014,3 +1014,83 @@ class Parser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiskHealth(unittest.TestCase):
+    DISK = {"path": "/dev/sda", "by_id": "/dev/disk/by-id/ata-X", "model": "X", "serial": "1",
+            "size": 1, "state": "free"}
+
+    def health(self, data):
+        output = SimpleNamespace(stdout=json.dumps(data) if data is not None else "", returncode=0)
+        with mock.patch.object(fnas, "run", return_value=output):
+            return fnas.disk_health(self.DISK)
+
+    def ata(self, passed=True, reallocated=0, temperature=35):
+        return {"smart_status": {"passed": passed}, "temperature": {"current": temperature},
+                "power_on_time": {"hours": 1200},
+                "ata_smart_attributes": {"table": [{"id": 5, "raw": {"value": reallocated}},
+                                                   {"id": 9, "raw": {"value": 1200}}]}}
+
+    def test_healthy_disk(self):
+        health = self.health(self.ata())
+        self.assertEqual((health["verdict"], health["notes"], health["hours"]), ("healthy", [], 1200))
+
+    def test_counters_and_heat_need_watching(self):
+        health = self.health(self.ata(reallocated=8, temperature=58))
+        self.assertEqual(health["verdict"], "watch")
+        self.assertEqual(health["notes"], ["8 reallocated sectors", "running hot at 58 °C"])
+
+    def test_failing_disk(self):
+        health = self.health(self.ata(passed=False))
+        self.assertEqual(health["verdict"], "failing")
+        self.assertIn("replace it soon", health["notes"][0])
+
+    def test_nvme(self):
+        health = self.health({"smart_status": {"passed": True},
+                              "nvme_smart_health_information_log": {"media_errors": 2,
+                                                                    "percentage_used": 95}})
+        self.assertEqual(health["notes"], ["2 media errors", "has used 95% of its rated life"])
+        health = self.health({"smart_status": {"passed": True},
+                              "nvme_smart_health_information_log": {"critical_warning": 4}})
+        self.assertEqual(health["verdict"], "failing")
+
+    def test_disk_without_smart(self):
+        for data in (None, {"smartctl": {"exit_status": 4}}):
+            with self.subTest(data):
+                self.assertEqual(self.health(data)["verdict"], "unknown")
+
+
+class SmbPassword(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        patch = mock.patch.object(fnas, "SMB_DIR", directory.name)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.run_mock = mock.patch.object(fnas, "run").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def account(self, uid, shell="/bin/bash"):
+        return mock.patch.object(fnas.pwd, "getpwnam", return_value=SimpleNamespace(pw_uid=uid, pw_shell=shell))
+
+    def test_sets_the_password_through_stdin(self):
+        with self.account(1000):
+            fnas.set_smb_password("sam", "s3cret word")
+        self.run_mock.assert_called_once_with("smbpasswd", "-s", "-a", "sam",
+                                              stdin="s3cret word\ns3cret word\n")
+
+    def test_only_peoples_accounts(self):
+        with self.account(0), self.assertRaisesRegex(fnas.FnasError, "isn't a person's account"):
+            fnas.set_smb_password("root", "x")
+        with self.account(3000, "/usr/sbin/nologin"), self.assertRaisesRegex(fnas.FnasError, "isn't a person's"):
+            fnas.set_smb_password("nas-share", "x")
+        with mock.patch.object(fnas.pwd, "getpwnam", side_effect=KeyError), \
+                self.assertRaisesRegex(fnas.FnasError, "no such user"):
+            fnas.set_smb_password("nobody-here", "x")
+        self.run_mock.assert_not_called()
+
+    def test_password_must_be_one_line(self):
+        for password in ("", "a\nb"):
+            with self.subTest(password), self.account(1000), self.assertRaises(fnas.FnasError):
+                fnas.set_smb_password("sam", password)
+        self.run_mock.assert_not_called()

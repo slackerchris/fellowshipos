@@ -27,7 +27,12 @@ fi
 echo "deb [trusted=yes] file:/usr/share/fellowshipos/nas-repo ./" > /etc/apt/sources.list.d/fellowship-nas.list
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y fellowship-nas fellowship-nas-smb
+apt-get install -y fellowship-nas fellowship-nas-smb fellowship-desktop
+
+# The web pages let nas-admins manage the NAS; the wizard's user is the first one
+if [ -n "$SUDO_USER" ] && id "$SUDO_USER" > /dev/null 2>&1; then
+    usermod -aG nas-admins "$SUDO_USER"
+fi
 
 # The role can pull in a newer kernel than the one running
 NEWEST_KERNEL=$(ls -v /lib/modules | tail -1)

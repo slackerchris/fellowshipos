@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Members may run fnas through pkexec, and nothing else as root
+    getent group nas-admins > /dev/null || groupadd --system nas-admins
+    systemctl enable --now cockpit.socket || true
+fi
+
+#DEBHELPER#

@@ -151,6 +151,16 @@ Notes:
 - The first-boot wizard currently offers `docker-node`, `monitor-node`, `storage-node`, and `nas-node` directly.
 - Server mode in the wizard can install nginx, Node.js, Python, PostgreSQL, Redis, and Traefik components.
 
+## NAS Web Pages
+
+These pages run on Cockpit for now. Phase 5 of [the plan](docs/fellowship-nas-plan.md) replaces Cockpit with FellowshipNAS's own web server and a desktop in the browser.
+
+After the wizard, open `https://NAS-ADDRESS:9090` (the wizard prints it), log in as the wizard's user and choose **NAS Setup**. It walks through storage, the LAN subnet, shares and SMB passwords, alerts and the nightly backup. **Storage**, **Shares** and **Health** stay in the menu afterwards, and Cockpit's own pages (logs, services, terminal) sit alongside them. The browser warns about Cockpit's self-signed certificate until you trust it.
+
+Only members of `nas-admins` can make changes; the wizard adds its user. Add someone else with `sudo usermod -aG nas-admins NAME`, and they log in again. A polkit rule lets that group run `fnas` and nothing else as root, so every change from the browser goes through the same checks as the CLI.
+
+To work on the pages: `cd nas/packages/fellowship-desktop/web && npm install && npm run watch`, then copy `dist/` to `~/.local/share/cockpit/fellowship-desktop` on a test machine.
+
 ## NAS Storage
 
 The `nas-node` role installs ZFS from the local apt repo on the ISO. Manage pools with `fnas`, which hides the OS disk and refuses disks that are in use:
@@ -179,7 +189,7 @@ sudo fnas lan set 192.168.1.0/24
 - `shared`: everyone reads and writes as the `nas-share` account, so each protocol can edit the other's files. Use it for media and family folders.
 - `matched`: only the owner gets in, and NFS clients need the same numeric user ID as the NAS. Use it for personal folders.
 
-Anyone connecting over SMB needs a Samba password, set with `sudo smbpasswd -a USER` for an existing user. `share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
+Anyone connecting over SMB needs a Samba password, set on the Shares page or with `sudo fnas user smb-password USER --password-stdin` (type the password, then Ctrl-D). `share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
 
 ## NAS Protection
 
@@ -221,7 +231,7 @@ sudo fnas pool import tank --force
 sudo fnas config restore tank
 ```
 
-`--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the ones to set again, and SMB users need `sudo smbpasswd -a USER`. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
+`--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the ones to set again, and SMB users need their password set again on the Shares page or with `fnas user smb-password`. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
 
 To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with four data disks.
 

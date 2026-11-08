@@ -1,83 +1,70 @@
-# FellowshipNAS Architecture Plan (revision 2)
+# FellowshipNAS Architecture Plan (revision 3)
 
-Nov 5, 2026 · @Chris
+Nov 7, 2026 · @Chris
 
-Revises the original plan after a design review and a check against this repo. The main change is a new Phase 0: FellowshipOS can't install to disk yet, and everything else depends on that.
+Revision 2 made four foundational choices without putting them to Chris: Cockpit as the web engine, ZFS as the only storage engine, a NAS role separate from the existing storage node, and plain pages before the desktop. Revision 3 replaces all four with his decisions. Phases 0–3 (install, ZFS, sharing, protection) are built and stay. The Phase 4 Cockpit pages are superseded; their page logic and the `fnas` commands behind them carry over.
 
-## What changed from revision 1
+## What changed from revision 2
 
-| Area | Revision 1 | Revision 2 |
+| Area | Revision 2 | Revision 3 |
 | --- | --- | --- |
-| Install | Assumed an installer with a role menu | New Phase 0 adds install to disk with `--debian-installer live` |
-| Role selection | Installer sub-options | New option in the existing first-boot wizard, backed by a `nas-node` flavor |
-| Existing pools | Wizard only checks for an imported pool | Wizard scans for importable pools before it offers to create one |
-| Kernel and ZFS | Pinned as tested pairs | No pin: follow Debian stable, verify the module, fall back to the last good kernel |
-| Phases 1–3 interface | Cockpit's stock pages | `fnas` CLI over SSH (stock Cockpit has no ZFS or share pages) |
-| Files app | Assumed to work with no server-side code | Early transfer test decides this before Files is built |
-| Backup | Replication out of scope | One scheduled `syncoid` job to a second local pool |
-| Config recovery | None | Config copy stored on the pool |
-| Web desktop | Built with the first apps | Apps ship as plain pages first; the windowed shell follows |
-| Secure Boot | Not covered | Detected, and setup stops with a clear message in v1 |
-| LXC | Not covered | NAS role is ISO-only |
+| Web engine | Cockpit, with custom pages on top | Our own server, `fellowship-nas-web`, written in Go. No Cockpit in the image |
+| Web interface | Plain pages first, windowed desktop in the last phase | The windowed desktop from the start: login screen, desktop, windows, taskbar, launcher |
+| Storage engine | ZFS only, fixed by the role | Chosen per pool inside the OS: ZFS, Btrfs, or mergerfs + SnapRAID, side by side on one NAS |
+| Wizard roles | "NAS / Home Server" plus a separate "Storage node (mergerfs + SnapRAID)" | One NAS role; the storage node is absorbed as the mergerfs + SnapRAID engine |
+| Scale | Four disks, one data pool | 12–16 drives behind an HBA, several pools, multi-group ZFS pools, spares, multi-parity SnapRAID, drive bay identification |
+| Secure Boot | Stops the whole role | Only ZFS is unavailable, with the reason shown; Btrfs and mergerfs still work |
+| Share settings | ZFS dataset properties (`sharenfs`, `org.fellowshipos:*`) | Stored in each pool's config folder for every engine; `fnas` writes NFS exports and Samba files from them |
+| Backup | `syncoid` between two ZFS pools | Engine-native when both pools match (`syncoid`, `btrfs send`), `rsync` otherwise |
 
 ## Overview
 
-FellowshipNAS is a new "NAS / Home Server" role in FellowshipOS: ZFS storage, NFS and optional SMB shares, automatic snapshots, health alerts, and a desktop-style web interface. It replaces TrueNAS for a home setup that mostly needs NFS, without TrueNAS's apps, VMs, clustering and middleware.
+FellowshipNAS is the "NAS / Home Server" role in FellowshipOS: storage pools on the engine of your choice, NFS and SMB shares, automatic snapshots where the engine supports them, health alerts, and a desktop in the browser. It replaces TrueNAS for a home setup, without TrueNAS's apps, VMs, clustering and middleware.
 
 **In scope**
 
 - Install FellowshipOS to disk from the ISO
 - One wizard option that turns an installed system into a NAS
-- ZFS pools and datasets: import existing pools, or create new ones through a first-run wizard
-- NFS (primary) and SMB (optional, pre-checked) shares
-- Scheduled snapshots, scrubs, SMART monitoring and alerts
-- One scheduled backup to a second local pool
-- A web desktop: windows, taskbar and app launcher, with a real file manager as its centrepiece
+- Several pools at once, each on its own engine: ZFS, Btrfs, or mergerfs + SnapRAID
+- 12–16 drives behind an HBA, with each drive identified by bay where the hardware reports it
+- NFS and SMB shares on any pool
+- Snapshots (ZFS and Btrfs), parity syncs (SnapRAID), scrubs, SMART monitoring and alerts
+- Scheduled backup from one pool to another
+- A desktop in the browser, served by our own web server: windows, taskbar, app launcher, notification centre, and a real file manager
 
 **Out of scope for v1**
 
 - Container apps, VMs, Kubernetes, iSCSI, off-site replication, clustering, directory services
-- The NAS role in the LXC template (a container can't load ZFS modules or own the disks)
-- Secure Boot support (disable it for v1)
-- Native mobile apps (the web UI must work on a phone browser instead)
+- The NAS role in the LXC template (a container can't own disks or load ZFS)
+- Btrfs RAID5/6, which is still not considered safe
+- Native mobile apps (the desktop works in a phone browser instead)
+- A terminal in the browser (use SSH)
 
-**Design direction:** the feel of Synology DSM and FygoOS (a desktop in the browser, apps in windows), with FellowshipOS's own name, icons, colours and layout. Nothing copied from either product.
+**Design direction:** the feel of Synology DSM and FygoOS: a desktop in the browser with apps in windows, served by the NAS's own web server. FellowshipOS's own name, icons, colours and layout; nothing copied from either product.
 
 **Guiding rules**
 
 1. Layer on top of Debian, never fork it, so Debian keeps supplying security updates.
-2. Use proven packages for the plumbing; spend custom work only on the user experience.
+2. Use proven packages for storage and sharing (ZFS, Btrfs, mergerfs, SnapRAID, Samba, NFS). Write our own code for everything the user sees and for the path from browser to system.
 3. Anything that can destroy data happens behind a confirmation, never silently. The only disk the installer may touch is the OS disk, chosen by hand.
-
-## Repo baseline
-
-The repo before Phase 0:
-
-| Item | Current state |
-| --- | --- |
-| Debian release | 13 Trixie |
-| Architecture | amd64 only |
-| Kernel | Stock `linux-image-amd64` (6.12.90 in the last build) |
-| Apt sources | `main contrib non-free non-free-firmware`, so `contrib` is already enabled |
-| Installer | None: `--debian-installer false`, and no install-to-disk tooling |
-| Persistence | None: the ISO is live-only and nothing survives a reboot |
-| Role menu | Bash prompt in `fellowshipos-setup`, one choice only |
-| Role delivery | Flavor scripts in `/usr/local/lib/flavors`, run with `apt-get` during the wizard |
-| Own apt repo or signing key | None |
-| Debian packaging | None |
-| ZFS or Cockpit | Not in the repo or the image |
+4. The person using the NAS makes the choices: which engine, which layout, which disks. The system explains each option; it doesn't choose for them.
 
 ## System architecture
 
-FellowshipNAS is five layers on a stock FellowshipOS base, and every change made in the web UI goes through one helper CLI before it touches ZFS or a share config.
+```
+Browser ──HTTPS──► fellowship-nas-web ──► fnas ──► ZFS / Btrfs / mergerfs + SnapRAID, NFS, Samba
+                        │                   └─────► Sanoid, btrbk, smartd, zed, alerts
+                        └──► file helper, run as the logged-in user (Files app)
+NFS and SMB clients ─────────────────────────────► NFS server, Samba
+```
 
 1. **Clients:** browsers, NFS clients, SMB clients
-2. **Web:** FellowshipNAS Desktop and apps, on Cockpit
-3. **Helper CLI:** `fnas` commands from `fellowship-nas-tools`
-4. **Services:** NFS, Samba, Sanoid, `smartd`, `zed`, alerts
-5. **Storage:** ZFS on the data disks, on Debian Trixie
+2. **Web:** the FellowshipNAS Desktop (TypeScript, Preact) served by `fellowship-nas-web` (Go)
+3. **Helper CLI:** `fnas`, the only code that changes storage, shares or system settings. Every argument is checked, because it is the privilege boundary
+4. **Services:** NFS, Samba, Sanoid, btrbk, SnapRAID schedules, `smartd`, `zed`, alerts
+5. **Storage:** the engines, on Debian Trixie
 
-NFS and SMB clients talk straight to their servers; the browser path goes Desktop, Cockpit, then the helper CLI, so all risky logic sits in one testable place.
+NFS and SMB clients talk straight to their servers. The browser path always goes through `fnas`, so all risky logic sits in one testable place, used the same way from the desktop and over SSH.
 
 ## Install and first boot
 
@@ -86,12 +73,12 @@ There are three separate stages, and each one owns its own decisions.
 | Stage | Runs on | Decides |
 | --- | --- | --- |
 | Debian installer | ISO, local console | OS disk, first user, time zone |
-| First-boot wizard | `tty1`, local console | Hostname, SSH, role (and the first user in the LXC template) |
-| NAS setup wizard | Web UI | Pools, datasets, first share, alerts |
+| First-boot wizard | `tty1`, local console | Hostname, SSH, role, LAN subnet |
+| NAS setup | The desktop, in a browser | Pools and their engines, shares, users, alerts, backup |
 
-**Debian installer:** `--debian-installer live` in `auto/config` makes the installer copy the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached at this point. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
+**Debian installer:** `--debian-installer live` in `auto/config` makes the installer copy the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached. With data disks present, the installer's default partitioning method becomes "largest continuous free space", so the person must pick "use entire disk" and then the OS disk. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
 
-The installer needs three corrections, all in place since Phase 0:
+The installer needs three corrections, in place since Phase 0:
 
 - **Removal list:** live-build's list includes everything added after its install pass, so it would remove Docker and keep `live-boot`. A binary hook replaces it with just the live packages.
 - **Apt sources:** the installer leaves the install media as the only source, which means no security updates and no ZFS. A `late_command` restores `/usr/share/fellowshipos/sources.list`.
@@ -99,347 +86,299 @@ The installer needs three corrections, all in place since Phase 0:
 
 With root login off, the installer always creates a first user, with `sudo`. The wizard reuses that user, which also leaves a working login if the wizard fails.
 
-**Changes to the base system**
+**Base system changes (Phase 0):** the first-boot wizard doesn't run in a live session, waits for the network, and pauses before it exits so failures stay on screen.
 
-- The first-boot wizard must not run in a live session, so `fellowshipos-setup.service` has a condition on the kernel command line.
-- The service is ordered after `network-online.target`, because role installs need the network.
-- The wizard pauses before it exits, because the login prompt clears the screen and would hide any failure message.
+**Role option:** one "NAS / Home Server" entry in the wizard. The old "Storage node (mergerfs + SnapRAID)" entry is removed, and its packages become part of the NAS role. Other roles can still be layered afterward with `homelabos-flavor`.
 
-**Console access:** the installer already needs a monitor and keyboard, so the `tty1` wizard adds no new requirement. After first boot, the machine can run headless.
+**Role install:** the `nas-node.sh` flavor:
 
-**Role option:** add "NAS / Home Server (ZFS + web UI)" to the wizard's menu. Rename the existing option to "Storage node (mergerfs + SnapRAID)" so the two aren't confused. They stay as separate roles, and combining them isn't supported. The wizard stays single-choice; other roles can be layered afterward with `homelabos-flavor`.
+1. Stops with a clear message in a container.
+2. Checks the network and Debian mirror access.
+3. Installs `fellowship-nas`, `fellowship-nas-smb` and `fellowship-nas-web`, which bring every engine's tools.
+4. Builds and loads the ZFS module. If Secure Boot is on or the module fails, the role still completes: ZFS is marked unavailable with the reason, and Btrfs and mergerfs pools work.
+5. Adds the wizard's user to `nas-admins` and writes `/etc/fellowshipos/.nas-role-complete`.
 
-**Sub-options shown when the role is picked**
+The flavor is safe to run twice; if the marker is missing, the wizard shows the retry command, `sudo homelabos-flavor nas-node`. At the end, the wizard prints the desktop's address, `https://ADDRESS`.
 
-| Option | Default | What it installs |
-| --- | --- | --- |
-| SMB sharing for Windows/macOS | On, can untick | `fellowship-nas-smb` |
-| Web file manager | On | FellowshipNAS Files app |
+**Packages:** `fellowship-nas` is a meta-package with every engine's dependencies. `fellowship-nas-smb` holds Samba and discovery, `fellowship-nas-tools` holds `fnas`, and `fellowship-nas-web` holds the server and the desktop. For v1 they ship as a local apt repo inside the ISO, with dependencies from Debian during the role install. A hosted, signed repo arrives in the release phase.
 
-NFS is always installed. Alerts need no sub-option: `msmtp` is a small dependency of the meta-package, and channels are set up later.
+## Storage
 
-**Role install:** a new `nas-node.sh` flavor runs these steps in order:
+**One idea for every engine:** a pool is a named set of disks mounted at `/NAME`, with shares inside it and a config folder that remembers its settings. The Storage app shows every pool the same way and says plainly what each engine can and can't do. Different pools can use different engines on the same NAS, for example a ZFS pool for family files, a mergerfs pool for films, and a Btrfs mirror of two SSDs.
 
-1. Stop with a clear message if this is a container, or if Secure Boot is on (read from the EFI variable, so `mokutil` isn't needed).
-2. Check the network and Debian mirror access.
-3. Install `fellowship-nas`, and `fellowship-nas-smb` if selected.
-4. Confirm the ZFS module built and loads. If the role pulled in a newer kernel, the module only has to exist for that kernel, and the wizard asks for a reboot.
-5. Write `/etc/fellowshipos/.nas-role-complete`.
+**Choosing an engine** (shown when creating a pool, with this comparison)
 
-The flavor must be safe to run twice. Today, the wizard writes `.setup-complete` even when a step fails. So if the marker in step 5 is missing, the wizard shows the failure and the retry command, `sudo homelabos-flavor nas-node`.
-
-**Packages:** `fellowship-nas` is a meta-package that depends on everything the NAS needs. SMB lives in a separate `fellowship-nas-smb` package so unticking it simply skips that package. For v1, the Fellowship packages ship as a small local apt repo inside the ISO, while their dependencies come from Debian during the role install. The LXC build removes that local repo. A hosted, signed repo arrives in Phase 6 for updates.
-
-**NAS setup wizard:** the `fellowship-nas-firstrun.service` unit opens this wizard on the dashboard until a pool is set up.
-
-1. **Scan for existing pools** with `zpool import`. If any are found, offer to import them before anything else. Pool import is the default path, and creating a pool needs an explicit choice.
-2. Show detected disks (model, size, serial, SMART status), hiding the OS disk. Flag any disk that has a ZFS label, partitions or a filesystem.
-3. Pick a layout: single disk, mirror, RAIDZ1 or RAIDZ2, with usable space and drive-loss tolerance shown for each.
-4. Name the pool and confirm with a typed confirmation ("erase 4 disks").
-5. Create default datasets and a first share. On an imported pool, leave existing datasets alone.
-6. Restore saved config if the pool has any (see Storage layer).
-7. Set up alerts (optional, skippable).
-
-## Storage layer
-
-ZFS is the only storage engine in v1: one data pool, separate from the OS disk, with sensible defaults set once by the wizard.
-
-**Packages:** `zfsutils-linux`, `zfs-dkms`, `zfs-zed`, `linux-image-amd64` and `linux-headers-amd64`. `zfs-zed` is listed because this image turns off apt's Recommends. The headers meta-package keeps headers matched to future kernels, and the image meta-package stops them running ahead of the installed kernel on an older ISO. All of these install during the role, so the module compiles at that point. It isn't baked into the image, because the LXC template is built from the same chroot.
-
-**Kernel and ZFS updates:** there's no version pin, so kernel security updates keep flowing. Debian stable ships a matched kernel and ZFS, and backports stay off.
-
-- `zfs-kernel-check` runs from both `/etc/kernel/postinst.d` and `header_postinst.d`, because a kernel and its headers can install in either order.
-- With no module for the new kernel, it sets GRUB's default to the running kernel and logs an error, and `fnas check` raises an alert. When the module appears, it clears that default.
-- `unattended-upgrades` never reboots automatically.
-- `GRUB_DEFAULT=saved` is set by the role. Old kernels are kept until the new one has booted with its pool imported.
-
-**Pool layouts offered**
-
-| Layout | Min disks | Survives | Best for |
+| | ZFS | Btrfs | mergerfs + SnapRAID |
 | --- | --- | --- | --- |
-| Single | 1 | 0 failures | Testing only |
-| Mirror | 2 | 1 per mirror | Small setups, fastest rebuilds |
-| RAIDZ1 | 3 | 1 failure | 3–4 smaller disks |
-| RAIDZ2 | 4 | 2 failures | Large disks, most data safety |
+| Best for | Important files, photos, documents | Small mirrors, SSDs, mixed sizes | Large media libraries on mixed disks |
+| Redundancy | Mirrors, RAIDZ1/2/3, hot spares | Mirror (`raid1`), three copies (`raid1c3`), `raid10` | 1–6 parity disks |
+| Mixed disk sizes | Wastes space | Works | Works |
+| Add one disk later | To a RAIDZ group (RAIDZ expansion) or as a new group | Yes | Yes |
+| Checksums and self-repair | Yes, live | Yes, live | At sync and scrub time only |
+| Protected immediately | Yes | Yes | Only after the next sync (nightly by default) |
+| Snapshots and Windows "Previous Versions" | Yes (Sanoid) | Yes (btrbk) | No |
+| A failed disk loses | Nothing within the layout's tolerance | Nothing within the layout's tolerance | Nothing up to the parity count, if synced; each disk stays readable on its own |
+| Secure Boot | Must be off | Works | Works |
+| Imports an existing TrueNAS pool | Yes | No | No |
 
-**Pool creation:** always use `/dev/disk/by-id` paths, so pools survive device names changing.
+**Disk handling**
 
-**Pool defaults:** `ashift=12`, `compression=lz4`, `atime=off`, `xattr=sa`, `acltype=posixacl`, `dnodesize=auto`. The last three matter for sharing one dataset over both NFS and SMB.
+- Pools are always built from `/dev/disk/by-id` paths, so device names can change.
+- `fnas` never offers the OS disk, refuses disks in use, and needs `--wipe` plus a typed confirmation ("erase 6 disks") for disks with old data.
+- **Drive bays:** where the HBA and backplane report enclosure slots (SES, through `/sys/class/enclosure`), disks are shown and alerted by bay ("Bay 7, serial ZL2…"). The locate light is blinked with `ledctl` or `sg_ses`. Without enclosure reporting, disks are identified by serial number, and "Identify" reads from the disk so its activity light flickers.
+- **HBA:** must run in IT (pass-through) mode, so every disk is visible on its own with its SMART data. SAS and SATA disks behind it are both supported.
+- **Spin-down:** mergerfs data disks may spin down when idle (`hd-idle`); ZFS and Btrfs disks don't, because both touch every disk regularly.
 
-**Default datasets**
+**ZFS** (built in Phases 1–3)
 
-- `tank/shares` as the parent for user-created shares
-- `tank/home` for per-user folders
-- `tank/backups` as a landing spot for client backups
-- `tank/fellowship-config` for the config copy
+- Layouts: single, mirror, RAIDZ1, RAIDZ2, RAIDZ3, and pools of several groups ("two 6-disk RAIDZ2 groups"). Hot spares. Growing a pool by adding a group or expanding a RAIDZ group by one disk.
+- Defaults: `ashift=12`, `compression=lz4`, `atime=off`, `xattr=sa`, `acltype=posixacl`, `dnodesize=auto`.
+- Shares are datasets in `POOL/shares`; settings are saved in `POOL/fellowship-config`.
+- Snapshots by Sanoid, monthly scrub from Debian's `zfsutils-linux` job, events from `zed`.
+- **Kernel and ZFS updates:** no version pin. `zfs-kernel-check` runs after kernel and header installs; with no module for the new kernel it keeps GRUB on the running kernel and `fnas check` raises an alert. `unattended-upgrades` never reboots by itself.
 
-**Config recovery:** after every change, `fnas` saves share settings, the Sanoid config, alert settings (without secrets) and the user and UID list to `tank/fellowship-config`. After a reinstall, the wizard offers to restore them. Passwords aren't stored, so restored users set new ones.
+**Btrfs**
 
-**Disk replacement:** the Storage app has a guided flow for a failed disk: identify it by serial, choose the replacement, run `zpool replace`, and show resilver progress.
+- Layouts: single, `raid1`, `raid1c3`, `raid10`. Metadata uses at least the same redundancy as data. RAID5/6 isn't offered.
+- Shares are subvolumes in `/NAME/shares`; settings in `/NAME/.fellowship`.
+- Snapshots by `btrbk` into `/NAME/.snapshots`, named so Samba shows them as "Previous Versions". Monthly `btrfs scrub`, and `btrfs device stats` read by the hourly check.
+- Mounted by filesystem UUID through a systemd mount unit, with `degraded` mounting only after a confirmed choice in the Storage app.
 
-**Maintenance:** a monthly scrub through the `zfsutils-linux` cron job Debian already ships (the second Sunday of each month), with results shown on the dashboard. Pool import at boot uses the standard `zfs-import-cache` service.
+**mergerfs + SnapRAID** (absorbs the old storage node)
 
-## Migrating from TrueNAS
+- Each data disk gets its own ext4 filesystem, mounted at `/srv/disks/SERIAL`; mergerfs joins them at `/NAME`. Parity disks must be at least as large as the largest data disk.
+- Shares are top-level folders in `/NAME`; settings in `/NAME/.fellowship`, copied to every data disk so the pool can be rebuilt after a reinstall.
+- `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` (skipped with an alert if too many files were deleted, a sign of a missing disk), then a weekly partial `snapraid scrub`.
+- A failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
+- The Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.
 
-Test this before relying on it, using the real pool.
+**Config recovery** (built in Phase 3 for ZFS; extended to every engine): after every change, `fnas` saves the LAN subnet, users and their IDs, share settings, schedules, the backup job and alert channels without secrets to every pool. After a reinstall, the desktop finds the pools, imports them, and offers to restore the settings. A fresh install never overwrites a saved copy it hasn't restored, and a restore checks everything on the disk before using it.
 
-1. Export the pool from TrueNAS, and note its version and enabled feature flags.
-2. On FellowshipNAS, try `zpool import -o readonly=on` first. Debian's ZFS (2.3.9 in Trixie at Phase 0) must support every active feature, or the import may be refused or read-only.
-3. Check dataset encryption, permissions, and that UIDs match the new system.
-4. Do a normal import only after that passes. Never run `zpool upgrade` as part of migration, because it blocks a return to TrueNAS.
-5. Keep a backup of anything irreplaceable until the migration has run cleanly for a while.
+**Migrating from TrueNAS:** export the pool from TrueNAS, then import it read-only first (`fnas pool import NAME --readonly`), check permissions and user IDs, and only then import it normally. Never run `zpool upgrade` during migration, because it blocks a return to TrueNAS.
 
 ## Sharing
 
-NFS is the primary protocol and is managed by ZFS itself; SMB is optional and managed through Samba's own config. Each protocol has one owner, so settings never fight.
+**One owner per protocol, the same on every engine:** `fnas` keeps each share's settings in its pool's config folder and generates both protocols' configuration from them. ZFS's `sharenfs` and `sharesmb` properties aren't used (revision 2 used `sharenfs`; Phase 6 moves it).
 
-**NFS (primary)**
+**NFS:** `nfs-kernel-server`, NFSv4 only by default. `fnas` writes `/etc/exports.d/fellowship.exports`, restricted to the LAN subnet, never `*`.
 
-- `nfs-kernel-server`, NFSv4 only by default (v3 off unless a client needs it)
-- Exports set per dataset with the ZFS `sharenfs` property, so share settings travel with the data
-- Exports restricted to the LAN subnet chosen in the wizard, never `*`
-- `fnas` writes `sharenfs` values; nothing edits `/etc/exports` by hand
+**SMB:** one Samba file per share plus a master file `smb.conf` includes. `wsdd2` for Windows network discovery and Avahi for macOS. SMB passwords are set from the Users app (`fnas user smb-password`). On ZFS and Btrfs, `vfs_shadow_copy2` shows snapshots as "Previous Versions"; mergerfs shares have none.
 
-**User ID matching:** NFS trusts numeric user IDs, so the same person needs the same UID on the NAS and on every client. FellowshipNAS offers two modes per share:
+**User ID modes, per share:**
 
 | Mode | How it works | Use when |
 | --- | --- | --- |
-| Matched users | UIDs kept identical across machines | Personal folders, your own Linux machines |
-| Shared folder | `all_squash` to one fixed `anonuid`/`anongid`, and Samba `force user`/`force group` to the same account | Media, family shares, anything everyone can write |
-
-**SMB (optional)**
-
-- `fnas` writes one file per share, plus a generated master file that lists them. `smb.conf` includes only that master file, because Samba can't include a whole directory. ZFS's `sharesmb` property is not used.
-- `wsdd2` so shares show up in Windows Network, and Avahi for macOS
-- SMB passwords set alongside the system password from the Users app (`smbpasswd`)
-- `vfs_shadow_copy2` mapped to Sanoid's snapshot names, so ZFS snapshots appear as "Previous Versions" in Windows File Explorer. See the Phase 2 test below. `shadow:snapprefix` keeps the real names, because Sanoid's period suffix can't be rebuilt from a time format. Snapshots must be taken by `sanoid.service`, which runs in UTC: a hand-run `sanoid` uses local time, and Samba can't open those.
-
-**One dataset on both protocols** works when it uses `acltype=posixacl` and `xattr=sa` (set by default), and the web UI warns if a share is set to "Matched users" on NFS while SMB users have no matching UID.
+| Matched users | Files keep their owners; NFS clients need the same user IDs | Personal folders, your own Linux machines |
+| Shared folder | NFS `all_squash` and Samba `force user` to one fixed account, `nas-share` (ID 3000) | Media, family shares, anything everyone can write |
 
 ## Snapshots, backup, health and alerts
 
-Snapshots run on a fixed schedule from day one, and every warning a disk or pool can raise ends up in one alert pipeline.
+**Snapshots:** Sanoid on ZFS, btrbk on Btrfs, both generated by `fnas` from the same per-share policy (hourly 24, daily 30, monthly 6 by default). mergerfs shares show "No snapshots on this engine" rather than hiding the option.
 
-**Snapshots: Sanoid**
-
-- `sanoid` package, config in `/etc/sanoid/sanoid.conf` generated by `fnas`
-- Default policy per share: hourly kept 24, daily kept 30, monthly kept 6 (editable per dataset)
-- Samba's "Previous Versions" and the file manager's version panel both read Sanoid's snapshot names
-
-**Backup: Syncoid**
-
-Snapshots protect against deleted files, not against losing the pool. v1 includes one optional scheduled `syncoid` job to a second local pool, such as a USB disk. A failed or overdue backup raises an alert. Off-site replication stays out of scope.
+**Backup:** one or more scheduled jobs, each copying a pool's shares to another pool. `syncoid` between ZFS pools and `btrfs send` between Btrfs pools keep snapshots; any other pair uses `rsync`, keeping a snapshot on the target where its engine allows. A failed or overdue backup raises an alert.
 
 **Health monitoring**
 
-| Source | Watches | Package |
-| --- | --- | --- |
-| `smartd` | Disk SMART errors, reallocated sectors, temperature | `smartmontools` |
-| ZFS event daemon (`zed`) | Pool degraded, checksum errors, scrub results, resilver done | `zfs-zed` |
-| FellowshipNAS checker | Pool over 80% full, snapshot job failed, last scrub too old, backup overdue, ZFS module missing for a kernel | custom systemd timer |
+| Source | Watches |
+| --- | --- |
+| `smartd` | SMART errors, reallocated and pending sectors, temperature, for every disk on the HBA |
+| `zed` | ZFS pool degraded, checksum errors, scrub and resilver results |
+| Hourly check (`fnas check`) | Pools over 80% full, missing or failed disks on any engine, Btrfs device errors, SnapRAID sync or scrub overdue or failed, snapshots stopped, scrub too old, backup overdue, ZFS module missing for a kernel, unrestored settings |
 
-**Alerts:** all sources call one script, `fellowship-nas-notify`, which sends to whatever channels are set up:
+**Alerts:** every source calls `fellowship-nas-notify`, which sends email (`msmtp`) and ntfy push, and always records the alert in the desktop's notification centre. Undelivered alerts are retried for a day.
 
-- Email through `msmtp` (any SMTP account)
-- Push through ntfy (public server or self-hosted)
-- Always: the dashboard's notification centre, stored locally
-
-The Alerts app has a "Send test alert" button so setup can be checked in one click.
-
-**As built in Phase 3**
+**As built in Phase 3 (ZFS)**
 
 - Sanoid's daily and monthly runs are moved to 23:30 and 00:15 UTC, so hourly, daily and monthly snapshots don't share a timestamp. The very first run still makes all three at once.
-- `smartd` runs inside VMs too (Debian's unit skips them), using its own config that calls `fellowship-nas-notify` directly.
-- Alerts that can't be delivered, such as one raised before the network is up, are kept and retried by the hourly check for up to a day.
-- Settings are copied to `POOL/fellowship-config` after every change, without passwords or tokens. A fresh install never overwrites a copy it hasn't restored, and a restore validates everything on the disk before using it.
-- After a reinstall, `fnas pool import --force` imports a pool the old system never exported, but never one that another running system has imported (ZFS multihost).
-- Restore and alert setup are CLI only until the Phase 4 pages.
+- `smartd` runs inside VMs too (Debian's unit skips them), with its own config that calls `fellowship-nas-notify` directly.
+- After a reinstall, `fnas pool import --force` imports a pool the old system never exported, but never one another running system has imported (ZFS multihost). One restore takes over every pool the old install saved to.
 
 Not checked in the VM: `smartd` reacting to a real disk fault (the alert hook was tested directly), and the snapshot timing across a day and month boundary.
 
-## Web UI
+## Web server: `fellowship-nas-web`
 
-Cockpit is the engine and FellowshipNAS Desktop is the face: Cockpit handles login, permissions and running system commands, while custom apps provide the DSM-style experience.
+Our own server, written in Go, replaces Cockpit entirely. It serves the desktop and a JSON API, and it never changes the system itself: every change goes through `fnas`.
 
-**Why Cockpit underneath**
+**Three processes, so the part facing the network has no special rights** (the same split OpenSSH uses):
 
-- Logs in with normal Linux accounts (PAM), so no separate user database
-- Its JavaScript API (`cockpit.js`) runs commands, reads files and watches D-Bus with the logged-in user's permissions, through `sudo` or polkit for admin actions
-- Serves over HTTPS on port 9090. Its automatic certificate is normally self-signed, so browsers will warn until the user trusts it or adds their own.
-- Its built-in pages (logs, services, networking, updates, terminal) stay reachable as an "Advanced" app, so nothing has to be rebuilt
+| Process | Runs as | Does |
+| --- | --- | --- |
+| Web front | Unprivileged `fnas-web` account | HTTPS, the desktop's files, sessions, the API |
+| Privileged helper | root, reachable only through a local socket | Checks passwords with PAM, reports a user's groups, runs `fnas` for members of `nas-admins`, starts file helpers |
+| File helper | The logged-in user | Every Files app operation, so Linux permissions decide what each person sees |
 
-**What Cockpit doesn't provide:** its stock Storage page doesn't appear to manage ZFS, and it has no share or snapshot pages. Third-party ZFS plugins have reported problems on Debian and newer ZFS, so they aren't a dependency. Until the custom apps exist, the NAS is managed with `fnas` over SSH.
+**Login and sessions**
 
-**Build order:** each app is a self-contained component that first ships as a plain Cockpit page. The windowed shell comes afterward and hosts the same components. That leaves a usable NAS UI at every step, and the shell can slip without blocking anything.
+- Normal Linux accounts, checked with PAM; no separate user database.
+- A random session token in a `Secure`, `HttpOnly`, `SameSite=Strict` cookie, kept server-side. Sessions end after 30 minutes idle and 12 hours in total; long transfers count as activity.
+- Every API request that changes something must carry a matching `Origin` and a per-session token header, against cross-site attacks.
+- Failed logins slow down per address and per account, and are logged; repeated failures raise an alert.
+- The desktop is HTTPS only: port 443, with port 80 redirecting. A self-signed certificate is made at first start, and the Settings app accepts your own.
 
-**FellowshipNAS Desktop (the shell)**
+**API:** one endpoint per `fnas` action, with arguments passed as a list (never through a shell). Long jobs (scrubs, resilvers, backups, SnapRAID syncs) report progress over server-sent events.
 
-- Packaged as a Cockpit plugin (`/usr/share/cockpit/fellowship-desktop/`) set as the default landing page (confirm how Cockpit supports this)
-- Desktop with wallpaper and icons, a taskbar with open windows and a clock, a start-style app launcher, and a notification centre
-- Windows can be moved, resized, minimised, maximised and stacked; layout is remembered per user
-- On a phone, windows open full-screen and the taskbar becomes a bottom bar
-- Built with plain TypeScript and a small UI library (decided in Phase 4), bundled with esbuild
+**Files:** served by the file helper with full `Range` support (video seeking) and file sizes (download progress). Uploads are chunked and resumable; folders download as a streamed zip.
+
+**Built with:** Go's standard library for HTTPS, routing and streaming, and a small `cgo` binding to `libpam` written here. No web framework. Built in the same container as the ISO, with Debian's Go.
+
+**Phase 4's transfer test (Cockpit 337, in a KVM VM)** showed what Cockpit couldn't do and set targets for our server: 10 GB upload at 85 MiB/s and download at 170 MiB/s through Cockpit, 5,000 thumbnails made in 17 s and shown in 5 s, folders zipped while streaming; but no video seeking (no `Range` support) and no download progress. Our server must match those speeds and pass the two Cockpit failed.
+
+## Desktop
+
+The desktop is the interface from the start. Every app opens in a window; there are no standalone pages.
+
+- **Login screen** with FellowshipOS branding.
+- **Desktop:** wallpaper, app icons, and widgets (pool health and capacity, disk temperatures, last scrub, sync, snapshot and backup, recent alerts).
+- **Windows:** move, resize, minimise, maximise, stack, several open at once; layout remembered per user.
+- **Taskbar:** open windows, launcher, clock, notification centre.
+- **Phone:** windows open full-screen and the taskbar becomes a bottom bar.
+- **Built with:** TypeScript, Preact 10 and esbuild (chosen in Phase 4). Phase 4's Setup, Storage, Shares and Health code moves into windows.
+- **Non-admins** see only Files and their own settings.
+- **Look:** FellowshipOS's own palette, icons and wallpaper; light and dark themes. Inspired by the windowed feel of DSM and FygoOS, without copied icons, layouts or artwork.
 
 **Apps in v1**
 
-| App | What it does | Built on |
-| --- | --- | --- |
-| Files | Desktop-style file manager (spec below) | Decided by the transfer test |
-| Storage | Pools, datasets, disks, scrubs, layouts, disk replacement | Custom, calls `fnas` |
-| Shares | NFS and SMB shares, access rules, user ID mode | Custom, calls `fnas` |
-| Snapshots | Schedules per dataset, browse, restore, backup job | Custom, calls `fnas` |
-| Users | Accounts, groups, SMB passwords | Custom, calls `fnas` |
-| Health | SMART per disk in plain language, temperatures | Custom, reads `smartctl --json` |
-| Alerts | Email and push setup, test button, history | Custom |
-| Setup | NAS setup wizard, rerunnable for new disks | Custom |
-| Advanced | Cockpit's own pages and terminal | Cockpit, unchanged |
+| App | What it does |
+| --- | --- |
+| Setup | First-run tour: import or create pools, LAN subnet, first share, users, alerts, backup. Rerunnable after adding disks |
+| Storage | Pools on every engine, disks by bay, create with engine and layout choice, grow, scrub, sync, guided disk replacement, identify light |
+| Shares | NFS and SMB shares on any pool, user ID modes, LAN subnet |
+| Snapshots and backup | Schedules per share, browse and restore, backup jobs |
+| Users | Accounts, groups, `nas-admins`, SMB passwords |
+| Health | SMART per disk in plain words, temperatures, current problems |
+| Alerts | Email and ntfy setup, test button, history |
+| Files | The file manager (below) |
+| Settings | Hostname, time, certificate, updates, restart and shut down, active sessions |
 
-**Files transfer test (before any Files work)**
+**Files app**
 
-Build a throwaway Cockpit page that does the following on modest hardware:
+- Sidebar: pools, shares, home folder, favourites, recent
+- Toolbar: back/forward/up, breadcrumb, search, grid/list, sort
+- Grid with thumbnails for images and video; list with name, size, modified, owner, permissions
+- Multi-select with click, Shift and Ctrl; drag to move, Ctrl-drag to copy
+- Right-click menu: open, download, rename, copy, cut, paste, delete, compress, properties, previous versions
+- Upload by dragging in from the computer; download folders as zip
+- Quick look for images, video (with seeking), audio, PDF and text with the space bar
+- **Previous versions panel** on ZFS and Btrfs: a timeline of snapshots containing the file, with preview, "Restore a copy" and "Replace"
 
-- Upload and download a 10 GB file, and survive Cockpit's idle timeout
-- Stream a video for preview, with seeking
-- Generate thumbnails for a folder of 5,000 images
-- Download a large folder as a zip
+## Security model
 
-Also evaluate the Cockpit project's `cockpit-files` plugin as a base. If `cockpit.js` alone can't pass this test, add a small local file service that runs as the logged-in user, and record that decision here. Revision 1's "no server-side code" rule applies only if the test passes.
+Built for a trusted home LAN; nothing is exposed to the internet by default.
 
-**Files app spec** (the centrepiece)
-
-- Sidebar: pools and datasets, shares, home folder, favourites, recent
-- Toolbar: back/forward/up, breadcrumb path, search, grid/list toggle, sort
-- Grid view with thumbnails for images and video; list view with name, size, modified, owner, permissions
-- Multi-select with click, Shift and Ctrl; drag and drop to move, Ctrl-drag to copy
-- Right-click menu: open, download, rename, copy, cut, paste, delete, compress, properties, "Previous versions"
-- Upload by dragging from the computer into the window; download folders as zip
-- Quick look preview for images, video, audio, PDF and text with the space bar
-- Keyboard shortcuts matching common desktop file managers
-- **Previous versions panel:** for any file or folder, a timeline of ZFS snapshots that contain it, with preview and "Restore a copy" or "Replace"
-- File operations run as the logged-in user, so Linux permissions are always respected
-
-**Dashboard widgets** (on the desktop): pool health and capacity bars, disk temperatures, active shares, last scrub, snapshot and backup, recent alerts.
-
-**Look and feel:** FellowshipOS's own palette, icon set and wallpaper; light and dark themes. Inspired by the windowed feel of DSM and FygoOS, but no copied icons, layouts or artwork.
+- **Two roles:** `nas-admins` manage storage, shares, users and settings; everyone else sees Files for folders they already have permission to.
+- **Privileges:** only the privileged helper runs as root. It runs `fnas` for `nas-admins` members and nothing else, and `fnas` checks every argument.
+- **Network:** `nftables` allows HTTPS, NFS and SMB from the LAN subnet only.
+- **Remote access:** not built in; a VPN such as WireGuard or Tailscale is documented.
+- **Destructive actions** (destroy a pool, delete a share, roll back a snapshot, wipe disks) need a typed confirmation that names what will be lost.
+- **Updates:** `unattended-upgrades` for Debian security updates, including the kernel, with no automatic reboot.
+- **Review:** the web server's login, session and helper code gets a security review before release.
 
 ## Repository layout and packaging
 
-FellowshipNAS lives on the `nas-edition` branch. This repo is a flat live-build project, so the NAS work goes in a new `nas/` folder, plus small changes to the existing build.
-
 ```
 auto/config                  installer and preseed boot options
-build.sh                     build Fellowship packages; remove the local repo from the LXC template
+build.sh                     builds the Fellowship packages and the ISO in a Debian container
 config/includes.chroot/
-  usr/local/bin/fellowshipos-setup       new role option and retry message
-  usr/local/lib/flavors/nas-node.sh      new flavor
-  usr/share/fellowshipos/sources.list    apt sources restored after install
-  etc/systemd/system/fellowshipos-setup.service
+  usr/local/bin/fellowshipos-setup       role option, web address, retry message
+  usr/local/lib/flavors/nas-node.sh      the NAS role
 config/hooks/normal/0800-installer-remove-list.hook.binary
 config/preseed/fellowshipos.cfg.installer
 CLAUDE.md                    rules for Claude Code
 docs/
 nas/
   packages/
-    fellowship-nas/          meta-package: depends, ZFS defaults, kernel hook
-    fellowship-nas-smb/      Samba, discovery service, shadow copy config
-    fellowship-nas-tools/    fnas CLI: notify, checker, firstrun, share helpers
-    fellowship-desktop/      Cockpit plugin: desktop shell + all apps
+    fellowship-nas/          meta-package: every engine's tools, schedules, kernel hook, alert hooks
+    fellowship-nas-smb/      Samba and discovery
+    fellowship-nas-tools/    fnas and fellowship-nas-notify
+    fellowship-nas-web/      Go server and helpers, plus the desktop (web/)
   theme/                     icons, wallpaper, colour tokens
   tests/
-    vm/                      vm.sh: install from the ISO's boot menu with 4 virtual disks
+    vm/                      vm.sh: install from the ISO's boot menu, with up to 16 virtual disks
     unit/                    fnas tests that never touch a real disk
 ```
 
-**Build:** each package builds with `dpkg-buildpackage`; the desktop is bundled first with esbuild. The ISO carries the built `.deb` files as a local apt repo for v1.
-
-**Versioning:** all FellowshipNAS packages share one version number, so the role always pulls a matching set.
-
-**Helper CLI:** the web apps call small, well-tested scripts in `fellowship-nas-tools` (for example `fnas share create`) instead of building shell commands in JavaScript. That keeps risky logic in one testable place and makes the CLI usable over SSH too. Every argument is validated, because these scripts are the privilege boundary.
-
-## Security model
-
-FellowshipNAS is built for a trusted home LAN; nothing is exposed to the internet by default.
-
-- **Two roles:** members of a `nas-admins` group can manage storage, shares and users; everyone else only sees the Files app for folders they already have permission to. The role adds the wizard's first user to `nas-admins`.
-- **Privileged actions** go through polkit rules that allow `nas-admins` to run the `fellowship-nas-tools` scripts, rather than broad `sudo` rights.
-- **Web access:** HTTPS only on port 9090; firewall (`nftables`) allows 9090, NFS and SMB from the LAN subnet only.
-- **Remote access:** not built in. The recommended route is a VPN such as WireGuard or Tailscale, documented but left to the user.
-- **Destructive actions** (destroy pool, delete dataset, roll back snapshot) need a typed confirmation, and the confirmation lists every snapshot that will be lost along with the dataset.
-- **Updates:** `unattended-upgrades` for Debian security updates, including the kernel, with no automatic reboot.
+`fellowship-nas-web` replaces Phase 4's Cockpit package, `fellowship-desktop`. All FellowshipNAS packages share one version number.
 
 ## Build phases and test checklist
 
-Work moves in seven phases, and no phase starts until the previous gate passes in a VM with four virtual disks.
+No phase starts until the previous gate passes in a VM. From Phase 6 on, the VM has 16 virtual disks.
 
-| Phase | Work | Gate |
-| --- | --- | --- |
-| 0. Base install | Debian live installer, wizard changes, `nas-node` flavor stub | Install from ISO, reboot, and settings persist; LXC template still builds |
-| 1. Storage | ZFS packages, kernel hook, `fnas` pool commands, pool import | Create and import a pool from the CLI; real TrueNAS pool imports read-only |
-| 2. Sharing | NFS, SMB, user ID modes | Mount from Linux and Windows; "Previous Versions" works with Sanoid names |
-| 3. Protection | Snapshots, backup, health, alerts, config copy | Failure tests pass from the CLI; a reinstall restores config |
-| 4. Core apps | Files transfer test, then Storage, Shares, Health and Setup as plain pages | Transfer test decided; full setup works from a browser |
-| 5. Files and remaining apps | Files, Snapshots, Users, Alerts | Restore a file from a snapshot in the browser; phone browser usable |
-| 6. Desktop and release | Windowed shell, theme, signed hosted apt repo | Apps run in windows; updates arrive from the hosted repo |
-
-Phases 0–3 give a working NAS managed with `fnas` over SSH; phases 4–6 add the web experience on top.
+| Phase | Work | Gate | Status |
+| --- | --- | --- | --- |
+| 0. Base install | Debian live installer, wizard changes, `nas-node` flavor | Install from ISO, reboot, and settings persist; LXC template still builds | Done |
+| 1. ZFS storage | ZFS packages, kernel hook, `fnas` pool commands, pool import | Create and import a pool from the CLI; real TrueNAS pool imports read-only | Done, except the TrueNAS import |
+| 2. Sharing | NFS, SMB, user ID modes | Mount from Linux and Windows; "Previous Versions" works | Done, except a real Windows client |
+| 3. Protection | Snapshots, backup, health, alerts, config copy | Failure tests pass from the CLI; a reinstall restores config | Done |
+| 4. Cockpit pages | Transfer test; Setup, Storage, Shares and Health on Cockpit | Superseded by revision 3 | Code carries over to Phase 5 |
+| 5. Web server and desktop | `fellowship-nas-web` with login, sessions, the helper split and the API; the desktop shell; Setup, Storage, Shares, Health, Alerts and Settings in windows; Cockpit removed | Full setup from the desktop in a browser; web security tests pass; non-admins can't reach admin apps or the API; no Cockpit installed | Next |
+| 6. Many drives and ZFS depth | Drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | 16-disk VM: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
+| 7. mergerfs + SnapRAID | Engine, sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create, share, sync; fail a data disk and rebuild it; alerts for a missed sync | |
+| 8. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
+| 9. Files and remaining apps | Files, Snapshots and backup, Users | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
+| 10. Release | Theme and icons, hosted signed apt repo, updates in Settings | Updates arrive from the hosted repo | |
 
 **Failure tests (run in the VM before every release)**
 
 Install and role:
 
-- [ ] Install to disk from the ISO, reboot: wizard runs once and settings persist
+- [ ] Install to disk from the ISO with data disks attached, reboot: wizard runs once and settings persist
 - [ ] Boot the ISO live: the first-boot wizard does not run
 - [ ] Cut the network during the role install: failure is shown, and the retry command completes it
-- [ ] Enable Secure Boot: role stops with a clear message
+- [ ] Enable Secure Boot: role completes, ZFS shows as unavailable with the reason, Btrfs and mergerfs pools work
 - [ ] Try the role in the LXC template: role stops with a clear message
 
-Pools:
+Pools, on every engine:
 
-- [ ] Reinstall the OS with a pool attached: the wizard offers import, and no disk is offered for erasing by default
-- [ ] Reorder the virtual disks: pool still imports
-- [ ] Pull one disk from a mirror and from a RAIDZ1 pool: pool shows degraded and an alert arrives
-- [ ] Replace the disk through the guided flow and resilver: pool returns to healthy
-- [ ] Pull two disks from RAIDZ1: the UI reports the failure clearly and nothing is destroyed automatically
+- [ ] Reinstall the OS with pools attached: the desktop offers import and restore, and no disk is offered for erasing by default
+- [ ] Reorder the disks: every pool still mounts
+- [ ] Pull a disk: the pool shows degraded, the alert names the bay, and the identify light finds it
+- [ ] Replace the disk through the guided flow: the pool returns to healthy
+- [ ] Pull more disks than the layout survives: the desktop reports it clearly and nothing is destroyed automatically
 - [ ] Fill a pool past 80%: a warning alert arrives
+- [ ] SnapRAID: delete many files, then run the nightly job: sync is skipped and an alert arrives
 
 Updates:
 
-- [ ] Reboot after a kernel update: pool imports and shares come back
-- [ ] Force a ZFS module build failure: alert arrives, and the system boots the last good kernel with its pool
+- [ ] Reboot after a kernel update: pools import and shares come back
+- [ ] Force a ZFS module build failure: alert arrives, and the system boots the last good kernel with its pools
 
 Data recovery:
 
-- [ ] Restore a deleted file from a snapshot in the Files app and through Windows Previous Versions
-- [ ] Restore a dataset from the `syncoid` backup
-- [ ] Restore config after a reinstall: shares, schedules and UIDs return
+- [ ] Restore a deleted file from a snapshot in Files and through Windows Previous Versions (ZFS and Btrfs)
+- [ ] Restore a share from a backup job, between matching and mismatched engines
+- [ ] Restore config after a reinstall: shares, schedules and user IDs return
 
-Access:
+Web and access:
 
-- [ ] Mount from an NFS client with a mismatched UID: a clear permission result, not a silent failure
-- [ ] Write to a "Shared folder" over NFS and SMB: each protocol can edit the other's files
-- [ ] Log in as a non-admin: Files shows only permitted folders and admin apps are hidden
+- [ ] Log in as a non-admin: admin apps are hidden and their API calls are refused
+- [ ] A request from another site, or without the session token, is refused
+- [ ] Repeated wrong passwords slow down and raise an alert
+- [ ] An idle session ends; a long upload keeps it alive
+- [ ] Mount from an NFS client with a mismatched user ID: a clear permission result
+- [ ] Write to a shared folder over NFS and SMB: each protocol can edit the other's files
 
 ## Open questions and risks
 
 **Still to confirm**
 
-- [ ] How does Cockpit let a plugin replace the default landing page?
-- [ ] Does your TrueNAS pool import read-only on Debian's ZFS?
+- [ ] Does the TrueNAS pool import read-only on Debian's ZFS?
+- [ ] Does the HBA run in IT mode, and does the backplane report bays (SES)?
 - [ ] Where will the signed apt repo be hosted?
 
 **Risks**
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Wrong disk chosen in the installer | Data loss | Partitioning is never preseeded, so a person always picks the disk; docs recommend unplugging data disks |
-| Existing pool mistaken for empty disks | Data loss | Pool scan runs first; ZFS labels are flagged |
-| ZFS module fails to build after a kernel update | Pool not mounted after reboot | Post-install check, last good kernel as boot default, alert |
-| Role install fails on first boot | Half-built system | Network check first, safe to rerun, separate completion marker |
-| Bug in pool or share scripts | Data loss | All destructive logic in `fellowship-nas-tools`, tested only in VMs, typed confirmations |
-| Cockpit can't handle large file transfers | Files app needs a redesign | Transfer test runs before Files work starts |
-| Pool loss | Data loss | Scheduled backup to a second pool, with overdue alerts |
-| Web desktop scope grows | Months instead of weeks | Apps ship as plain pages first; shell is last and can slip |
-| UID mismatch on NFS | Permission errors, confusing for users | Per-share user ID mode with a clear warning |
+| Wrong disk chosen in the installer | Data loss | Partitioning is never preseeded; docs recommend unplugging data disks |
+| Existing pool mistaken for empty disks | Data loss | Pool scan runs first; disks with labels or filesystems are flagged and need `--wipe` |
+| A security hole in our own web server | Someone on the LAN gets root | Privilege split, `fnas` as the only root door, LAN-only firewall, tests for every login and session rule, security review before release |
+| Three engines triple the work | Phases take longer | One engine layer in `fnas`; ZFS first, then mergerfs, then Btrfs, each with its own gate |
+| SnapRAID's unsynced window | Recent files lost with a disk | Nightly sync, the last sync shown in Storage, overdue alerts |
+| ZFS module fails after a kernel update | ZFS pools not mounted after reboot | Post-install check, last good kernel as default, alert |
+| Bug in pool or share scripts | Data loss | All destructive logic in `fnas`, tested in VMs, typed confirmations |
+| Pool loss | Data loss | Scheduled backup to another pool, with overdue alerts |
+| Desktop scope grows | Months instead of weeks | Apps reuse Phase 4's logic; the window manager is small and built once |
+| UID mismatch on NFS | Confusing permission errors | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 4." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 5." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

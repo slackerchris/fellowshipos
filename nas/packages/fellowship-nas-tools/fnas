@@ -96,7 +96,11 @@ CONFIG_DATASET = "fellowship-config"
 CONFIG_VERSION = 1
 ACCOUNT_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 # Actions that change nothing worth saving
-READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run"}
+READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub"}
+# SMART counters that should stay at zero on a healthy disk
+SMART_COUNTERS = {5: "reallocated sectors", 197: "sectors waiting to be reallocated",
+                  198: "unreadable sectors"}
+HOT_DISK = 55
 
 
 class FnasError(Exception):
@@ -536,6 +540,22 @@ def delete_share(name, confirm):
                         f'confirm by passing --confirm "{expected}"')
     run("zfs", "destroy", "-r", share["dataset"])
     write_smb_config()
+
+
+def set_smb_password(name, password):
+    """Let a local account log in to SMB shares; Samba keeps its own password list."""
+    if not os.path.isdir(SMB_DIR):
+        raise FnasError("SMB needs the fellowship-nas-smb package")
+    try:
+        account = pwd.getpwnam(name)
+    except KeyError:
+        raise FnasError(f"no such user: {name}") from None
+    if not (ACCOUNT_NAME.match(name) and 1000 <= account.pw_uid < 60000
+            and not account.pw_shell.endswith(("nologin", "false"))):
+        raise FnasError(f"{name} isn't a person's account")
+    if not password or "\n" in password:
+        raise FnasError("the password can't be empty or span lines")
+    run("smbpasswd", "-s", "-a", name, stdin=f"{password}\n{password}\n")
 
 
 def set_lan(value):
@@ -979,15 +999,60 @@ def config_findings():
                     f"fnas config adopt {pool} to replace them.") for pool in foreign_config_pools()]
 
 
+def find_problems(now):
+    pools = list_pools()
+    writable = [p["name"] for p in pools if p["readonly"] == "off"]
+    return (pool_findings(pools) + scrub_findings(writable, now)
+            + snapshot_findings(list_shares(), now) + backup_findings(now)
+            + kernel_findings() + config_findings())
+
+
+def disk_health(disk):
+    """Sum up what a disk's SMART data says, in words."""
+    result = run("smartctl", "--json", "-a", disk["path"], check=False)
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        data = {}
+    passed = data.get("smart_status", {}).get("passed")
+    temperature = data.get("temperature", {}).get("current")
+    notes = []
+    for attribute in data.get("ata_smart_attributes", {}).get("table", []):
+        count = attribute.get("raw", {}).get("value", 0)
+        if attribute.get("id") in SMART_COUNTERS and count:
+            notes.append(f"{count} {SMART_COUNTERS[attribute['id']]}")
+    nvme = data.get("nvme_smart_health_information_log", {})
+    if nvme.get("media_errors"):
+        notes.append(f"{nvme['media_errors']} media errors")
+    if nvme.get("percentage_used", 0) >= 90:
+        notes.append(f"has used {nvme['percentage_used']}% of its rated life")
+    if temperature is not None and temperature >= HOT_DISK:
+        notes.append(f"running hot at {temperature} °C")
+    if passed is None:
+        verdict = "unknown"
+        notes.insert(0, "doesn't report SMART health")
+    elif not passed or nvme.get("critical_warning"):
+        verdict = "failing"
+        notes.insert(0, "reports that it is failing: replace it soon")
+    else:
+        verdict = "watch" if notes else "healthy"
+    return {"path": disk["path"], "by_id": disk["by_id"], "model": disk["model"],
+            "serial": disk["serial"], "size": disk["size"], "state": disk["state"],
+            "verdict": verdict, "notes": notes, "temperature": temperature,
+            "hours": data.get("power_on_time", {}).get("hours")}
+
+
+def scrub_pool(name):
+    if name not in [p["name"] for p in list_pools()]:
+        raise FnasError(f"no imported pool: {name}")
+    run("zpool", "scrub", name)
+
+
 def run_checks():
     """Send an alert for each new problem, a reminder each day, and a note when one clears."""
     after_change()
     now = time.time()
-    pools = list_pools()
-    writable = [p["name"] for p in pools if p["readonly"] == "off"]
-    found = (pool_findings(pools) + scrub_findings(writable, now)
-             + snapshot_findings(list_shares(), now) + backup_findings(now)
-             + kernel_findings() + config_findings())
+    found = find_problems(now)
     previous = read_json(CHECK_STATE, {})
     current = {}
     for item in found:
@@ -1246,6 +1311,14 @@ def print_findings(found):
         print(f"    {item['message']}")
 
 
+def print_health(health):
+    print_findings(health["problems"])
+    for disk in health["disks"]:
+        print(f"{disk['by_id'] or disk['path']}: {disk['verdict']}")
+        for note in disk["notes"]:
+            print(f"    {note}")
+
+
 def print_config(saved):
     print(f"Saved {when(saved['saved'])}" + ("" if saved["install"] == install_id()
                                              else " by another install"))
@@ -1283,6 +1356,7 @@ def build_parser():
                          help="import a pool last used by another system, as after a reinstall")
     export = pool.add_parser("export", help="export a pool")
     export.add_argument("name")
+    pool.add_parser("scrub", help="check every block on a pool now").add_argument("name")
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
@@ -1301,6 +1375,13 @@ def build_parser():
     delete = share.add_parser("delete", help="destroy a share, its data and its snapshots")
     delete.add_argument("name")
     delete.add_argument("--confirm", default="", help='type "delete NAME and N snapshots"')
+
+    user = area.add_parser("user", help="accounts that use shares").add_subparsers(
+        dest="action", required=True)
+    smb_password = user.add_parser("smb-password", help="set the password a user types for SMB shares")
+    smb_password.add_argument("name")
+    smb_password.add_argument("--password-stdin", action="store_true", required=True,
+                              help="read the password from stdin")
 
     lan = area.add_parser("lan", help="the subnet shares are limited to").add_subparsers(
         dest="action", required=True)
@@ -1366,6 +1447,7 @@ def build_parser():
     adopt.add_argument("--confirm", default="", help='type "replace saved settings on POOL"')
 
     area.add_parser("check", help="look for problems and send alerts")
+    area.add_parser("health", help="show problems and each disk's SMART health, sending nothing")
     return parser
 
 
@@ -1380,6 +1462,9 @@ def dispatch(args):
         show(list_disks(), print_disks, args.all)
     elif args.area == "share":
         dispatch_share(args, show)
+    elif args.area == "user":
+        set_smb_password(args.name, read_secret(True))
+        print(f"{args.name} can log in to SMB shares")
     elif args.area == "lan":
         print(set_lan(args.subnet) if args.action == "set" else lan_subnet())
     elif args.area == "snapshot":
@@ -1392,6 +1477,9 @@ def dispatch(args):
         dispatch_config(args, show)
     elif args.area == "check":
         show(run_checks(), print_findings)
+    elif args.area == "health":
+        show({"problems": find_problems(time.time()),
+              "disks": [disk_health(d) for d in list_disks()]}, print_health)
     elif args.action == "list":
         show(list_pools(), print_pools)
     elif args.action == "scan":
@@ -1411,6 +1499,9 @@ def dispatch(args):
     elif args.action == "export":
         export_pool(args.name)
         print(f"Exported {args.name}")
+    elif args.action == "scrub":
+        scrub_pool(args.name)
+        print(f"Scrubbing {args.name}: fnas pool status {args.name} shows progress")
 
 
 def dispatch_share(args, show):
@@ -1489,7 +1580,7 @@ def dispatch_config(args, show):
         saved = saved_config(args.pool)
         if not saved:
             raise FnasError(f"{args.pool} has no saved settings")
-        show(saved, print_config)
+        show({**saved, "from_this_install": saved.get("install") == install_id()}, print_config)
     elif args.action == "restore":
         notes = restore_config(args.pool)
         print(f"Restored settings from {args.pool}")
@@ -1506,7 +1597,7 @@ def main():
         if os.geteuid() != 0:
             raise FnasError("run as root: sudo fnas ...")
         dispatch(args)
-        if args.area != "check" and args.action not in READ_ONLY_ACTIONS:
+        if args.area not in ("check", "health") and args.action not in READ_ONLY_ACTIONS:
             after_change()
     except FnasError as error:
         print(f"fnas: {error}", file=sys.stderr)

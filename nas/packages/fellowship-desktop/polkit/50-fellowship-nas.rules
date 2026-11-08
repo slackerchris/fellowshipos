@@ -1,0 +1,7 @@
+// nas-admins run fnas without a password prompt. fnas checks every
+// argument, so it is the only door to root that the web pages need.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.fellowshipos.fnas" && subject.isInGroup("nas-admins")) {
+        return polkit.Result.YES;
+    }
+});

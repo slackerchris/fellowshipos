@@ -1,0 +1,3 @@
+web/dist/* usr/share/cockpit/fellowship-desktop
+polkit/org.fellowshipos.fnas.policy usr/share/polkit-1/actions
+polkit/50-fellowship-nas.rules usr/share/polkit-1/rules.d
