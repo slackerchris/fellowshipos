@@ -3,5 +3,6 @@ d-i passwd/root-login boolean false
 d-i netcfg/get_hostname string fellowshipos
 d-i netcfg/get_domain string
 d-i console-setup/charmap47 select UTF-8
-# The installer leaves only the install media in sources.list
-d-i preseed/late_command string cp /target/usr/share/fellowshipos/sources.list /target/etc/apt/sources.list
+# The installer leaves only the install media in sources.list, and the live
+# installer's browser leaves its libraries behind when it is removed
+d-i preseed/late_command string cp /target/usr/share/fellowshipos/sources.list /target/etc/apt/sources.list; in-target apt-get autoremove --purge -y

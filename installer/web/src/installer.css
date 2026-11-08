@@ -1,0 +1,89 @@
+/* The desktop's palette, controls and wallpapers, so install and desktop look alike */
+@import "../../../nas/packages/fellowship-nas-web/web/src/style.css";
+
+body { overflow: auto; }
+
+.installer {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    background-color: var(--desktop);
+    background-image: var(--wallpaper);
+    background-position: center;
+    background-size: cover;
+    background-attachment: fixed;
+}
+.installer-card {
+    width: min(720px, 100%);
+    display: grid;
+    gap: 16px;
+    padding: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--gold);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+.brand { display: flex; gap: 14px; align-items: center; }
+.brand h1 { font-family: var(--serif); font-weight: 600; font-size: 1.65rem; letter-spacing: 0.02em; }
+.nav { justify-content: flex-end; }
+
+.disk {
+    display: grid;
+    gap: 4px;
+    text-align: left;
+    width: 100%;
+    padding: 12px 14px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+}
+.disk:hover:not(:disabled) { border-color: var(--gold); }
+.disk.chosen { border-color: var(--gold); background: var(--info-soft); box-shadow: inset 3px 0 0 var(--gold); }
+.disk:disabled { opacity: 0.55; cursor: not-allowed; }
+.disk-name { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.warning-text { color: var(--warning); }
+
+.layout-bar { display: flex; height: 26px; border-radius: 7px; overflow: hidden; border: 1px solid var(--border); }
+.layout-part { min-width: 6px; }
+.layout-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; }
+.layout-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.layout-system { background: var(--gold); }
+.layout-reserve { background: color-mix(in srgb, var(--gold) 40%, var(--surface-sunk)); }
+.layout-swap { background: var(--muted); }
+.layout-data { background: var(--good); }
+
+input[type="range"] { padding: 0; min-height: 28px; background: none; border: 0; accent-color: var(--accent); }
+
+th { width: 120px; }
+
+.progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.progress li { padding-left: 28px; position: relative; color: var(--muted); }
+.progress li::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 2px solid var(--border);
+}
+.progress li.done { color: var(--text); }
+.progress li.done::before { background: var(--good); border-color: var(--good); }
+.progress li.current { color: var(--text); font-weight: 600; }
+.progress li.current::before { border-color: var(--gold); border-top-color: transparent; animation: spin 0.9s linear infinite; }
+.progress li.failed { color: var(--bad); font-weight: 600; }
+.progress li.failed::before { background: var(--bad); border-color: var(--bad); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .progress li.current::before { animation: none; } }
+
+.log { max-height: 220px; overflow: auto; padding: 10px; background: var(--surface-sunk); border-radius: 7px; }
+
+@media (max-width: 600px) {
+    .installer-card { padding: 18px; }
+}

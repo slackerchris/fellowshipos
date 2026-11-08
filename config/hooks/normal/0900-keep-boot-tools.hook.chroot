@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+# The NAS installer pulls these in. Installed systems need them to boot, so
+# they must survive when the installer and its browser are autoremoved.
+apt-mark manual lvm2 gdisk parted dosfstools grub-efi-amd64 grub-efi-amd64-signed shim-signed efibootmgr > /dev/null

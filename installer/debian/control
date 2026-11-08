@@ -1,0 +1,17 @@
+Source: fellowship-installer
+Section: admin
+Priority: optional
+Maintainer: slackerchris <slackerchris@gmail.com>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~)
+Standards-Version: 4.7.0
+
+Package: fellowship-installer
+Architecture: any
+Depends: cage, cog, lvm2, gdisk, parted, dosfstools, e2fsprogs, squashfs-tools,
+ grub-efi-amd64, grub-efi-amd64-signed, shim-signed, efibootmgr, adduser,
+ ${shlibs:Depends}, ${misc:Depends}
+Description: FellowshipOS NAS installer
+ The graphical installer the boot menu's NAS entry starts. It runs in the
+ live system, shows its page full screen on the machine's own monitor, and
+ serves it to other computers after pairing. It never reaches an installed
+ system.

@@ -12,7 +12,7 @@ Revision 2 made four foundational choices without putting them to Chris: Cockpit
 | Web interface | Plain pages first, windowed desktop in the last phase | The windowed desktop from the start: login screen, desktop, windows, taskbar, launcher |
 | Storage engine | ZFS only, fixed by the role | Chosen per pool inside the OS: ZFS, Btrfs, or mergerfs + SnapRAID, side by side on one NAS |
 | Wizard roles | "NAS / Home Server" plus a separate "Storage node (mergerfs + SnapRAID)" | One NAS role; the storage node is absorbed as the mergerfs + SnapRAID engine |
-| Scale | Four disks, one data pool | 12–16 drives behind an HBA, several pools, multi-group ZFS pools, spares, multi-parity SnapRAID, drive bay identification |
+| Scale | Four disks, one data pool | Any machine: from one data disk to dozens, on SATA, SAS, NVMe or USB, with or without an HBA. Several pools, multi-group ZFS pools, spares, multi-parity SnapRAID, and drive bays where the hardware reports them |
 | Secure Boot | Stops the whole role | Only ZFS is unavailable, with the reason shown; Btrfs and mergerfs still work |
 | Share settings | ZFS dataset properties (`sharenfs`, `org.fellowshipos:*`) | Stored in each pool's config folder for every engine; `fnas` writes NFS exports and Samba files from them |
 | Backup | `syncoid` between two ZFS pools | Engine-native when both pools match (`syncoid`, `btrfs send`), `rsync` otherwise |
@@ -26,7 +26,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS: storage pools on 
 - Install FellowshipOS to disk from the ISO
 - One wizard option that turns an installed system into a NAS
 - Several pools at once, each on its own engine: ZFS, Btrfs, or mergerfs + SnapRAID
-- 12–16 drives behind an HBA, with each drive identified by bay where the hardware reports it
+- Any machine and any number of drives, from an old PC with one data disk to a 16-bay server behind an HBA. Nothing needs specific hardware; extras such as bay numbers and locate lights appear when the hardware supports them
 - NFS and SMB shares on any pool
 - Snapshots (ZFS and Btrfs), parity syncs (SnapRAID), scrubs, SMART monitoring and alerts
 - Scheduled backup from one pool to another
@@ -48,6 +48,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS: storage pools on 
 2. Use proven packages for storage and sharing (ZFS, Btrfs, mergerfs, SnapRAID, Samba, NFS). Write our own code for everything the user sees and for the path from browser to system.
 3. Anything that can destroy data happens behind a confirmation, never silently. The only disk the installer may touch is the OS disk, chosen by hand.
 4. The person using the NAS makes the choices: which engine, which layout, which disks. The system explains each option; it doesn't choose for them.
+5. It runs on whatever machine it is put in. The system finds out what the hardware offers and only shows options that work there: layouts the disk count allows, bay numbers where the enclosure reports them, a serial number and an activity-light blink where it doesn't.
 
 ## System architecture
 
@@ -68,15 +69,28 @@ NFS and SMB clients talk straight to their servers. The browser path always goes
 
 ## Install and first boot
 
-There are three separate stages, and each one owns its own decisions.
+FellowshipOS is an OS with many roles (base, Docker node, server, monitor, storage, NAS, and later a full desktop), built as an ISO and as an LXC template, and later perhaps a VM image. The NAS is one of those roles. **Nothing at install forces storage setup:** pools, RAID and ZFS are always optional and set up later from the NAS desktop.
 
-| Stage | Runs on | Decides |
+**The role decides the disk layout.** The ISO boots into a text menu that asks what the machine is for, and each choice takes its own path:
+
+| Choice | Installer | Disk layout |
 | --- | --- | --- |
-| Debian installer | ISO, local console | OS disk, first user, time zone |
-| First-boot wizard | `tty1`, local console | Hostname, SSH, role, LAN subnet |
-| NAS setup | The desktop, in a browser | Pools and their engines, shares, users, alerts, backup |
+| Base, Docker node, server, monitor, storage | Today's Debian text installer | The whole disk for the system; Docker's data lives there too, which suits a 16–32 GB VM disk |
+| NAS | A graphical FellowshipOS installer | The system on LVM, sized from the disk and the projected install; the rest left free for a data pool, set up later from the desktop |
+| Desktop (later) | To be decided with the desktop role | The whole disk for the system and home folders |
 
-**Debian installer:** `--debian-installer live` in `auto/config` makes the installer copy the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached. With data disks present, the installer's default partitioning method becomes "largest continuous free space", so the person must pick "use entire disk" and then the OS disk. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
+The choice carries through: the first-boot wizard starts with that role selected, and it can still be changed there.
+
+**The NAS installer** is a web page in the desktop's look, shown full screen on the machine's own monitor by a small built-in browser. The same installer is reachable from another computer's browser at an address the text menu prints, for a NAS with no monitor. The built-in display and browser add roughly 150–250 MB to the ISO and aren't installed on the target.
+
+- **Smart suggestions, shown as adjustable sliders.** The system's size comes from the projected install (base, NAS packages, ZFS builds), room for updates and for old kernels kept for rollback, and logs: about 16 GB on a 64 GB disk, 32 GB on 500 GB, 48 GB on 4 TB and more. Disks under about 64 GB give the whole disk to the system, since a split makes no sense there.
+- **Layout:** an EFI partition, an LVM area for the system (with a little free space so it can grow later from Settings), and a plain partition with the rest for data. The data part is a plain partition because ZFS works best outside LVM and a ZFS pool can't shrink later; that is why the suggestion matters at install time.
+- **Other disks are never touched.** Only the disk chosen for the system is written to, and it is named by model, size and serial. Disks holding old data are shown as such and left alone.
+- **Partitioning is our own code** on this path, so its gate covers every disk size and disks with old data on them.
+
+**Limit:** a one-disk machine installed as, say, a Docker node gives the system the whole disk. Making it a NAS later needs a second disk for data, or a reinstall.
+
+**Debian installer (non-NAS roles):** `--debian-installer live` in `auto/config` makes the installer copy the live system to disk. Partitioning stays manual and is never preseeded, because the data disks are attached. With data disks present, the installer's default partitioning method becomes "largest continuous free space", so the person must pick "use entire disk" and then the OS disk. The docs should recommend unplugging data disks for a first install if the OS disk isn't obvious.
 
 The installer needs three corrections, in place since Phase 0:
 
@@ -124,9 +138,10 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 **Disk handling**
 
 - Pools are always built from `/dev/disk/by-id` paths, so device names can change.
-- `fnas` never offers the OS disk, refuses disks in use, and needs `--wipe` plus a typed confirmation ("erase 6 disks") for disks with old data.
+- **The system disk can hold data too.** The NAS installer sizes the system to fit the disk and leaves a data partition (see Install and first boot). Storage offers it as "the rest of the system disk", so a machine with one disk is a working NAS with a single-disk pool. It is shown without redundancy, and Health suggests adding a disk to mirror it.
+- `fnas` never offers the system partitions themselves, refuses disks in use, and needs `--wipe` plus a typed confirmation ("erase 6 disks") for disks with old data.
 - **Drive bays:** where the HBA and backplane report enclosure slots (SES, through `/sys/class/enclosure`), disks are shown and alerted by bay ("Bay 7, serial ZL2…"). The locate light is blinked with `ledctl` or `sg_ses`. Without enclosure reporting, disks are identified by serial number, and "Identify" reads from the disk so its activity light flickers.
-- **HBA:** must run in IT (pass-through) mode, so every disk is visible on its own with its SMART data. SAS and SATA disks behind it are both supported.
+- **Controllers:** onboard SATA, NVMe, USB enclosures and HBAs all work. An HBA must run in IT (pass-through) mode so each disk is visible on its own with its SMART data; a RAID card that hides the disks is reported as such. USB disks are offered with a warning, since many USB bridges drop out under load or hide SMART data.
 - **Spin-down:** mergerfs data disks may spin down when idle (`hd-idle`); ZFS and Btrfs disks don't, because both touch every disk regularly.
 
 **ZFS** (built in Phases 1–3)
@@ -158,7 +173,7 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 
 ## Sharing
 
-**One owner per protocol, the same on every engine:** `fnas` keeps each share's settings in its pool's config folder and generates both protocols' configuration from them. ZFS's `sharenfs` and `sharesmb` properties aren't used (revision 2 used `sharenfs`; Phase 6 moves it).
+**One owner per protocol, the same on every engine:** `fnas` keeps each share's settings in its pool's config folder and generates both protocols' configuration from them. ZFS's `sharenfs` and `sharesmb` properties aren't used (revision 2 used `sharenfs`; Phase 7 moves it).
 
 **NFS:** `nfs-kernel-server`, NFSv4 only by default. `fnas` writes `/etc/exports.d/fellowship.exports`, restricted to the LAN subnet, never `*`.
 
@@ -316,7 +331,7 @@ nas/
 
 ## Build phases and test checklist
 
-No phase starts until the previous gate passes in a VM. From Phase 6 on, the VM has 16 virtual disks.
+No phase starts until the previous gate passes in a VM. From Phase 7 on, each gate runs on several machines: the system disk alone, one data disk, two disks, four disks, sixteen disks, and disks of mixed sizes, so nothing only works on a big box.
 
 | Phase | Work | Gate | Status |
 | --- | --- | --- | --- |
@@ -326,11 +341,12 @@ No phase starts until the previous gate passes in a VM. From Phase 6 on, the VM 
 | 3. Protection | Snapshots, backup, health, alerts, config copy | Failure tests pass from the CLI; a reinstall restores config | Done |
 | 4. Cockpit pages | Transfer test; Setup, Storage, Shares and Health on Cockpit | Superseded by revision 3 | Code carries over to Phase 5 |
 | 5. Web server and desktop | `fellowship-nas-web` with login, sessions, the helper split and the API; the desktop shell; Setup, Storage, Shares, Health, Alerts and Settings in windows; Cockpit removed | Full setup from the desktop in a browser; web security tests pass; non-admins can't reach admin apps or the API; no Cockpit installed | Done. Progress over server-sent events moves to Phase 6, with the long jobs it reports on |
-| 6. Many drives and ZFS depth | Progress for long jobs (server-sent events), drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | 16-disk VM: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
-| 7. mergerfs + SnapRAID | Engine, sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create, share, sync; fail a data disk and rebuild it; alerts for a missed sync | |
-| 8. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
-| 9. Files and remaining apps | Files, Snapshots and backup, Users | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
-| 10. Release | Theme and icons, hosted signed apt repo, updates in Settings | Updates arrive from the hosted repo | |
+| 6. Installer | Boot menu that asks for the role; the graphical NAS installer (built-in browser, also reachable over the network) with smart, adjustable sizes, LVM for the system and a data partition; the chosen role carried into the first-boot wizard | Install a NAS on 32 GB, 500 GB and 4 TB disks, and with old data on other disks: suggestions fit each, only the chosen disk is written, the system boots, and the free part becomes a pool from the desktop. Non-NAS roles install as before and use the whole disk | Done |
+| 7. Any number of drives and ZFS depth | Growing the system into its room to grow from Settings, progress for long jobs (server-sent events), drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | On the system disk alone, then one, two, four and sixteen disks, only the layouts that fit are offered and each works; a one-disk machine shares files from the rest of its system disk. On sixteen: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
+| 8. mergerfs + SnapRAID | Engine, sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create, share, sync; fail a data disk and rebuild it; alerts for a missed sync | |
+| 9. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
+| 10. Files and remaining apps | Files, Snapshots and backup, Users | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
+| 11. Release | Theme and icons, hosted signed apt repo, updates in Settings | Updates arrive from the hosted repo | |
 
 **Failure tests (run in the VM before every release)**
 
@@ -377,7 +393,7 @@ Web and access:
 **Still to confirm**
 
 - [ ] Does the TrueNAS pool import read-only on Debian's ZFS?
-- [ ] Does the HBA run in IT mode, and does the backplane report bays (SES)?
+- [ ] On Chris's own server: does the HBA run in IT mode, and does the backplane report bays (SES)? This only decides whether that box gets bay numbers; nothing depends on it
 - [ ] Where will the signed apt repo be hosted?
 
 **Risks**
@@ -396,4 +412,4 @@ Web and access:
 | UID mismatch on NFS | Confusing permission errors | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 6." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 7." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

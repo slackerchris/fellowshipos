@@ -43,6 +43,7 @@ run "Building" docker run --rm \
         apt-get update -qq
         apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev
         nas/packages/build.sh
+        installer/build.sh
         lb clean
         lb config
         lb build

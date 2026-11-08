@@ -111,7 +111,7 @@ header
 section "System"
 
 while true; do
-    prompt "Hostname" "fellowshipos" SETUP_HOSTNAME
+    prompt "Hostname" "$(hostname 2>/dev/null || echo fellowshipos)" SETUP_HOSTNAME
     if valid_hostname "$SETUP_HOSTNAME"; then
         break
     fi
@@ -119,7 +119,7 @@ while true; do
 done
 
 while true; do
-    prompt "Timezone" "UTC" SETUP_TZ
+    prompt "Timezone" "$(cat /etc/timezone 2>/dev/null || echo UTC)" SETUP_TZ
     if valid_timezone "$SETUP_TZ"; then
         break
     fi
@@ -197,8 +197,12 @@ fi
 echo "    7) Skip for now"
 echo ""
 
+# The NAS installer records the role chosen in the boot menu
+ROLE_DEFAULT=1
+[ "$(cat /etc/fellowshipos/install-role 2>/dev/null)" = "nas" ] && [ "$NAS_AVAILABLE" = "Y" ] && ROLE_DEFAULT=6
+
 while true; do
-    prompt "Choice" "1" SETUP_FLAVOR_CHOICE
+    prompt "Choice" "$ROLE_DEFAULT" SETUP_FLAVOR_CHOICE
     case "$SETUP_FLAVOR_CHOICE" in
         6)
             [ "$NAS_AVAILABLE" = "Y" ] && break

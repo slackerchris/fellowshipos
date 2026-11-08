@@ -4,9 +4,13 @@
 #   vm.sh boot      Boot the installed disk (monitor socket in the work dir);
 #                   extra arguments go to QEMU, such as a second network card
 #   vm.sh live      Boot the ISO's live session
+#   vm.sh nas       Boot the ISO's graphical NAS installer, reachable from
+#                   this machine at http://localhost:8088
 #   vm.sh clean     Delete the VM disks
 # FELLOWSHIP_DISK_ORDER="4 3 2 1" attaches the data disks in a different order.
 # FELLOWSHIP_KEEP_DATA=1 keeps the data disks through an install, to test a reinstall.
+# FELLOWSHIP_OS_SIZE=500G sets the system disk's size (default 20G); disks are sparse.
+# FELLOWSHIP_KEEP_OS=1 keeps the system disk too, to test installing over an old install.
 set -e
 
 cd "$(dirname "$0")"
@@ -31,7 +35,7 @@ qemu() {
         -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
         -drive "if=pflash,format=raw,file=$WORK/vars.fd" \
         "${disks[@]}" \
-        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8443-:443 \
+        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8443-:443,hostfwd=tcp:127.0.0.1:8088-:80 \
         -display none \
         -serial "file:$WORK/serial-$MODE.log" \
         -monitor "unix:$WORK/monitor.sock,server,nowait" \
@@ -39,8 +43,10 @@ qemu() {
 }
 
 create_disks() {
-    cp "$OVMF_VARS" "$WORK/vars.fd"
-    qemu-img create -q -f qcow2 "$WORK/os.qcow2" 20G
+    if [ -z "$FELLOWSHIP_KEEP_OS" ]; then
+        cp "$OVMF_VARS" "$WORK/vars.fd"
+        qemu-img create -q -f qcow2 "$WORK/os.qcow2" "${FELLOWSHIP_OS_SIZE:-20G}"
+    fi
     [ -n "$FELLOWSHIP_KEEP_DATA" ] && return
     for i in 1 2 3 4; do
         qemu-img create -q -f qcow2 "$WORK/data$i.qcow2" 2G
@@ -114,6 +120,13 @@ case "$MODE" in
     live)
         create_disks
         boot_iso
+        ;;
+    nas)
+        create_disks
+        boot_iso -no-reboot &
+        VM=$!
+        sleep 15; keys n                        # GRUB: Install FellowshipOS NAS
+        wait "$VM"
         ;;
     clean)
         rm -rf "$WORK"

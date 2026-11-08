@@ -1,0 +1,27 @@
+[Unit]
+Description=FellowshipOS NAS installer on this screen
+ConditionKernelCommandLine=fellowship.installer=nas
+After=fellowship-installer.service systemd-user-sessions.service
+Wants=fellowship-installer.service
+# The installer takes the first screen instead of a login prompt
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=fellowship-kiosk
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+Environment=XDG_SESSION_TYPE=wayland
+# Machines without a graphics driver, such as most VMs, draw in software
+Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
+Environment=WLR_NO_HARDWARE_CURSORS=1
+ExecStart=/usr/bin/cage -s -- /usr/bin/cog http://127.0.0.1/
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target multi-user.target

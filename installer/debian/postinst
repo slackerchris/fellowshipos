@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # The kiosk browser runs as its own account, not as root
+    getent passwd fellowship-kiosk > /dev/null || \
+        adduser --system --group --home /var/lib/fellowship-kiosk fellowship-kiosk
+    for group in video render input; do
+        getent group "$group" > /dev/null && adduser fellowship-kiosk "$group" > /dev/null
+    done
+fi
+
+#DEBHELPER#

@@ -64,9 +64,20 @@ Build logs are written to:
 ### 1) Live ISO
 
 - File: `live-image-amd64.hybrid.iso`
-- Purpose: Live session, plus "Start installer" in the boot menu to install to disk
+- Purpose: install FellowshipOS to disk, or try it live
 
-The installer asks for the OS disk, first user and time zone. Partitioning erases the disk you choose, so check it carefully if data disks are attached.
+The boot menu asks what the machine is for:
+
+- **Install FellowshipOS (base, Docker, server, monitor, storage)** uses Debian's text installer and gives the whole disk to the system. It asks for the OS disk, first user and time zone. Partitioning erases the disk you choose, so check it carefully if data disks are attached.
+- **Install FellowshipOS NAS (graphical)** opens FellowshipOS's own installer, full screen on the machine's monitor. To install from another computer instead, open the address it shows there and type the pairing code from the machine's screen. It:
+  - lists every disk with what's on it, and only ever changes the one you choose;
+  - suggests a split from the disk's size: the system on LVM (with room to grow later), swap, and the rest as an empty data partition you can turn into storage from the desktop whenever you like. Disks under 64 GB give everything to the system. A slider changes the system's size;
+  - asks for the NAS's name, time zone and your account, then needs "erase DISK" typed before it starts.
+
+  After the restart, the first-boot wizard already has the NAS role selected. The NAS installer needs UEFI firmware; on a machine that starts in legacy BIOS mode, use the text installer.
+- **Try FellowshipOS (live)** starts the live system without installing.
+
+Nothing at install sets up storage: pools, RAID and ZFS are always optional, and set up later from the NAS desktop.
 
 ### 2) Proxmox LXC Template
 
@@ -187,6 +198,8 @@ sudo fnas pool create tank raidz1 SERIAL1 SERIAL2 SERIAL3 --confirm "erase 3 dis
 
 Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
 
+On a machine installed with the NAS installer, `disk list` also offers the empty data partition on the system disk as "the free part of the system disk", so a machine with one disk can still hold a pool. Only that partition is used; the system's own partitions are never offered.
+
 ## NAS Shares
 
 Each share is a dataset in `POOL/shares`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard:
@@ -296,6 +309,8 @@ sudo fellowshipos-setup
 - `config/package-lists/`: package selections
 - `config/includes.chroot/`: files injected into target rootfs
 - `config/hooks/normal/`: build-time install/customization hooks
+- `config/bootloaders/grub-pc/`: the boot menu
+- `installer/`: the graphical NAS installer (Go engine and its page); `installer/cmd/fellowship-installer -demo` shows sample disks and pretends to install, for working on the page
 - `proxmox/create-ct.sh`: helper for creating LXC containers from template
 
 ## Notes

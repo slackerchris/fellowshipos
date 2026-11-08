@@ -38,6 +38,7 @@ DATASET_PROPERTIES = ["compression=lz4", "atime=off", "xattr=sa",
 DEFAULT_DATASETS = ["shares", "home", "backups", "fellowship-config"]
 LAYOUT_MIN_DISKS = {"single": 1, "mirror": 2, "raidz1": 3, "raidz2": 4}
 # Stable names first: wwn and eui links exist alongside these on most disks
+SYSTEM_DATA_LABEL = "fellowship-data"
 BY_ID_PREFERENCE = ("ata-", "nvme-", "scsi-", "virtio-", "usb-", "wwn-")
 
 LAN_FILE = "/etc/fellowshipos/nas-lan"
@@ -139,13 +140,13 @@ def human_size(size):
     return f"{value:.1f} PB"
 
 
-def by_id_links():
-    """Map each whole-disk device to its preferred /dev/disk/by-id path."""
+def by_id_links(partitions=False):
+    """Map each whole-disk device (or each partition) to its preferred /dev/disk/by-id path."""
     links = {}
     if not os.path.isdir(BY_ID_DIR):
         return links
     for name in sorted(os.listdir(BY_ID_DIR)):
-        if "-part" in name or not name.startswith(BY_ID_PREFERENCE):
+        if ("-part" in name) != partitions or not name.startswith(BY_ID_PREFERENCE):
             continue
         rank = next(i for i, p in enumerate(BY_ID_PREFERENCE) if name.startswith(p))
         path = os.path.join(BY_ID_DIR, name)
@@ -197,10 +198,34 @@ def classify(device, pool_devices):
     return "empty", ""
 
 
+def system_data_part(device, pool_devices, part_links):
+    """The FellowshipOS installer leaves the rest of the system disk as a
+    partition labelled fellowship-data, so a one-disk machine can hold a pool."""
+    for part in device.get("children") or []:
+        if part.get("partlabel") != SYSTEM_DATA_LABEL:
+            continue
+        state, reason = classify(part, pool_devices)
+        return {
+            "path": part["path"],
+            "by_id": part_links.get(part["path"]),
+            "size": part["size"],
+            "model": (device.get("model") or "").strip(),
+            # Left out so the system disk's serial can't select this by mistake
+            "serial": "",
+            "state": state,
+            "reason": reason or "the free part of the system disk",
+            "partitions": [],
+            "kind": "partition",
+            "disk": device["path"],
+        }
+    return None
+
+
 def list_disks():
     output = run("lsblk", "-J", "-b", "-o",
-                 "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINTS").stdout
+                 "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINTS,PARTLABEL").stdout
     links = by_id_links()
+    part_links = by_id_links(partitions=True)
     pool_devices = imported_pool_devices()
     disks = []
     for device in json.loads(output)["blockdevices"]:
@@ -217,7 +242,12 @@ def list_disks():
             "state": state,
             "reason": reason,
             "partitions": [d["path"] for d in walk(device)][1:],
+            "kind": "disk",
         })
+        if state == "os":
+            data = system_data_part(device, pool_devices, part_links)
+            if data:
+                disks.append(data)
     return disks
 
 
@@ -1658,7 +1688,7 @@ def dispatch(args):
         show(run_checks(), print_findings)
     elif args.area == "health":
         show({"problems": find_problems(time.time()),
-              "disks": [disk_health(d) for d in list_disks()]}, print_health)
+              "disks": [disk_health(d) for d in list_disks() if d["kind"] == "disk"]}, print_health)
     elif args.action == "list":
         show(list_pools(), print_pools)
     elif args.action == "scan":

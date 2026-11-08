@@ -14,3 +14,4 @@ config/chroot
 config/common
 config/source
 config/includes.chroot/usr/share/fellowshipos/nas-repo/
+config/packages.chroot/*.deb

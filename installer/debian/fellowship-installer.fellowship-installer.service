@@ -1,0 +1,13 @@
+[Unit]
+Description=FellowshipOS NAS installer
+# Only when the boot menu's NAS entry was chosen
+ConditionKernelCommandLine=fellowship.installer=nas
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/lib/fellowship-installer/fellowship-installer
+StandardOutput=journal+console
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

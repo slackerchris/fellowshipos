@@ -24,9 +24,9 @@ def disk(name, children=(), fstype=None, mounts=(None,), serial=None):
             "mountpoints": list(mounts), "children": list(children)}
 
 
-def part(name, fstype=None, mounts=(None,)):
+def part(name, fstype=None, mounts=(None,), label=None):
     return {"name": name, "path": f"/dev/{name}", "type": "part", "size": GB, "model": None,
-            "serial": None, "fstype": fstype, "mountpoints": list(mounts)}
+            "serial": None, "fstype": fstype, "mountpoints": list(mounts), "partlabel": label}
 
 
 OS_DISK = disk("vda", [part("vda1", "vfat", ["/boot/efi"]), part("vda2", "ext4", ["/"])])
@@ -56,9 +56,16 @@ class Fake:
         return ok
 
 
-def links():
+def links(partitions=False):
     names = "vda vdb vdc vdd vde".split()
+    if partitions:
+        return {f"/dev/{n}{i}": f"/dev/disk/by-id/virtio-{n.upper()}-part{i}" for n in names for i in (1, 2, 3)}
     return {f"/dev/{n}": f"/dev/disk/by-id/virtio-{n.upper()}" for n in names}
+
+
+# What the FellowshipOS NAS installer leaves: EFI, LVM for the system, and a data partition
+INSTALLED_DISK = disk("vda", [part("vda1", "vfat", ["/boot/efi"]), part("vda2", "LVM2_member", [None], "fellowship-system"),
+                              part("vda3", None, [None], "fellowship-data")])
 
 
 class Base(unittest.TestCase):
@@ -97,6 +104,17 @@ class Disks(Base):
         pools = "tank\t1\t-\n\tmirror-0\t1\t-\n\t/dev/vdb1\t1\t-\n"
         self.assertEqual(self.state(device, pools), "in-use")
 
+    def test_offers_the_rest_of_the_system_disk(self):
+        INSTALLED_DISK["children"][1]["children"] = [
+            {"name": "fellowship-root", "path": "/dev/mapper/fellowship-root", "type": "lvm", "size": GB,
+             "fstype": "ext4", "mountpoints": ["/"]}]
+        self.use(Fake([INSTALLED_DISK, disk("vdb")]))
+        disks = fnas.list_disks()
+        self.assertEqual([(d["path"], d["state"], d["kind"]) for d in disks],
+                         [("/dev/vda", "os", "disk"), ("/dev/vda3", "empty", "partition"), ("/dev/vdb", "empty", "disk")])
+        self.assertEqual(disks[1]["by_id"], "/dev/disk/by-id/virtio-VDA-part3")
+        self.assertEqual(disks[1]["serial"], "")
+
     def test_skips_empty_readers_zvols_and_floppies(self):
         reader = disk("sdz")
         reader["size"] = 0
@@ -126,6 +144,16 @@ class Create(Base):
             "-O", "xattr=sa", "-O", "acltype=posixacl", "-O", "dnodesize=auto", "tank", "raidz1",
             "/dev/disk/by-id/virtio-VDB", "/dev/disk/by-id/virtio-VDC", "/dev/disk/by-id/virtio-VDD"))
         self.assertEqual(calls[1:], [("zfs", "create", f"tank/{d}") for d in fnas.DEFAULT_DATASETS])
+
+    def test_pool_on_the_rest_of_the_system_disk(self):
+        INSTALLED_DISK["children"][1]["children"] = [
+            {"name": "fellowship-root", "path": "/dev/mapper/fellowship-root", "type": "lvm", "size": GB,
+             "fstype": "ext4", "mountpoints": ["/"]}]
+        calls = self.create(Fake([INSTALLED_DISK]), "tank", "single", ["/dev/vda3"])
+        create = next(c for c in calls if c[:2] == ("zpool", "create"))
+        self.assertEqual(create[-1], "/dev/disk/by-id/virtio-VDA-part3")
+        self.assertFalse([c for c in calls if "/dev/vda" in c or "/dev/vda1" in c or "/dev/vda2" in c],
+                         "only the data partition may be touched")
 
     def test_never_passes_force(self):
         device = disk("vdb", [part("vdb1", "zfs_member")])
