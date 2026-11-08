@@ -249,7 +249,7 @@ The desktop is the interface from the start. Every app opens in a window; there 
   | Warnings | Amber `#E0A452` |
   | Errors | Muted vermilion `#D87667` |
 
-  Misty mountain wallpaper, generated at build time, and a restrained serif for the FellowshipOS wordmark. Nothing is copied from DSM or FygoOS.
+  Wallpapers Chris chose, made in Canva: a dusty walking path across an open field toward a forest and mountains, stormy for the dark theme and sunny for the light one. A drawn misty mountain scene, generated at build time, shows only if a photo fails to load. A restrained serif for the FellowshipOS wordmark. Nothing is copied from DSM or FygoOS.
 
 **Apps in v1**
 

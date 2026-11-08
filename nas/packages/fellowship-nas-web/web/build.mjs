@@ -1,6 +1,6 @@
 // Bundles the desktop into dist/, which the server serves as it is
 import * as esbuild from "esbuild";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 
 mkdirSync("dist", { recursive: true });
 
@@ -131,6 +131,10 @@ ${layers.map((layer, i) => `<path d="${fill(layer.points)}${layer.trees}" fill="
 `;
 }
 
+// Chris's wallpapers, made in Canva. The drawn mountains sit behind them and
+// show only if a photo can't be loaded.
+copyFileSync("wallpapers/dark.jpg", "dist/wallpaper-dark.jpg");
+copyFileSync("wallpapers/light.jpg", "dist/wallpaper-light.jpg");
 writeFileSync("dist/wallpaper-dark.svg", wallpaper("dark"));
 writeFileSync("dist/wallpaper-light.svg", wallpaper("light"));
 
@@ -143,7 +147,7 @@ const options = {
     jsx: "automatic",
     jsxImportSource: "preact",
     // The wallpapers sit next to the stylesheet; leave their addresses alone
-    external: ["*.svg"],
+    external: ["*.svg", "*.jpg"],
     logLevel: "info",
 };
 

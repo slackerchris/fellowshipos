@@ -17,7 +17,7 @@
     --good: #3f7a46;
     --warning: #9a6316;
     --bad: #a8463a;
-    --wallpaper: url("wallpaper-light.svg");
+    --wallpaper: url("wallpaper-light.jpg"), url("wallpaper-light.svg");
     --icon-label: #101a17;
     --icon-shadow: 0 1px 2px rgb(244 239 227 / 0.9);
     --icon-hover: rgb(251 248 240 / 0.6);
@@ -41,7 +41,7 @@
         --good: #86b88a;
         --warning: #e0a452;
         --bad: #d87667;
-        --wallpaper: url("wallpaper-dark.svg");
+        --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
         --icon-label: #efe7d5;
         --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
         --icon-hover: rgb(16 26 23 / 0.45);
@@ -65,7 +65,7 @@
     --good: #86b88a;
     --warning: #e0a452;
     --bad: #d87667;
-    --wallpaper: url("wallpaper-dark.svg");
+    --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
     --icon-label: #efe7d5;
     --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
     --icon-hover: rgb(16 26 23 / 0.45);
