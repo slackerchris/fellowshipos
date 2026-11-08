@@ -10,8 +10,9 @@ from .engines import zfs
 POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 ENGINES = {"zfs": zfs}
-# Where pools are mounted, as /NAME
-ROOT = "/"
+# Every pool is mounted at /mnt/NAME, on every engine, so no pool name can
+# collide with a folder the system uses
+ROOT = "/mnt"
 
 
 def check_pool_name(name):
@@ -72,12 +73,11 @@ def check_new_name(name):
     check_pool_name(name)
     if name in [p["name"] for p in list_pools()] + [p.get("pool") for p in scan_pools()]:
         raise FnasError(f"a pool named {name} already exists")
-    # A pool is mounted at /NAME, which mustn't be a folder the system uses. An
-    # empty folder, such as one an exported pool left behind, is fine.
+    # An empty folder, such as one an exported pool left behind, is fine
     path = os.path.join(ROOT, name)
     if os.path.lexists(path) and (not os.path.isdir(path) or os.path.islink(path)
                                   or os.path.ismount(path) or os.listdir(path)):
-        raise FnasError(f"/{name} is already a folder on this system, so choose another name")
+        raise FnasError(f"{path} is already in use, so choose another name")
 
 
 def engine_named(name):
@@ -87,3 +87,8 @@ def engine_named(name):
     if reason:
         raise FnasError(f"{name} can't be used here: {reason}")
     return ENGINES[name]
+
+
+def mountpoint(name):
+    return os.path.join(ROOT, name)
+

@@ -73,10 +73,10 @@ DEFAULT = {
     "pools": [{"name": "tank", "size": 16 * 10 ** 12, "allocated": 9 * 10 ** 12, "free": 7 * 10 ** 12,
                "health": "ONLINE", "readonly": False, "engine": "zfs"}],
     "shares": [
-        {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/tank/shares/media",
+        {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/mnt/tank/shares/media",
          "mode": "shared", "nfs": True, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
          "readonly": False},
-        {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/tank/shares/family",
+        {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/mnt/tank/shares/family",
          "mode": "matched", "nfs": False, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
          "readonly": False},
     ],

@@ -78,8 +78,10 @@ EMPTY = [disk(n) for n in ("vdb", "vdc", "vdd", "vde")]
 class Fake:
     """Answers the read-only commands and records everything else."""
 
-    def __init__(self, devices, pools="", imports="", import_rc=1):
+    def __init__(self, devices, pools="", imports="", import_rc=1, mounted_by="default"):
         self.devices, self.pools, self.imports, self.import_rc = devices, pools, imports, import_rc
+        # Where an imported pool's mountpoint comes from: "default" (/NAME) or "local"
+        self.mounted_by = mounted_by
         self.calls = []
 
     def __call__(self, *command, check=True, stdin=None):
@@ -93,6 +95,8 @@ class Fake:
         elif command == ("zpool", "import", "-d", fnas.BY_ID_DIR):
             ok.stdout, ok.returncode = self.imports, self.import_rc
             ok.stderr = "" if self.imports else "no pools available to import"
+        elif command[:2] == ("zfs", "get") and "value,source" in command:
+            ok.stdout = f"/{command[-1]}\t{self.mounted_by}\n"
         else:
             self.calls.append(command)
         return ok
@@ -191,9 +195,10 @@ class Create(Base):
         self.assertEqual(fake.calls, [], "a refused create must change nothing")
 
     def test_uses_by_id_paths_and_plan_defaults(self):
-        calls = self.create(Fake(EMPTY), "tank", "raidz1", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
+        with patch("ROOT", "/mnt"):
+            calls = self.create(Fake(EMPTY), "tank", "raidz1", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
         self.assertEqual(calls[0], (
-            "zpool", "create", "-o", "ashift=12", "-O", "compression=lz4", "-O", "atime=off",
+            "zpool", "create", "-m", "/mnt/tank", "-o", "ashift=12", "-O", "compression=lz4", "-O", "atime=off",
             "-O", "xattr=sa", "-O", "acltype=posixacl", "-O", "dnodesize=auto", "tank", "raidz1",
             "/dev/disk/by-id/virtio-VDB", "/dev/disk/by-id/virtio-VDC", "/dev/disk/by-id/virtio-VDD"))
         self.assertEqual(calls[1:], [("zfs", "create", f"tank/{d}") for d in fnas.DEFAULT_DATASETS])
@@ -266,12 +271,12 @@ class Create(Base):
         self.refused("already exists", "tank", "single", ["/dev/vdb"],
                      imports="   pool: tank\n     id: 1\n  state: ONLINE\n")
 
-    def test_refuses_names_of_system_folders(self):
+    def test_refuses_a_name_already_in_use_under_mnt(self):
         with tempfile.TemporaryDirectory() as root:
             os.makedirs(os.path.join(root, "home", "tester"))
             os.mkdir(os.path.join(root, "tank"))
             with patch("ROOT", root):
-                self.refused("already a folder", "home", "single", ["/dev/vdb"])
+                self.refused("already in use", "home", "single", ["/dev/vdb"])
                 calls = self.create(Fake(EMPTY), "tank", "single", ["/dev/vdb"])
             self.assertEqual(calls[0][:2], ("zpool", "create"))
 
@@ -692,16 +697,36 @@ class Scan(Base):
 
 class Import(Base):
     IMPORTS = "   pool: tank\n     id: 123\n  state: ONLINE\n"
+    IMPORT = ("zpool", "import", "-d", fnas.BY_ID_DIR)
 
-    def test_read_only(self):
+    def setUp(self):
+        super().setUp()
+        patcher = patch("ROOT", "/mnt")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_moves_a_pool_made_elsewhere_under_mnt(self):
+        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
+        fnas.import_pool("tank", False)
+        self.assertEqual(fake.calls, [(*self.IMPORT, "-N", "tank"), ("zfs", "set", "mountpoint=/mnt/tank", "tank"),
+                                      ("zfs", "mount", "-a")])
+
+    def test_a_pool_made_here_keeps_its_place(self):
+        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0, mounted_by="local"))
+        fnas.import_pool("tank", False)
+        self.assertEqual(fake.calls, [(*self.IMPORT, "-N", "tank"), ("zfs", "mount", "-a")])
+
+    def test_read_only_goes_under_mnt_without_writing(self):
         fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
         fnas.import_pool("tank", True)
-        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "-o", "readonly=on", "tank")])
+        self.assertEqual(fake.calls, [(*self.IMPORT, "-o", "readonly=on", "-N", "tank"), ("zpool", "export", "tank"),
+                                      (*self.IMPORT, "-o", "readonly=on", "-N", "-o", "altroot=/mnt", "tank"),
+                                      ("zfs", "mount", "-a")])
 
     def test_by_id(self):
-        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
+        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0, mounted_by="local"))
         fnas.import_pool("123", False)
-        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "123")])
+        self.assertEqual(fake.calls[0], (*self.IMPORT, "-N", "123"))
 
     def test_only_imports_what_a_scan_found(self):
         fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
@@ -721,9 +746,9 @@ class Import(Base):
         self.assertEqual(fake.calls, [])
 
     def test_foreign_pool_with_force(self):
-        fake = self.use(Fake([], imports=self.FOREIGN, import_rc=0))
+        fake = self.use(Fake([], imports=self.FOREIGN, import_rc=0, mounted_by="local"))
         fnas.import_pool("tank", False, force=True)
-        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "-f", "tank")])
+        self.assertEqual(fake.calls[0], (*self.IMPORT, "-f", "-N", "tank"))
 
     def test_never_forces_a_pool_in_use(self):
         fake = self.use(Fake([], imports=self.ACTIVE, import_rc=0))
@@ -732,9 +757,9 @@ class Import(Base):
         self.assertEqual(fake.calls, [])
 
     def test_force_is_not_used_when_not_needed(self):
-        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
+        fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0, mounted_by="local"))
         fnas.import_pool("tank", False, force=True)
-        self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "tank")])
+        self.assertEqual(fake.calls[0], (*self.IMPORT, "-N", "tank"))
 
 
 def volume_line(name, pool="tank", readonly="off", sharenfs="off", mode="-", smb="-", policy="-"):

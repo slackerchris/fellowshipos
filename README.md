@@ -197,7 +197,7 @@ sudo fnas pool layouts SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5
 sudo fnas pool create tank raidz2 SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5 --width 4 --spares 1 --confirm "erase 5 disks"
 ```
 
-Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
+Every pool mounts at `/mnt/NAME`, and importing a pool made elsewhere moves it there. Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
 
 `pool layouts` lists every layout the chosen disks fit (single, mirror, RAIDZ1, RAIDZ2 or RAIDZ3, in one or more groups, with up to two hot spares), with the usable space and how many failed disks each group survives. The first is the recommended one: RAIDZ2 in groups of 6 to 10 disks for larger sets. `--width` is the number of disks in each group, and `--spares` how many of the disks stand by to replace a failed one at once. Disks of similar size are grouped together and the largest become the spares; disks of different sizes in one group work, but the extra space on the larger ones goes unused, and the Storage app says how much.
 
@@ -221,7 +221,7 @@ The installer also leaves room beside the system on its LVM volume group. Give t
 
 ## NAS Shares
 
-Each share is a dataset in `POOL/shares`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard. Its settings live in the pool's `fellowship-config/shares.json`, so they move with the pool, and `fnas` writes `/etc/exports.d/fellowship.exports` and the Samba files from them:
+Each share is a dataset in `POOL/shares`, mounted at `/mnt/POOL/shares/NAME`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard. Its settings live in the pool's `fellowship-config/shares.json`, so they move with the pool, and `fnas` writes `/etc/exports.d/fellowship.exports` and the Samba files from them:
 
 ```bash
 sudo fnas share create media tank --mode shared --nfs --smb

@@ -196,7 +196,7 @@ def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0)
     pools.check_new_name(name)
     disks.check_confirmation(chosen, confirm)
     disks.prepare(chosen, wipe_disks)
-    command = ["zpool", "create"]
+    command = ["zpool", "create", "-m", pools.mountpoint(name)]
     for prop in POOL_PROPERTIES:
         command += ["-o", prop]
     for prop in DATASET_PROPERTIES:
@@ -437,6 +437,7 @@ def import_pool(pool, readonly, force=False):
     if not found:
         raise FnasError(f"no importable pool: {pool}")
     status = found[0].get("status", "")
+    name = found[0]["pool"]
     command = ["zpool", "import", "-d", disks.BY_ID_DIR]
     if "currently imported by another system" in status:
         # Multihost protection: another machine has it imported right now
@@ -449,7 +450,18 @@ def import_pool(pool, readonly, force=False):
         command.append("-f")
     if readonly:
         command += ["-o", "readonly=on"]
-    run(*command, pool)
+    # Imported without mounting, so a pool made elsewhere can be moved under /mnt first
+    run(*command, "-N", pool)
+    value, source = run("zfs", "get", "-H", "-o", "value,source", "mountpoint", name).stdout.split("\t")
+    if source.strip() == "default":
+        if readonly:
+            # Nothing can be written to it, so it is imported again with /mnt in
+            # front of every path, for as long as it stays imported
+            run("zpool", "export", name)
+            run(*command, "-N", "-o", f"altroot={pools.ROOT}", pool)
+        else:
+            run("zfs", "set", f"mountpoint={pools.mountpoint(name)}", name)
+    run("zfs", "mount", "-a")
     shares.migrate()
     shares.write_config()
 

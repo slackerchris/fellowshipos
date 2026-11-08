@@ -101,7 +101,7 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                 const shown = all ? options || [] : (options || []).slice(0, SHOWN_LAYOUTS);
                 return (
                     <form class="stack" onSubmit={event => { event.preventDefault(); setConfirming(true); }}>
-                        <Field label="Pool name" hint="Shares live under /NAME/shares">
+                        <Field label="Pool name" hint="It is mounted at /mnt/NAME, with shares in /mnt/NAME/shares">
                             <input value={name} onInput={event => setName(event.currentTarget.value)} />
                         </Field>
                         <div class="row">

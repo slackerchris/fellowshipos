@@ -118,7 +118,7 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 
 ## Storage
 
-**One idea for every engine:** a pool is a named set of disks mounted at `/NAME`, with shares inside it and a config folder that remembers its settings. The Storage app shows every pool the same way and says plainly what each engine can and can't do. Different pools can use different engines on the same NAS, for example a ZFS pool for family files, a mergerfs pool for films, and a Btrfs mirror of two SSDs.
+**One idea for every engine:** a pool is a named set of disks mounted at `/mnt/NAME`, with shares inside it and a config folder that remembers its settings. The Storage app shows every pool the same way and says plainly what each engine can and can't do. Different pools can use different engines on the same NAS, for example a ZFS pool for family files, a mergerfs pool for films, and a Btrfs mirror of two SSDs.
 
 **Choosing an engine** (shown when creating a pool, with this comparison)
 
@@ -158,7 +158,7 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 - **Mixed sizes:** similar sizes go in the same group, and the largest disks become the spares, since a spare only stands in for a disk no bigger than itself. ZFS wants `-f` for a group of disks of different sizes; `fnas` passes it only when that is ZFS's one objection, after the layout has shown the space lost. Everything else ZFS refuses stays refused, and old data still needs `--wipe`.
 - **Growing:** another group like the existing ones, one disk added to a RAIDZ group (RAIDZ expansion, OpenZFS 2.3), a mirror for a disk on its own, or hot spares. Spares must be at least as large as the pool's largest disk. A second disk on its own is refused, because it would leave nothing able to survive a failure.
 - **Replacing:** the Storage app shows each failed disk on one row, with the spare standing in for it or the disk replacing it. `fnas pool replace` starts the resilver and follows it as a job; when it finishes, the spare goes back to waiting.
-- **Pool names** can't be a folder the system already uses, such as `home`, since pools mount at `/NAME`.
+- **Where pools mount:** every pool mounts at `/mnt/NAME`, so no pool name can collide with a folder the system uses, such as `/home` (Chris, Nov 8). New pools are created with that mountpoint. Importing a pool that still uses ZFS's default, `/NAME`, sets its mountpoint to `/mnt/NAME`; a read-only import changes nothing on the pool, and uses `/mnt` as its root for as long as it stays imported. A pool moved back to TrueNAS, which adds `/mnt` itself, needs `zfs inherit mountpoint NAME` first.
 - **Long jobs:** a resilver, scrub, expansion or backup started from `fnas` runs as its own systemd unit (`fellowship-job-ID`) and records its progress in `/var/lib/fellowship-nas/jobs`. The desktop follows them over server-sent events, and they finish if the browser closes or the web server restarts. A job whose unit vanished is marked as stopped. ZED already reports finished scrubs and resilvers, so jobs only alert on failure or a finished expansion.
 - **Bays and identify:** disks in an enclosure that reports slots (SES) are shown by bay, in the desktop and in alerts. Identify writes the slot's `locate` file; without SES it reads from the disk for a minute so its activity light gives it away.
 - **Degraded pools:** the hourly check names each missing or failing disk by bay or by-id name.
@@ -166,14 +166,14 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 **Btrfs**
 
 - Layouts: single, `raid1`, `raid1c3`, `raid10`. Metadata uses at least the same redundancy as data. RAID5/6 isn't offered.
-- Shares are subvolumes in `/NAME/shares`; settings in `/NAME/.fellowship`.
-- Snapshots by `btrbk` into `/NAME/.snapshots`, named so Samba shows them as "Previous Versions". Monthly `btrfs scrub`, and `btrfs device stats` read by the hourly check.
+- Shares are subvolumes in `/mnt/NAME/shares`; settings in `/mnt/NAME/.fellowship`.
+- Snapshots by `btrbk` into `/mnt/NAME/.snapshots`, named so Samba shows them as "Previous Versions". Monthly `btrfs scrub`, and `btrfs device stats` read by the hourly check.
 - Mounted by filesystem UUID through a systemd mount unit, with `degraded` mounting only after a confirmed choice in the Storage app.
 
 **mergerfs + SnapRAID** (absorbs the old storage node)
 
-- Each data disk gets its own ext4 filesystem, mounted at `/srv/disks/SERIAL`; mergerfs joins them at `/NAME`. Parity disks must be at least as large as the largest data disk.
-- Shares are top-level folders in `/NAME`; settings in `/NAME/.fellowship`, copied to every data disk so the pool can be rebuilt after a reinstall.
+- Each data disk gets its own ext4 filesystem, mounted at `/srv/disks/SERIAL`; mergerfs joins them at `/mnt/NAME`. Parity disks must be at least as large as the largest data disk.
+- Shares are top-level folders in `/mnt/NAME`; settings in `/mnt/NAME/.fellowship`, copied to every data disk so the pool can be rebuilt after a reinstall.
 - `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` (skipped with an alert if too many files were deleted, a sign of a missing disk), then a weekly partial `snapraid scrub`.
 - A failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
 - The Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.

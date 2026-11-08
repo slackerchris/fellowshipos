@@ -107,7 +107,7 @@ function DoneStep() {
             <ul>
                 <li>Windows: <span class="mono">{`\\\\${host}`}</span> in File Explorer</li>
                 <li>Mac: Finder → Go → Connect to Server → <span class="mono">{`smb://${host}`}</span></li>
-                <li>Linux: <span class="mono">{`mount ${host}:/POOL/shares/NAME /mnt`}</span></li>
+                <li>Linux: <span class="mono">{`mount ${host}:/mnt/POOL/shares/NAME /media/NAME`}</span></li>
             </ul>
             <p class="muted">Storage, Shares, Health and Alerts are on the desktop. Run this setup again any time, for example after adding disks.</p>
         </Card>
