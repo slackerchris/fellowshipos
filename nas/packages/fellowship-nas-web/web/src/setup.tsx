@@ -64,7 +64,7 @@ function BackupStep() {
             <p class="muted small">Snapshots protect against deleted files, not against losing a pool. A second pool, such as a
                 USB disk, can hold a copy of every share.</p>
             <Loading loaded={pools}>{() => <Loading loaded={job}>{() => {
-                const writable = pools.data!.filter(pool => pool.readonly === "off").map(pool => pool.name);
+                const writable = pools.data!.filter(pool => !pool.readonly).map(pool => pool.name);
                 if (job.data!.job) {
                     return <Notice kind="done">Shares on {job.data!.job.source} are backed up to {job.data!.job.target} every night.</Notice>;
                 }

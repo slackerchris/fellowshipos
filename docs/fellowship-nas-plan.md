@@ -114,7 +114,7 @@ With root login off, the installer always creates a first user, with `sudo`. The
 
 The flavor is safe to run twice; if the marker is missing, the wizard shows the retry command, `sudo homelabos-flavor nas-node`. At the end, the wizard prints the desktop's address, `https://ADDRESS`.
 
-**Packages:** `fellowship-nas` is a meta-package with every engine's dependencies. `fellowship-nas-smb` holds Samba and discovery, `fellowship-nas-tools` holds `fnas`, and `fellowship-nas-web` holds the server and the desktop. For v1 they ship as a local apt repo inside the ISO, with dependencies from Debian during the role install. A hosted, signed repo arrives in the release phase.
+**Packages:** `fellowship-nas` is a meta-package with every engine's dependencies. `fellowship-nas-smb` holds Samba and discovery, `fellowship-nas-tools` holds `fnas` (a short command over the `fellowship_nas` Python package, with one module per engine), and `fellowship-nas-web` holds the server and the desktop. For v1 they ship as a local apt repo inside the ISO, with dependencies from Debian during the role install. A hosted, signed repo arrives in the release phase.
 
 ## Storage
 
@@ -152,6 +152,17 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 - Snapshots by Sanoid, monthly scrub from Debian's `zfsutils-linux` job, events from `zed`.
 - **Kernel and ZFS updates:** no version pin. `zfs-kernel-check` runs after kernel and header installs; with no module for the new kernel it keeps GRUB on the running kernel and `fnas check` raises an alert. `unattended-upgrades` never reboots by itself.
 
+**As built in Phase 7 (ZFS)**
+
+- **Layouts for any number of disks:** `fnas pool layouts` lists every layout the chosen disks fit, and the desktop shows the best four first. The recommendation is single for one disk, a mirror for two, RAIDZ1 for three, one RAIDZ2 group for four to ten, and RAIDZ2 groups of 6 to 10 beyond that, with one or two spares when the count doesn't divide evenly (15 disks: two groups of 7 and a spare).
+- **Mixed sizes:** similar sizes go in the same group, and the largest disks become the spares, since a spare only stands in for a disk no bigger than itself. ZFS wants `-f` for a group of disks of different sizes; `fnas` passes it only when that is ZFS's one objection, after the layout has shown the space lost. Everything else ZFS refuses stays refused, and old data still needs `--wipe`.
+- **Growing:** another group like the existing ones, one disk added to a RAIDZ group (RAIDZ expansion, OpenZFS 2.3), a mirror for a disk on its own, or hot spares. Spares must be at least as large as the pool's largest disk. A second disk on its own is refused, because it would leave nothing able to survive a failure.
+- **Replacing:** the Storage app shows each failed disk on one row, with the spare standing in for it or the disk replacing it. `fnas pool replace` starts the resilver and follows it as a job; when it finishes, the spare goes back to waiting.
+- **Pool names** can't be a folder the system already uses, such as `home`, since pools mount at `/NAME`.
+- **Long jobs:** a resilver, scrub, expansion or backup started from `fnas` runs as its own systemd unit (`fellowship-job-ID`) and records its progress in `/var/lib/fellowship-nas/jobs`. The desktop follows them over server-sent events, and they finish if the browser closes or the web server restarts. A job whose unit vanished is marked as stopped. ZED already reports finished scrubs and resilvers, so jobs only alert on failure or a finished expansion.
+- **Bays and identify:** disks in an enclosure that reports slots (SES) are shown by bay, in the desktop and in alerts. Identify writes the slot's `locate` file; without SES it reads from the disk for a minute so its activity light gives it away.
+- **Degraded pools:** the hourly check names each missing or failing disk by bay or by-id name.
+
 **Btrfs**
 
 - Layouts: single, `raid1`, `raid1c3`, `raid10`. Metadata uses at least the same redundancy as data. RAID5/6 isn't offered.
@@ -173,7 +184,7 @@ The flavor is safe to run twice; if the marker is missing, the wizard shows the 
 
 ## Sharing
 
-**One owner per protocol, the same on every engine:** `fnas` keeps each share's settings in its pool's config folder and generates both protocols' configuration from them. ZFS's `sharenfs` and `sharesmb` properties aren't used (revision 2 used `sharenfs`; Phase 7 moves it).
+**One owner per protocol, the same on every engine:** `fnas` keeps each share's settings in `shares.json` in its pool's config folder and generates both protocols' configuration from them: `/etc/exports.d/fellowship.exports` and one Samba file per share. ZFS's `sharenfs` and `sharesmb` properties aren't used. Shares made before Phase 7 kept their settings on ZFS properties; `fnas share refresh` (run when the package is upgraded, after imports and after every change) moves them into `shares.json` and turns `sharenfs` off. A backup also copies the source pool's share settings to the backup pool, so a restored share comes back shared the way it was. Exporting a pool stops sharing it first, so NFS and Samba let go of it.
 
 **NFS:** `nfs-kernel-server`, NFSv4 only by default. `fnas` writes `/etc/exports.d/fellowship.exports`, restricted to the LAN subnet, never `*`.
 
@@ -230,7 +241,7 @@ Our own server, written in Go, replaces Cockpit entirely. It serves the desktop 
 - Failed logins slow down per address and per account, and are logged; repeated failures raise an alert.
 - The desktop is HTTPS only: port 443, with port 80 redirecting. A self-signed certificate is made at first start, and the Settings app accepts your own.
 
-**API:** one endpoint per `fnas` action, with arguments passed as a list (never through a shell). Long jobs (scrubs, resilvers, backups, SnapRAID syncs) report progress over server-sent events.
+**API:** one endpoint per `fnas` action, with arguments passed as a list (never through a shell). Long jobs (scrubs, resilvers, backups, SnapRAID syncs) report progress over server-sent events: `/api/jobs/events` sends the job list whenever it changes. Following progress doesn't count as activity, so an idle session still ends. Only `fnas` itself runs a job; the helper lets people list and follow them.
 
 **Files:** served by the file helper with full `Range` support (video seeking) and file sizes (download progress). Uploads are chunked and resumable; folders download as a streamed zip.
 
@@ -319,7 +330,7 @@ nas/
   packages/
     fellowship-nas/          meta-package: every engine's tools, schedules, kernel hook, alert hooks
     fellowship-nas-smb/      Samba and discovery
-    fellowship-nas-tools/    fnas and fellowship-nas-notify
+    fellowship-nas-tools/    fnas, its fellowship_nas package (engines/ holds one module per engine), and fellowship-nas-notify
     fellowship-nas-web/      Go server and helpers, plus the desktop (web/)
   theme/                     icons, wallpaper, colour tokens
   tests/
@@ -342,7 +353,7 @@ No phase starts until the previous gate passes in a VM. From Phase 7 on, each ga
 | 4. Cockpit pages | Transfer test; Setup, Storage, Shares and Health on Cockpit | Superseded by revision 3 | Code carries over to Phase 5 |
 | 5. Web server and desktop | `fellowship-nas-web` with login, sessions, the helper split and the API; the desktop shell; Setup, Storage, Shares, Health, Alerts and Settings in windows; Cockpit removed | Full setup from the desktop in a browser; web security tests pass; non-admins can't reach admin apps or the API; no Cockpit installed | Done. Progress over server-sent events moves to Phase 6, with the long jobs it reports on |
 | 6. Installer | Boot menu that asks for the role; the graphical NAS installer (built-in browser, also reachable over the network) with smart, adjustable sizes, LVM for the system and a data partition; the chosen role carried into the first-boot wizard | Install a NAS on 32 GB, 500 GB and 4 TB disks, and with old data on other disks: suggestions fit each, only the chosen disk is written, the system boots, and the free part becomes a pool from the desktop. Non-NAS roles install as before and use the whole disk | Done |
-| 7. Any number of drives and ZFS depth | Growing the system into its room to grow from Settings, progress for long jobs (server-sent events), drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | On the system disk alone, then one, two, four and sixteen disks, only the layouts that fit are offered and each works; a one-disk machine shares files from the rest of its system disk. On sixteen: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | |
+| 7. Any number of drives and ZFS depth | Growing the system into its room to grow from Settings, progress for long jobs (server-sent events), drive bays and identify light, multi-group pools, RAIDZ3, spares, growing pools, guided disk replacement, share settings moved to pool config, NFS through `exports.d`, the engine layer inside `fnas` | On the system disk alone, then one, two, four and sixteen disks, only the layouts that fit are offered and each works; a one-disk machine shares files from the rest of its system disk. On sixteen: build a two-group RAIDZ2 pool with a spare, fail a disk, replace it from the desktop | Done. Each gate booted the same installed system disk with a different set of data disks (the install itself passed in Phase 6). Bay lights are tested against a fake sysfs only, since no VM reports SES |
 | 8. mergerfs + SnapRAID | Engine, sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create, share, sync; fail a data disk and rebuild it; alerts for a missed sync | |
 | 9. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
 | 10. Files and remaining apps | Files, Snapshots and backup, Users | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
@@ -412,4 +423,4 @@ Web and access:
 | UID mismatch on NFS | Confusing permission errors | Per-share user ID mode with a clear warning |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 7." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 8." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.

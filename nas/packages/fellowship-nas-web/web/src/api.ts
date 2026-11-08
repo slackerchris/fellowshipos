@@ -91,6 +91,10 @@ export interface Disk {
     serial: string;
     state: "os" | "in-use" | "has-data" | "empty";
     reason: string;
+    // A partition is the free part of the system disk, left by the installer
+    kind: "disk" | "partition";
+    // The drive bay, where the enclosure reports one
+    bay: string | null;
 }
 
 export interface Pool {
@@ -99,7 +103,76 @@ export interface Pool {
     allocated: number;
     free: number;
     health: string;
-    readonly: "on" | "off";
+    readonly: boolean;
+    engine: string;
+}
+
+export interface LayoutOption {
+    layout: "single" | "mirror" | "raidz1" | "raidz2" | "raidz3";
+    width: number;
+    groups: number;
+    spares: number;
+    usable: number;
+    // Space lost because disks in a group differ in size
+    unused: number;
+    // Failed disks each group survives
+    survives: number;
+    recommended: boolean;
+}
+
+export interface Vdev {
+    name: string;
+    type: string;
+    state: string;
+    path: string;
+    size: number;
+    errors: number;
+    note: string;
+    disks?: Vdev[];
+}
+
+export interface Progress {
+    state: string;
+    progress: number;
+    started: number;
+    ended: number;
+}
+
+export interface PoolStatus {
+    name: string;
+    state: string;
+    status: string;
+    action: string;
+    groups: Vdev[];
+    spares: Vdev[];
+    scan: (Progress & { function: "scrub" | "resilver"; errors: number }) | null;
+    expand: Progress | null;
+    expandable: boolean;
+}
+
+export interface Job {
+    id: string;
+    kind: "resilver" | "scrub" | "expand" | "backup";
+    title: string;
+    pool: string | null;
+    state: "running" | "done" | "failed";
+    progress: number;
+    started: number;
+    ended: number | null;
+    error: string | null;
+}
+
+export interface SystemStorage {
+    device: string;
+    size: number;
+    used: number;
+    lvm: boolean;
+    room: number;
+}
+
+/** The disks inside a group, or inside a disk being replaced. */
+export function leaves(vdev: Vdev): Vdev[] {
+    return vdev.disks ? vdev.disks.flatMap(leaves) : [vdev];
 }
 
 export interface ImportablePool {
@@ -173,14 +246,13 @@ export interface SavedConfig {
     backup: { source: string; target: string } | null;
 }
 
-export const LAYOUTS = {
-    single: { disks: 1, text: "One disk, no redundancy" },
-    mirror: { disks: 2, text: "Pairs of disks holding the same data; survives one failure per pair" },
-    raidz1: { disks: 3, text: "Survives one disk failing" },
-    raidz2: { disks: 4, text: "Survives two disks failing" },
-} as const;
-
-export type Layout = keyof typeof LAYOUTS;
+export const LAYOUT_NAMES: Record<LayoutOption["layout"], string> = {
+    single: "One disk",
+    mirror: "Mirror",
+    raidz1: "RAIDZ1",
+    raidz2: "RAIDZ2",
+    raidz3: "RAIDZ3",
+};
 
 export function humanSize(bytes: number): string {
     const units = ["B", "KB", "MB", "GB", "TB", "PB"];

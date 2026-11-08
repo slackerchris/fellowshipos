@@ -128,6 +128,9 @@ a { color: var(--accent); }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+.group-row th { text-transform: none; letter-spacing: 0; font-size: 0.9rem; color: var(--text); padding-top: 14px; }
+.group-row td { padding-top: 14px; }
+.pool-disks td { vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 td.actions { text-align: right; white-space: nowrap; }
 
@@ -164,6 +167,7 @@ input, select, textarea {
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: var(--gold); }
 input[type="checkbox"], input[type="radio"] { width: auto; min-height: 0; accent-color: var(--accent); }
+input[type="range"] { min-height: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
 .check { display: flex; gap: 8px; align-items: flex-start; }
 .check input { margin-top: 4px; }
 

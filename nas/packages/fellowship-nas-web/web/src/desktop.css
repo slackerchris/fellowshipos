@@ -158,6 +158,10 @@
 }
 .taskbar-button:hover, .taskbar-window:hover { background: #1b2923; }
 .taskbar-button.pressed { background: #29392f; border-color: #405247; }
+.taskbar-jobs { gap: 8px; max-width: 260px; }
+.taskbar-jobs span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbar-jobs-bar { flex: none; width: 46px; height: 6px; border-radius: 999px; background: #29392f; overflow: hidden; }
+.taskbar-jobs-bar span { display: block; height: 100%; background: #c5a465; }
 .taskbar-windows { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .taskbar-window { flex-shrink: 0; max-width: 180px; color: #b7b29e; }
 .taskbar-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

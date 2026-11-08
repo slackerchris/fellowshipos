@@ -19,7 +19,7 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
     return (
         <Card title="Create a share">
             <Loading loaded={pools}>{() => {
-                const writable = pools.data!.filter(p => p.readonly === "off");
+                const writable = pools.data!.filter(p => !p.readonly);
                 if (!writable.length) {
                     return <Notice>Shares need a pool. Create or import one on the Storage page first.</Notice>;
                 }

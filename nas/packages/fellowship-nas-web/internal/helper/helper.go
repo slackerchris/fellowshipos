@@ -44,18 +44,21 @@ var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // Commands nas-admins may run, by area and action. An area mapped to nil
 // takes no action.
 var commands = map[string][]string{
-	"disk":     {"list"},
-	"pool":     {"list", "scan", "status", "create", "import", "export", "scrub"},
-	"share":    {"list", "create", "set", "delete"},
+	"disk": {"list", "identify"},
+	"pool": {"list", "scan", "engines", "status", "layouts", "create", "grow", "replace", "remove-spare",
+		"import", "export", "scrub"},
+	"share":    {"list", "create", "set", "refresh", "delete"},
 	"user":     {"smb-password"},
 	"lan":      {"show", "set"},
 	"snapshot": {"list", "policy"},
 	"backup":   {"show", "set", "off", "run", "list", "restore"},
 	"alert":    {"list", "show", "test", "email-set", "email-off", "ntfy-set", "ntfy-off"},
 	"config":   {"show", "restore", "adopt"},
-	"system":   {"show", "timezones", "hostname", "timezone", "certificate", "restart", "shutdown"},
-	"health":   nil,
-	"check":    nil,
+	"system":   {"show", "timezones", "hostname", "timezone", "certificate", "storage", "grow", "restart", "shutdown"},
+	// Only fnas itself runs a job; people follow them
+	"job":    {"list", "show"},
+	"health": nil,
+	"check":  nil,
 }
 
 type Account struct {

@@ -1,7 +1,7 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
-import { Session, SessionInfo, SystemInfo, endSession, fnas, fnasJson, sessions, when } from "./api";
-import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
+import { Session, SessionInfo, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, sessions, when } from "./api";
+import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
 export const SessionContext = createContext<Session>({ id: "", user: "", admin: false, csrf: "" });
 
@@ -160,6 +160,49 @@ function Certificate({ info, reload }: { info: SystemInfo; reload: () => void })
     );
 }
 
+const GIB = 1024 ** 3;
+
+/** The system volume, and growing it into the room the installer left. */
+function SystemSpace() {
+    const storage = useLoad(() => fnasJson<SystemStorage>(["system", "storage"]));
+    const [amount, setAmount] = useState(4);
+    const action = useAction(storage.reload);
+    return (
+        <Card title="System space">
+            <Loading loaded={storage}>{() => {
+                const s = storage.data!;
+                const room = Math.floor(s.room / GIB);
+                return (
+                    <div class="stack">
+                        <Usage used={s.used} total={s.size} />
+                        <span class="small muted">{humanSize(s.used)} used of {humanSize(s.size)} for FellowshipOS and its apps</span>
+                        {!s.lvm && <p class="small muted">The system uses its whole disk, so there is nothing to grow into.</p>}
+                        {s.lvm && room < 1 && <p class="small muted">There is no room left to grow into.</p>}
+                        {s.lvm && room >= 1 && (
+                            <form class="stack" onSubmit={event => {
+                                event.preventDefault();
+                                action.run(async () => {
+                                    await fnas(["system", "grow", amount >= room ? "all" : `${amount}G`]);
+                                    return `The system now has ${Math.min(amount, room)} GiB more room.`;
+                                });
+                            }}>
+                                <p class="small">The installer kept {humanSize(s.room)} spare beside the system. Growing takes a moment and
+                                    needs no restart, but it can't be undone, so add what you need now and keep the rest for later.</p>
+                                <Field label={`Add ${Math.min(amount, room)} GiB`}>
+                                    <input type="range" min={1} max={room} value={Math.min(amount, room)}
+                                           onInput={event => setAmount(Number(event.currentTarget.value))} />
+                                </Field>
+                                <div class="row"><Button kind="primary" type="submit" busy={action.busy}>Grow the system</Button></div>
+                            </form>
+                        )}
+                        <Result outcome={action.outcome} />
+                    </div>
+                );
+            }}</Loading>
+        </Card>
+    );
+}
+
 const POWER = {
     restart: { label: "Restart", phrase: "restart the NAS", text: "Shares and this desktop are unavailable for a minute or two." },
     shutdown: { label: "Shut down", phrase: "shut down the NAS", text: "Everything stops until someone switches the NAS on again." },
@@ -194,6 +237,7 @@ const SECTIONS = [
     { id: "account", label: "Your account", admin: false },
     { id: "sessions", label: "Sessions", admin: false },
     { id: "nas", label: "Name and time", admin: true },
+    { id: "space", label: "System space", admin: true },
     { id: "certificate", label: "Certificate", admin: true },
     { id: "power", label: "Power", admin: true },
 ] as const;
@@ -216,6 +260,7 @@ export function Settings() {
                 {section === "sessions" && <Sessions />}
                 {section === "nas" && <Loading loaded={info}>{() => <ThisNas info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "certificate" && <Loading loaded={info}>{() => <Certificate info={info.data!} reload={info.reload} />}</Loading>}
+                {section === "space" && <SystemSpace />}
                 {section === "power" && <Power />}
             </Page>
         </div>

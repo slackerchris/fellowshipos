@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"fellowship-nas-web/internal/protocol"
 )
@@ -182,5 +183,39 @@ func TestStatic(t *testing.T) {
 	}
 	if response := send(handler, request{method: "GET", path: "/api/nothing"}); response.Code != 404 {
 		t.Errorf("unknown API: %d", response.Code)
+	}
+}
+
+func TestJobEventsStreamChangesUntilSignedOut(t *testing.T) {
+	outputs := []string{`[{"id": "a", "progress": 0.5}]`, `[{"id": "a", "progress": 0.5}]`,
+		`[{"id": "a", "progress": 1}]`}
+	var asked []protocol.Request
+	call := func(request protocol.Request) (protocol.Response, error) {
+		switch request.Op {
+		case protocol.OpCheck:
+			return protocol.Response{Session: &protocol.Session{User: "sam", Admin: true}}, nil
+		case protocol.OpFnas:
+			asked = append(asked, request)
+			if len(asked) > len(outputs) {
+				return protocol.Response{Code: protocol.CodeUnauthenticated}, nil
+			}
+			return protocol.Response{Output: outputs[len(asked)-1]}, nil
+		}
+		return protocol.Response{}, nil
+	}
+	server := &Server{Call: call, JobPoll: time.Millisecond}
+	response := send(server.Handler(), request{method: "GET", path: "/api/jobs/events", cookie: true})
+	body := response.Body.String()
+	if response.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("content type %q", response.Header().Get("Content-Type"))
+	}
+	if strings.Count(body, "event: jobs\n") != 2 || !strings.Contains(body, `data: [{"id":"a","progress":1}]`) ||
+		!strings.HasSuffix(body, "event: ended\ndata: {}\n\n") {
+		t.Fatalf("stream:\n%s", body)
+	}
+	for _, r := range asked {
+		if r.Touch || strings.Join(r.Args, " ") != "--json job list" {
+			t.Fatalf("asked %+v", r)
+		}
 	}
 }

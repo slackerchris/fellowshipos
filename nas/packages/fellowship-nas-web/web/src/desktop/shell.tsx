@@ -2,6 +2,7 @@
 import { useContext, useEffect, useState } from "preact/hooks";
 import { Alert, Health, Pool, fnasJson, humanSize, logout, when } from "../api";
 import { SEVERITY } from "../health";
+import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
 import { APPS, AppId, appsFor } from "./apps";
@@ -123,6 +124,22 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                 ))}
             </button>
         </aside>
+    );
+}
+
+/** Long jobs in progress, such as a disk being replaced, with how far along they are. */
+function JobsIndicator({ open }: { open: (app: AppId) => void }) {
+    const running = useJobs().filter(job => job.state === "running");
+    if (!running.length) {
+        return null;
+    }
+    const progress = Math.floor(running.reduce((sum, job) => sum + job.progress, 0) / running.length * 100);
+    const titles = running.map(job => `${job.title}: ${Math.floor(job.progress * 100)}%`).join("\n");
+    return (
+        <button type="button" class="taskbar-button taskbar-jobs" title={titles} aria-label={titles} onClick={() => open("storage")}>
+            <span class="taskbar-jobs-bar"><span style={{ width: `${progress}%` }} /></span>
+            <span class="hide-narrow">{running.length === 1 ? running[0].title : `${running.length} jobs`}</span>
+        </button>
     );
 }
 
@@ -278,6 +295,7 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
                         </button>
                     ))}
                 </div>
+                {session.admin && <JobsIndicator open={open} />}
                 {session.admin && (
                     <button type="button" class={`taskbar-button ${panel === "notifications" ? "pressed" : ""}`}
                             title="Notifications" aria-label={`Notifications: ${found.length}`}

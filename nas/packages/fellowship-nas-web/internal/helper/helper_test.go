@@ -195,6 +195,10 @@ func TestAllowed(t *testing.T) {
 		{[]string{"--json", "pool", "list"}, false, false},
 		{[]string{"user", "smb-password", "kim", "--password-stdin"}, false, true},
 		{[]string{"user", "smb-password", "sam", "--password-stdin"}, false, false},
+		{[]string{"--json", "job", "list"}, true, true},
+		{[]string{"job", "run", "0123456789ab"}, true, false},
+		{[]string{"pool", "replace", "tank", "old", "new", "--confirm", "erase 1 disk"}, true, true},
+		{[]string{"system", "grow", "all"}, false, false},
 	}
 	for _, c := range cases {
 		if got := Allowed(c.args, "kim", c.admin); got != c.want {

@@ -11,15 +11,67 @@ GB = 10 ** 9
 NOW = int(time.time())
 
 
-def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=()):
+def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=(), bay=None):
     return {"path": f"/dev/sd{n}", "by_id": f"/dev/disk/by-id/ata-{model.replace(' ', '_')}_SN{n.upper()}0042",
             "size": size, "model": model, "serial": f"SN{n.upper()}0042", "state": state, "reason": reason,
+            "kind": "disk", "bay": bay, "partitions": [],
             "temperature": temp, "hours": 18000, "verdict": verdict, "notes": list(notes)}
+
+
+def member(d, state="ONLINE"):
+    path = d["by_id"] + "-part1"
+    return {"name": path, "type": "disk", "state": state, "path": path, "size": d["size"], "errors": 0, "note": ""}
+
+
+def pool_status(state, name):
+    """A RAIDZ2 group of the disks in the pool, as fnas pool status --json gives it."""
+    used = [d for d in state["disks"] if d["reason"] == f"in pool {name}"]
+    group = {"name": "raidz2-0", "type": "raidz2", "state": "ONLINE", "path": "", "size": 0, "errors": 0,
+             "note": "", "disks": [member(d) for d in used]}
+    running = [j for j in jobs(state) if j["pool"] == name and j["state"] == "running"]
+    scan = {"function": "scrub", "state": "scanning", "progress": running[0]["progress"], "started": NOW,
+            "ended": 0, "errors": 0} if running else None
+    return {"name": name, "state": "ONLINE", "status": "", "action": "", "groups": [group], "spares": [],
+            "scan": scan, "expand": None, "expandable": True}
+
+
+def layouts(count, size):
+    def option(layout, width, spares, survives, data, recommended=False):
+        return {"layout": layout, "width": width, "groups": (count - spares) // width, "spares": spares,
+                "usable": data * size, "unused": 0, "survives": survives, "recommended": recommended}
+    if count == 1:
+        return [option("single", 1, 0, 0, 1, True)]
+    if count == 2:
+        return [option("mirror", 2, 0, 1, 1, True)]
+    found = [option("raidz2" if count >= 4 else "raidz1", count, 0, 2 if count >= 4 else 1,
+                    count - (2 if count >= 4 else 1), True),
+             option("raidz1", count, 0, 1, count - 1)]
+    if count % 2 == 0:
+        found.append(option("mirror", 2, 0, 1, count // 2))
+    return found
+
+
+def start_job(state, kind, title, pool):
+    job = {"id": f"{len(state.setdefault('jobs', [])):012x}", "kind": kind, "title": title, "pool": pool,
+           "state": "running", "progress": 0.0, "started": int(time.time()), "ended": None, "error": None}
+    state["jobs"].insert(0, job)
+    return f"{title}: follow it with fnas job show {job['id']}"
+
+
+def jobs(state):
+    """Jobs take a minute here, so their progress can be watched."""
+    now = int(time.time())
+    for job in state.get("jobs", []):
+        if job["state"] == "running":
+            job["progress"] = min((now - job["started"]) / 60, 1.0)
+            if job["progress"] >= 1:
+                job.update(state="done", ended=now)
+    return state.get("jobs", [])
 
 
 DEFAULT = {
     "pools": [{"name": "tank", "size": 16 * 10 ** 12, "allocated": 9 * 10 ** 12, "free": 7 * 10 ** 12,
-               "health": "ONLINE", "readonly": "off"}],
+               "health": "ONLINE", "readonly": False, "engine": "zfs"}],
     "shares": [
         {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/tank/shares/media",
          "mode": "shared", "nfs": True, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
@@ -29,13 +81,13 @@ DEFAULT = {
          "readonly": False},
     ],
     "disks": [disk("a", 256 * GB, "Samsung SSD 870", "os", "holds the system"),
-              disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36),
-              disk("c", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 38),
+              disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36, bay="Bay 1"),
+              disk("c", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 38, bay="Bay 2"),
               disk("d", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 41, "watch",
-                   ["8 reallocated sectors: keep a spare disk ready"]),
-              disk("e", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 39),
-              disk("f", 4 * 10 ** 12, "WDC WD40EFRX", "empty", "", 33),
-              disk("g", 4 * 10 ** 12, "WDC WD40EFRX", "has-data", "has an ext4 file system", 32)],
+                   ["8 reallocated sectors: keep a spare disk ready"], bay="Bay 3"),
+              disk("e", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 39, bay="Bay 4"),
+              disk("f", 4 * 10 ** 12, "WDC WD40EFRX", "empty", "", 33, bay="Bay 5"),
+              disk("g", 4 * 10 ** 12, "WDC WD40EFRX", "has-data", "has an ext4 file system", 32, bay="Bay 6")],
     "lan": "192.168.1.0/24",
     "alerts": [{"time": NOW - 86400 * 2, "severity": "info", "title": "Test alert",
                 "message": "Alerts from this NAS are reaching you.", "undelivered": []},
@@ -70,20 +122,41 @@ def main(args):
     elif area == "pool" and action == "scan":
         out = []
     elif area == "pool" and action == "status":
-        out = "  pool: tank\n state: ONLINE\n  scan: scrub repaired 0B with 0 errors\nconfig:\n\ttank  ONLINE\n"
+        out = pool_status(state, rest[0]) if as_json else "  pool: tank\n state: ONLINE\nconfig:\n\ttank  ONLINE\n"
+    elif area == "pool" and action == "engines":
+        out = [{"name": "zfs", "available": True, "reason": ""}]
+    elif area == "pool" and action == "layouts":
+        chosen = [d for d in state["disks"] if d["by_id"] in rest or d["path"] in rest]
+        out = layouts(len(chosen), min(d["size"] for d in chosen))
+    elif area == "pool" and action in ("grow", "replace"):
+        out = start_job(state, "resilver", f"{'Adding a disk to' if action == 'grow' else 'Replacing a disk in'} {rest[0]}",
+                        rest[0])
+    elif area == "job":
+        found = jobs(state)
+        out = found if action == "list" else next((j for j in found if j["id"] == rest[0]), None)
+    elif area == "system" and action == "storage":
+        out = {"device": "/dev/mapper/fellowship-root", "size": 34 * GB, "used": 6 * GB, "lvm": True,
+               "room": state.get("room", 26 * GB)}
+    elif area == "system" and action == "grow":
+        state["room"] = 0 if rest[0] == "all" else max(state.get("room", 26 * GB) - int(rest[0][:-1]) * 2 ** 30, 0)
+        out = "grown"
     elif area == "pool" and action == "create":
         name, chosen = rest[0], [a for a in rest[2:] if a.startswith("/dev")]
         phrase = f"erase {len(chosen)} disk{'s' if len(chosen) != 1 else ''}"
         if "--confirm" not in rest or rest[rest.index("--confirm") + 1] != phrase:
             fail(f'confirm by passing --confirm "{phrase}"')
         state["pools"].append({"name": name, "size": 4 * 10 ** 12, "allocated": 0, "free": 4 * 10 ** 12,
-                               "health": "ONLINE", "readonly": "off"})
+                               "health": "ONLINE", "readonly": False, "engine": "zfs"})
         for d in state["disks"]:
             if d["by_id"] in chosen or d["path"] in chosen:
                 d["state"], d["reason"] = "in-use", f"in pool {name}"
         out = f"Created pool {name}"
-    elif area == "pool" and action in ("scrub", "export"):
-        out = f"{action} {rest[0]}: done"
+    elif area == "pool" and action == "scrub":
+        out = start_job(state, "scrub", f"Checking every block on {rest[0]}", rest[0])
+    elif area == "pool" and action == "export":
+        out = f"export {rest[0]}: done"
+    elif area == "disk" and action == "identify":
+        out = f"Reading from {rest[0]} for a minute: its activity light is the one that stays lit"
     elif area == "disk":
         out = [d for d in state["disks"] if "--all" in rest or d["state"] != "os"]
     elif area == "share" and action == "list":

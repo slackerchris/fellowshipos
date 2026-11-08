@@ -1,19 +1,61 @@
 """Unit tests for fnas. Nothing here touches a real disk: every external
 command goes through a fake, and a test fails if fnas runs one it didn't expect."""
-import importlib.machinery
-import importlib.util
+import importlib
 import json
 import os
+import pkgutil
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-PATH = os.path.join(os.path.dirname(__file__), "../../packages/fellowship-nas-tools/fnas")
-loader = importlib.machinery.SourceFileLoader("fnas", PATH)
-spec = importlib.util.spec_from_loader("fnas", loader)
-fnas = importlib.util.module_from_spec(spec)
-loader.exec_module(fnas)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../packages/fellowship-nas-tools"))
+import fellowship_nas  # noqa: E402
+
+MODULES = [importlib.import_module(info.name)
+           for info in pkgutil.walk_packages(fellowship_nas.__path__, "fellowship_nas.")]
+
+
+class Package:
+    """Every name in the package, wherever it lives, as if fnas were one file."""
+
+    def __getattr__(self, name):
+        for module in MODULES:
+            if name in vars(module):
+                return vars(module)[name]
+        raise AttributeError(name)
+
+
+fnas = Package()
+
+
+class patch:
+    """mock.patch.object for a name in every module that has it, since modules
+    import shared helpers like run by name."""
+
+    def __init__(self, name, new=mock.DEFAULT, **kwargs):
+        if new is mock.DEFAULT:
+            new = mock.MagicMock(**kwargs)
+        self.new = new
+        self.patchers = [mock.patch.object(module, name, new) for module in MODULES if name in vars(module)]
+        assert self.patchers, name
+
+    def start(self):
+        for patcher in self.patchers:
+            patcher.start()
+        return self.new
+
+    def stop(self):
+        for patcher in reversed(self.patchers):
+            patcher.stop()
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *error):
+        self.stop()
+
 
 GB = 10 ** 9
 
@@ -57,7 +99,7 @@ class Fake:
 
 
 def links(partitions=False):
-    names = "vda vdb vdc vdd vde".split()
+    names = "vda vdb vdc vdd vde vdf vdg vdh vdi".split()
     if partitions:
         return {f"/dev/{n}{i}": f"/dev/disk/by-id/virtio-{n.upper()}-part{i}" for n in names for i in (1, 2, 3)}
     return {f"/dev/{n}": f"/dev/disk/by-id/virtio-{n.upper()}" for n in names}
@@ -69,9 +111,20 @@ INSTALLED_DISK = disk("vda", [part("vda1", "vfat", ["/boot/efi"]), part("vda2", 
 
 
 class Base(unittest.TestCase):
+    def setUp(self):
+        # Nothing here may write the real NFS or Samba configuration, and pools
+        # are checked against an empty root, not this machine's folders
+        for name, value in (("EXPORTS_DIR", "/nonexistent"), ("SMB_DIR", "/nonexistent"),
+                            ("ROOT", "/nonexistent")):
+            patcher = patch(name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def use(self, fake):
-        for patcher in (mock.patch.object(fnas, "run", fake),
-                        mock.patch.object(fnas, "by_id_links", links)):
+        for patcher in (patch("run", fake),
+                        patch("by_id_links", links),
+                        patch("unavailable", lambda: ""),
+                        patch("bays", dict)):
             patcher.start()
             self.addCleanup(patcher.stop)
         return fake
@@ -155,7 +208,7 @@ class Create(Base):
         self.assertFalse([c for c in calls if "/dev/vda" in c or "/dev/vda1" in c or "/dev/vda2" in c],
                          "only the data partition may be touched")
 
-    def test_never_passes_force(self):
+    def test_never_passes_force_for_old_data(self):
         device = disk("vdb", [part("vdb1", "zfs_member")])
         calls = self.create(Fake([device]), "tank", "single", ["/dev/vdb"], wipe=True)
         create = next(c for c in calls if c[:2] == ("zpool", "create"))
@@ -203,19 +256,393 @@ class Create(Base):
         self.refused("stable name", "tank", "single", ["/dev/sdq"], devices=[disk("sdq")])
 
     def test_layout_disk_counts(self):
-        self.refused("at least 2", "tank", "mirror", ["/dev/vdb"])
-        self.refused("at least 3", "tank", "raidz1", ["/dev/vdb", "/dev/vdc"])
-        self.refused("at least 4", "tank", "raidz2", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
+        self.refused("take 2 to 3", "tank", "mirror", ["/dev/vdb"])
+        self.refused("take 3 to 8", "tank", "raidz1", ["/dev/vdb", "/dev/vdc"])
+        self.refused("take 4 to 12", "tank", "raidz2", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
         self.refused("exactly 1", "tank", "single", ["/dev/vdb", "/dev/vdc"])
-        self.refused("even", "tank", "mirror", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
+        self.refused("don't divide", "tank", "mirror", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
 
     def test_refuses_name_of_importable_pool(self):
         self.refused("already exists", "tank", "single", ["/dev/vdb"],
                      imports="   pool: tank\n     id: 1\n  state: ONLINE\n")
 
+    def test_refuses_names_of_system_folders(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "home", "tester"))
+            os.mkdir(os.path.join(root, "tank"))
+            with patch("ROOT", root):
+                self.refused("already a folder", "home", "single", ["/dev/vdb"])
+                calls = self.create(Fake(EMPTY), "tank", "single", ["/dev/vdb"])
+            self.assertEqual(calls[0][:2], ("zpool", "create"))
+
     def test_refuses_bad_names(self):
         for name in ("Tank", "1tank", "-rf", "a b", "ta;nk", "mirror1", "raidz", "x" * 33, ""):
             self.refused("pool names|reserves", name, "single", ["/dev/vdb"])
+
+
+class Layouts(unittest.TestCase):
+    def options(self, count, size=4 * GB):
+        return fnas.layouts([size] * count)
+
+    def best(self, count):
+        option = self.options(count)[0]
+        self.assertTrue(option["recommended"])
+        return option["layout"], option["width"], option["groups"], option["spares"]
+
+    def test_recommendations_for_any_number_of_disks(self):
+        self.assertEqual(self.best(1), ("single", 1, 1, 0))
+        self.assertEqual(self.best(2), ("mirror", 2, 1, 0))
+        self.assertEqual(self.best(3), ("raidz1", 3, 1, 0))
+        self.assertEqual(self.best(6), ("raidz2", 6, 1, 0))
+        self.assertEqual(self.best(11), ("raidz2", 10, 1, 1))
+        self.assertEqual(self.best(12), ("raidz2", 6, 2, 0))
+        self.assertEqual(self.best(15), ("raidz2", 7, 2, 1))
+        self.assertEqual(self.best(16), ("raidz2", 8, 2, 0))
+
+    def test_only_layouts_that_fit_are_offered(self):
+        for count in range(1, 17):
+            for option in self.options(count):
+                with self.subTest(count=count, option=option):
+                    self.assertEqual(option["width"] * option["groups"] + option["spares"], count)
+                    low, high = fnas.WIDTHS[option["layout"]]
+                    self.assertTrue(low <= option["width"] <= high)
+        self.assertEqual({o["layout"] for o in self.options(1)}, {"single"})
+        self.assertNotIn("raidz2", {o["layout"] for o in self.options(3)})
+
+    def test_usable_space_and_survival(self):
+        option = next(o for o in self.options(16) if o["recommended"])
+        self.assertEqual(option["usable"], 2 * 6 * 4 * GB)
+        self.assertEqual(option["survives"], 2)
+        mirror = next(o for o in self.options(4) if o["layout"] == "mirror" and o["width"] == 2 and not o["spares"])
+        self.assertEqual((mirror["usable"], mirror["survives"]), (2 * 4 * GB, 1))
+
+    def test_mixed_sizes_group_alike_and_spare_the_largest(self):
+        sizes = [4 * GB, 8 * GB, 4 * GB, 8 * GB, 8 * GB]
+        groups, spares = fnas.plan("mirror", sizes, 2, 1)
+        self.assertEqual([[sizes[i] for i in g] for g in groups], [[4 * GB, 4 * GB], [8 * GB, 8 * GB]])
+        self.assertEqual(sizes[spares[0]], 8 * GB)
+        option = next(o for o in fnas.layouts(sizes[:4]) if o["layout"] == "raidz1" and o["width"] == 4)
+        self.assertEqual(option["unused"], 2 * 4 * GB)
+
+def vdev(name, kind="disk", state="ONLINE", children=(), size=4 * GB, **extra):
+    shown = {"name": name, "vdev_type": kind, "state": state, "read_errors": 0, "write_errors": 0,
+             "checksum_errors": 0, **extra}
+    if kind == "disk":
+        shown.update(path=name, phys_space=size)
+    if children:
+        shown["vdevs"] = {child["name"]: child for child in children}
+    return shown
+
+
+def by_id(name):
+    return f"/dev/disk/by-id/virtio-{name.upper()}-part1"
+
+
+def status_json(groups, spares=(), state="ONLINE", scan=None, expand=None):
+    pool = {"name": "tank", "state": state, "vdevs": {"tank": vdev("tank", "root", state, groups)},
+            "spares": {s["name"]: s for s in spares}}
+    if scan:
+        pool["scan_stats"] = scan
+    if expand:
+        pool["raidz_expand_stats"] = expand
+    return json.dumps({"pools": {"tank": pool}})
+
+
+class PoolFake(Fake):
+    """A pool called tank with the given status, and free disks to add."""
+
+    def __init__(self, devices, status, feature="enabled"):
+        super().__init__(devices)
+        self.status, self.feature = status, feature
+
+    def __call__(self, *command, check=True, stdin=None):
+        ok = SimpleNamespace(stdout="", stderr="", returncode=0)
+        if command[:2] == ("zpool", "list") and "-Hp" in command:
+            ok.stdout = "tank\t100\t1\t99\tONLINE\toff\n"
+        elif command[:3] == ("zpool", "status", "-j"):
+            ok.stdout = self.status
+        elif command[:2] == ("zpool", "get"):
+            ok.stdout = self.feature + "\n"
+        elif command[0] == "systemd-run":
+            self.calls.append(command)
+        else:
+            return super().__call__(*command, check=check)
+        return ok
+
+
+RAIDZ2 = [vdev("raidz2-0", "raidz", children=[vdev(by_id(n)) for n in ("vdb", "vdc", "vdd", "vde")])]
+
+
+class CreateGroups(Base):
+    def test_create_with_groups_and_spares(self):
+        devices = [disk(f"vd{c}") for c in "bcdefg"]
+        fake = self.use(Fake(devices))
+        fnas.create_pool("tank", "mirror", [d["path"] for d in devices], "erase 6 disks", False, 2, 2)
+        create = fake.calls[0]
+        self.assertEqual(create.count("mirror"), 2)
+        self.assertEqual(create[create.index("spare"):], ("spare", "/dev/disk/by-id/virtio-VDF",
+                                                         "/dev/disk/by-id/virtio-VDG"))
+
+    def sizes_fake(self, stderr):
+        devices = [disk(f"vd{c}") for c in "bcd"]
+        fake = Fake(devices)
+        real = fake.__class__.__call__
+
+        def create(*command, check=True, stdin=None):
+            if command[:2] == ("zpool", "create") and "-f" not in command:
+                fake.calls.append(command)
+                return SimpleNamespace(stdout="", stderr=stderr, returncode=1)
+            return real(fake, *command, check=check, stdin=stdin)
+        self.use(create)
+        return fake, devices
+
+    def test_different_sizes_are_accepted_once_shown(self):
+        fake, devices = self.sizes_fake("invalid vdev specification\nuse '-f' to override the following errors:\n"
+                                        "raidz contains devices of different sizes\n")
+        fnas.create_pool("tank", "raidz1", [d["path"] for d in devices], "erase 3 disks", False)
+        self.assertEqual(fake.calls[1][:3], ("zpool", "create", "-f"))
+
+    def test_other_objections_are_never_forced(self):
+        fake, devices = self.sizes_fake("invalid vdev specification\nuse '-f' to override the following errors:\n"
+                                        "/dev/vdc1 is part of active pool 'other'\n"
+                                        "raidz contains devices of different sizes\n")
+        with self.assertRaisesRegex(fnas.FnasError, "active pool"):
+            fnas.create_pool("tank", "raidz1", [d["path"] for d in devices], "erase 3 disks", False)
+        self.assertFalse([c for c in fake.calls if "-f" in c])
+
+    def test_raidz3(self):
+        devices = [disk(f"vd{c}") for c in "bcdefgh"]
+        fake = self.use(Fake(devices))
+        fnas.create_pool("tank", "raidz3", [d["path"] for d in devices], "erase 7 disks", False)
+        self.assertEqual(fake.calls[0].count("raidz3"), 1)
+
+
+class Grow(Base):
+    def setUp(self):
+        super().setUp()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        patcher = patch("JOBS_DIR", directory.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def pool(self, groups=RAIDZ2, spares=(), devices=None, **kwargs):
+        return self.use(PoolFake(devices or [disk(f"vd{c}") for c in "fgh"], status_json(groups, spares, **kwargs)))
+
+    def test_status_reads_groups_spares_and_progress(self):
+        scan = {"function": "RESILVER", "state": "SCANNING", "to_examine": 200, "issued": 50,
+                "start_time": 5, "end_time": 0, "errors": 0}
+        failed = vdev("replacing-1", "replacing", "DEGRADED",
+                      [vdev(by_id("vdc"), state="UNAVAIL"), vdev(by_id("vdf"))])
+        groups = [vdev("raidz2-0", "raidz", "DEGRADED", [vdev(by_id("vdb")), failed])]
+        self.pool(groups, [vdev(by_id("vdg"), state="AVAIL")], state="DEGRADED", scan=scan)
+        status = fnas.pool_status("tank")
+        self.assertEqual(status["groups"][0]["type"], "raidz2")
+        self.assertEqual([d["state"] for d in fnas.leaves(status["groups"][0])], ["ONLINE", "UNAVAIL", "ONLINE"])
+        self.assertEqual(status["spares"][0]["state"], "AVAIL")
+        self.assertEqual((status["scan"]["function"], status["scan"]["progress"]), ("resilver", 0.25))
+
+    def test_a_lone_disk_is_a_single_group(self):
+        self.pool([vdev(by_id("vdb"))])
+        self.assertEqual(fnas.pool_status("tank")["groups"][0]["type"], "single")
+
+    def test_adding_a_group_matches_the_others(self):
+        fake = self.pool(devices=[disk(f"vd{c}") for c in "fghi"])
+        self.assertIsNone(fnas.grow("tank", "group", ["/dev/vdf", "/dev/vdg", "/dev/vdh", "/dev/vdi"],
+                                    "erase 4 disks", False))
+        self.assertIn(("zpool", "add", "tank", "raidz2", "/dev/disk/by-id/virtio-VDF", "/dev/disk/by-id/virtio-VDG",
+                       "/dev/disk/by-id/virtio-VDH", "/dev/disk/by-id/virtio-VDI"), fake.calls)
+
+    def test_group_refusals(self):
+        fake = self.pool()
+        with self.assertRaisesRegex(fnas.FnasError, "so add 4"):
+            fnas.grow("tank", "group", ["/dev/vdf"], "erase 1 disk", False)
+        self.pool([vdev(by_id("vdb"))])
+        with self.assertRaisesRegex(fnas.FnasError, "add a mirror"):
+            fnas.grow("tank", "group", ["/dev/vdf"], "erase 1 disk", False)
+        self.assertFalse([c for c in fake.calls if c[0] == "zpool"])
+
+    def test_expanding_a_raidz_group_follows_the_reflow(self):
+        fake = self.pool()
+        job = fnas.grow("tank", "expand", ["/dev/vdf"], "erase 1 disk", False, "raidz2-0")
+        self.assertIn(("zpool", "attach", "tank", "raidz2-0", "/dev/disk/by-id/virtio-VDF"), fake.calls)
+        self.assertEqual((job["kind"], job["pool"]), ("expand", "tank"))
+        self.assertTrue([c for c in fake.calls if c[0] == "systemd-run" and job["id"] in c[3]])
+
+    def test_expanding_needs_the_feature(self):
+        self.use(PoolFake([disk("vdf")], status_json(RAIDZ2), feature="disabled"))
+        with self.assertRaisesRegex(fnas.FnasError, "older ZFS"):
+            fnas.grow("tank", "expand", ["/dev/vdf"], "erase 1 disk", False, "raidz2-0")
+
+    def test_mirroring_a_lone_disk(self):
+        fake = self.pool([vdev(by_id("vdb"))])
+        job = fnas.grow("tank", "mirror", ["/dev/vdf"], "erase 1 disk", False, by_id("vdb"))
+        self.assertIn(("zpool", "attach", "tank", by_id("vdb"), "/dev/disk/by-id/virtio-VDF"), fake.calls)
+        self.assertEqual(job["kind"], "resilver")
+
+    def test_a_smaller_disk_cant_join(self):
+        small = disk("vdf")
+        small["size"] = GB
+        self.pool([vdev(by_id("vdb"), size=100 * GB)], devices=[small])
+        with self.assertRaisesRegex(fnas.FnasError, "smaller"):
+            fnas.grow("tank", "mirror", ["/dev/vdf"], "erase 1 disk", False, by_id("vdb"))
+
+    def test_spares_need_redundancy_and_size(self):
+        self.pool([vdev(by_id("vdb"))])
+        with self.assertRaisesRegex(fnas.FnasError, "has none"):
+            fnas.grow("tank", "spare", ["/dev/vdf"], "erase 1 disk", False)
+        fake = self.pool(RAIDZ2)
+        fnas.grow("tank", "spare", ["/dev/vdf"], "erase 1 disk", False)
+        self.assertIn(("zpool", "add", "tank", "spare", "/dev/disk/by-id/virtio-VDF"), fake.calls)
+
+    def test_replace_a_missing_disk_by_its_name(self):
+        groups = [vdev("raidz2-0", "raidz", "DEGRADED",
+                       [vdev(by_id("vdb")), vdev("9876543210", state="UNAVAIL", path="")])]
+        groups[0]["vdevs"]["9876543210"]["path"] = ""
+        fake = self.pool(groups, state="DEGRADED")
+        job = fnas.replace("tank", "9876543210", "/dev/vdf", "erase 1 disk", False)
+        self.assertIn(("zpool", "replace", "tank", "9876543210", "/dev/disk/by-id/virtio-VDF"), fake.calls)
+        self.assertEqual(job["kind"], "resilver")
+
+    def test_replace_refusals(self):
+        fake = self.pool()
+        with self.assertRaisesRegex(fnas.FnasError, "isn't a disk"):
+            fnas.replace("tank", "/dev/disk/by-id/nope", "/dev/vdf", "erase 1 disk", False)
+        with self.assertRaisesRegex(fnas.FnasError, "confirm"):
+            fnas.replace("tank", by_id("vdc"), "/dev/vdf", "", False)
+        self.assertFalse([c for c in fake.calls if c[0] == "zpool"])
+
+    def test_a_spare_in_use_stays(self):
+        self.pool(RAIDZ2, [vdev(by_id("vdg"), state="INUSE")])
+        with self.assertRaisesRegex(fnas.FnasError, "standing in"):
+            fnas.remove_spare("tank", by_id("vdg"))
+
+    def test_following_a_resilver(self):
+        running = {"function": "RESILVER", "state": "SCANNING", "to_examine": 100, "issued": 40}
+        self.pool(scan=running)
+        job = {"kind": "resilver", "pool": "tank"}
+        self.assertEqual(fnas.follow(job), (fnas.RUNNING, 0.4))
+        self.pool(scan={**running, "state": "FINISHED"})
+        self.assertEqual(fnas.follow(job), (None, 1.0))
+        self.pool(scan={**running, "state": "FINISHED"}, state="DEGRADED")
+        self.assertIn("still degraded", fnas.follow(job)[0])
+        self.pool(scan={"function": "SCRUB", "state": "FINISHED", "errors": 3})
+        self.assertIn("3 errors", fnas.follow({"kind": "scrub", "pool": "tank"})[0])
+
+
+class Jobs(Base):
+    def setUp(self):
+        super().setUp()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        for name, value in (("JOBS_DIR", directory.name), ("POLL", 0)):
+            patcher = patch(name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.sent = []
+        patcher = patch("send_alert", lambda *a: self.sent.append(a))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_job_runs_in_its_own_unit(self):
+        fake = self.use(Fake([]))
+        job = fnas.start("scrub", "Checking tank", pool="tank")
+        self.assertEqual(fake.calls, [("systemd-run", "--quiet", "--collect", f"--unit=fellowship-job-{job['id']}",
+                                       "--description=Checking tank", "/usr/sbin/fnas", "job", "run", job["id"])])
+
+    def test_run_reports_progress_until_done(self):
+        self.use(Fake([]))
+        job = fnas.start("expand", "Adding a disk to tank", pool="tank")
+        steps = iter([(fnas.RUNNING, 0.5), (None, 1.0)])
+        seen = []
+
+        def follow(running):
+            seen.append(fnas.load(running["id"])["progress"])
+            return next(steps)
+
+        engine = mock.Mock(follow=follow)
+        with patch("engine_for", lambda name: engine):
+            fnas.run_job(job["id"])
+        done = fnas.load(job["id"])
+        self.assertEqual(seen, [0.0, 0.5])
+        self.assertEqual((done["state"], done["progress"], done["error"]), ("done", 1.0, None))
+        self.assertEqual(self.sent[0][0], "info")
+
+    def test_a_failed_job_alerts(self):
+        self.use(Fake([]))
+        job = fnas.start("scrub", "Checking tank", pool="tank")
+        with patch("engine_for", lambda name: mock.Mock(follow=lambda j: ("the scrub found 2 errors", 1.0))):
+            fnas.run_job(job["id"])
+        self.assertEqual(fnas.load(job["id"])["state"], "failed")
+        self.assertEqual(self.sent[0][:2], ("critical", "Checking tank failed"))
+
+    def test_a_job_whose_unit_vanished_failed(self):
+        fake = Fake([])
+        self.use(lambda *c, **k: SimpleNamespace(stdout="", stderr="", returncode=3)
+                 if c[0] == "systemctl" else fake(*c, **k))
+        job = fnas.start("scrub", "Checking tank", pool="tank")
+        self.assertEqual(fnas.show(job["id"])["error"], "stopped before it finished")
+
+    def test_old_jobs_are_forgotten_and_ids_are_checked(self):
+        self.use(Fake([]))
+        job = fnas.start("scrub", "Checking tank", pool="tank")
+        fnas.save({**job, "state": "done", "ended": 1})
+        self.assertEqual(fnas.list_jobs(now=10 * fnas.DAY), [])
+        for bad in ("../../etc/passwd", "", "ABC"):
+            with self.subTest(bad), self.assertRaisesRegex(fnas.FnasError, "no such job"):
+                fnas.load(bad)
+
+
+class Bays(unittest.TestCase):
+    def test_disks_are_found_by_bay(self):
+        with tempfile.TemporaryDirectory() as root:
+            for slot, device, label in (("Slot 07", "sdb", "7"), ("Slot 08", None, "8")):
+                folder = os.path.join(root, "0:0:1:0", slot)
+                os.makedirs(os.path.join(folder, "device", "block", device) if device else folder)
+                with open(os.path.join(folder, "slot"), "w") as file:
+                    file.write(label + "\n")
+            with patch("ENCLOSURE_DIR", root):
+                found = fnas.bays()
+        self.assertEqual(list(found), ["/dev/sdb"])
+        self.assertEqual(found["/dev/sdb"]["bay"], "Bay 7")
+
+    def test_no_enclosure_means_no_bays(self):
+        with patch("ENCLOSURE_DIR", "/nonexistent"):
+            self.assertEqual(fnas.bays(), {})
+
+
+class GrowSystem(unittest.TestCase):
+    def fake(self, lvs):
+        calls = []
+
+        def run(*command, check=True, stdin=None):
+            calls.append(command)
+            if command[0] == "findmnt":
+                return SimpleNamespace(stdout="/dev/mapper/fellowship-root\n", stderr="", returncode=0)
+            if command[0] == "lvs":
+                return SimpleNamespace(stdout=lvs, stderr="", returncode=0 if lvs else 5)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+        patcher = patch("run", run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    def test_grows_by_whole_extents(self):
+        calls = self.fake(f"  fellowship\troot\t{16 << 30}\t{8 << 30}\t{4 << 20}\n")
+        self.assertEqual(fnas.system_storage()["room"], 8 << 30)
+        fnas.grow_system("2G")
+        self.assertIn(("lvextend", "-r", "-l", "+512", "fellowship/root"), calls)
+        fnas.grow_system("all")
+        self.assertIn(("lvextend", "-r", "-l", "+2048", "fellowship/root"), calls)
+
+    def test_refusals(self):
+        self.fake(f"  fellowship\troot\t{16 << 30}\t{8 << 30}\t{4 << 20}\n")
+        for amount, message in (("9G", "only"), ("lots", "not an amount"), ("1", "no room")):
+            with self.subTest(amount), self.assertRaisesRegex(fnas.FnasError, message):
+                fnas.grow_system(amount)
+        self.fake("")
+        with self.assertRaisesRegex(fnas.FnasError, "isn't on LVM"):
+            fnas.grow_system("all")
 
 
 class Scan(Base):
@@ -258,7 +685,7 @@ class Scan(Base):
             result = real(*command, check=check)
             result.stderr = "permission denied"
             return result
-        with mock.patch.object(fnas, "run", broken):
+        with patch("run", broken):
             with self.assertRaisesRegex(fnas.FnasError, "permission denied"):
                 fnas.scan_pools()
 
@@ -310,80 +737,120 @@ class Import(Base):
         self.assertEqual(fake.calls, [("zpool", "import", "-d", fnas.BY_ID_DIR, "tank")])
 
 
-def share_line(name, mode="shared", sharenfs="off", smb="off", pool="tank", policy="-", readonly="off"):
+def volume_line(name, pool="tank", readonly="off", sharenfs="off", mode="-", smb="-", policy="-"):
     dataset = f"{pool}/shares/{name}"
-    return f"{dataset}\t/{dataset}\t{sharenfs}\t{mode}\t{smb}\t{policy}\t{readonly}\n"
+    return f"{dataset}\t/{dataset}\t{readonly}\t{sharenfs}\t{mode}\t{smb}\t{policy}\n"
+
+
+def share_line(name, mode="shared", sharenfs="off", smb="off", pool="tank", policy="-", readonly="off"):
+    """A share whose settings an older fnas kept in properties on its dataset."""
+    return volume_line(name, pool, readonly, sharenfs, mode, smb, policy)
 
 
 class ShareFake(Fake):
-    """Adds the pools and datasets that sharing commands read."""
+    """Adds the pools and datasets that sharing commands read, and makes and
+    destroys share datasets as asked."""
 
-    def __init__(self, datasets="", snapshots="", existing=False):
+    def __init__(self, datasets="", snapshots="", existing=False, config_dir=None,
+                 pools="tank\t100\t1\t99\tONLINE\toff\n"):
         super().__init__([])
         self.datasets, self.snapshots, self.existing = datasets, snapshots, existing
+        self.config_dir, self.pool_lines = config_dir, pools
 
     def __call__(self, *command, check=True, stdin=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[:2] == ("zpool", "list") and "-Hp" in command:
-            ok.stdout = "tank\t100\t1\t99\tONLINE\toff\n"
-        elif command[:3] == ("zfs", "list", "-H") and "filesystem" in command:
-            ok.stdout = self.datasets
+            ok.stdout = self.pool_lines
+        elif command[:3] == ("zfs", "list", "-H") and "-d" in command:
+            ok.stdout = "".join(line + "\n" for line in self.datasets.splitlines()
+                                if line.startswith(command[-1] + "/"))
         elif command[:3] == ("zfs", "list", "-H") and "snapshot" in command:
             ok.stdout = self.snapshots
         elif command[:3] == ("zfs", "list", "-H"):
             ok.returncode = 0 if self.existing else 1
+        elif command[:2] == ("zfs", "get") and command[-1].endswith("/fellowship-config"):
+            ok.stdout, ok.returncode = f"{self.config_dir}\n", 0 if self.config_dir else 1
         elif command[:2] == ("zfs", "get"):
             ok.stdout = "/" + command[-1] + "\n"
         else:
+            if command[:3] == ("zfs", "create", "-p"):
+                pool, _, name = command[3].split("/")
+                self.datasets += volume_line(name, pool)
+            elif command[:3] == ("zfs", "destroy", "-r"):
+                self.datasets = "".join(line + "\n" for line in self.datasets.splitlines()
+                                        if not line.startswith(command[3] + "\t"))
             return super().__call__(*command, check=check)
         return ok
 
 
 class Sharing(Base):
     def setUp(self):
+        super().setUp()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.smb_dir = os.path.join(directory.name, "samba")
-        os.mkdir(self.smb_dir)
-        lan_file = os.path.join(directory.name, "nas-lan")
+        self.root = directory.name
+        self.smb_dir = os.path.join(self.root, "samba")
+        self.config_dir = os.path.join(self.root, "config")
+        self.exports_dir = os.path.join(self.root, "exports.d")
+        for folder in (self.smb_dir, self.config_dir, self.exports_dir):
+            os.mkdir(folder)
+        lan_file = os.path.join(self.root, "nas-lan")
         with open(lan_file, "w") as file:
             file.write("192.168.1.0/24\n")
         owner = SimpleNamespace(pw_uid=1000, pw_gid=1000)
         self.chown, self.chmod = mock.Mock(), mock.Mock()
-        for patcher in (mock.patch.object(fnas, "SMB_DIR", self.smb_dir),
-                        mock.patch.object(fnas, "LAN_FILE", lan_file),
+        for patcher in (patch("SMB_DIR", self.smb_dir),
+                        patch("LAN_FILE", lan_file),
+                        patch("EXPORTS_DIR", self.exports_dir),
+                        patch("EXPORTS_FILE", os.path.join(self.exports_dir, "fellowship.exports")),
                         mock.patch.object(fnas.pwd, "getpwnam", side_effect=lambda n: {"tester": owner}[n]),
                         mock.patch.object(fnas.os, "chown", self.chown),
                         mock.patch.object(fnas.os, "chmod", self.chmod)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def fake(self, datasets="", **kwargs):
+        return self.use(ShareFake(datasets, config_dir=self.config_dir, **kwargs))
+
+    def write_settings(self, **shares):
+        fnas.write_json(os.path.join(self.config_dir, "shares.json"), {"version": 1, "shares": shares})
+
+    def settings(self):
+        return fnas.read_json(os.path.join(self.config_dir, "shares.json"))["shares"]
+
     def smb_file(self, *path):
         with open(os.path.join(self.smb_dir, *path)) as file:
             return file.read()
 
+    def exports(self):
+        with open(os.path.join(self.exports_dir, "fellowship.exports")) as file:
+            return [line for line in file.read().splitlines() if not line.startswith("#")]
+
     def test_shared_nfs_squashes_to_the_share_account(self):
-        fake = self.use(ShareFake())
+        fake = self.fake()
         fnas.create_share("media", "tank", "shared", None, True, False)
-        self.assertIn(("zfs", "set", "sharenfs=rw=@192.168.1.0/24,all_squash,"
-                       "anonuid=3000,anongid=3000", "tank/shares/media"), fake.calls)
+        self.assertIn(("zfs", "create", "-p", "tank/shares/media"), fake.calls)
+        self.assertEqual(self.exports(), ['"/tank/shares/media" 192.168.1.0/24'
+                                          '(rw,sync,no_subtree_check,all_squash,anonuid=3000,anongid=3000)'])
+        self.assertEqual(self.settings(), {"media": {"mode": "shared", "nfs": True, "smb": False,
+                                                     "policy": fnas.DEFAULT_POLICY}})
         self.chown.assert_called_once_with("/tank/shares/media", 3000, 3000)
         self.chmod.assert_called_once_with("/tank/shares/media", 0o2775)
+        # ZFS's own sharing stays off, so NFS has one owner
+        self.assertFalse([c for c in fake.calls if c[:2] == ("zfs", "set")])
 
     def test_matched_nfs_belongs_to_its_owner(self):
-        fake = self.use(ShareFake())
+        self.fake()
         fnas.create_share("chris", "tank", "matched", "tester", True, False)
-        self.assertIn(("zfs", "set", "sharenfs=rw=@192.168.1.0/24,root_squash",
-                       "tank/shares/chris"), fake.calls)
+        self.assertEqual(self.exports(), ['"/tank/shares/chris" 192.168.1.0/24(rw,sync,no_subtree_check,root_squash)'])
         self.chown.assert_called_once_with("/tank/shares/chris", 1000, 1000)
         self.chmod.assert_called_once_with("/tank/shares/chris", 0o2770)
 
     def test_smb_only_share_is_not_exported(self):
-        fake = self.use(ShareFake())
+        self.fake()
         fnas.create_share("media", "tank", "shared", None, False, True)
-        self.assertFalse([c for c in fake.calls if c[:2] == ("zfs", "set")])
-        self.assertIn(("zfs", "create", "-p", "-o", f"{fnas.MODE_PROPERTY}=shared",
-                       "-o", f"{fnas.SMB_PROPERTY}=on", "tank/shares/media"), fake.calls)
+        self.assertEqual(self.exports(), [])
+        self.assertIn("[media]\n", self.smb_file("shares", "media.conf"))
 
     def test_share_refusals(self):
         cases = [
@@ -397,42 +864,52 @@ class Sharing(Base):
             (("media", "other", "shared", None, True, False), "no imported pool"),
         ]
         for args, message in cases:
-            fake = self.use(ShareFake())
+            fake = self.fake()
             with self.subTest(args), self.assertRaisesRegex(fnas.FnasError, message):
                 fnas.create_share(*args)
             self.assertEqual(fake.calls, [])
 
+    def test_read_only_pool_takes_no_new_shares(self):
+        fake = self.fake(pools="tank\t100\t1\t99\tONLINE\ton\n")
+        with self.assertRaisesRegex(fnas.FnasError, "read-only"):
+            fnas.create_share("media", "tank", "shared", None, True, False)
+        self.assertEqual(fake.calls, [])
+
     def test_names_differing_only_by_case_clash(self):
-        fake = self.use(ShareFake(share_line("media")))
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": False})
+        fake = self.fake(volume_line("media"))
         with self.assertRaisesRegex(fnas.FnasError, "already exists"):
             fnas.create_share("Media", "tank", "shared", None, True, False)
         self.assertEqual(fake.calls, [])
 
     def test_never_takes_over_an_existing_dataset(self):
-        fake = self.use(ShareFake(existing=True))
+        fake = self.fake(existing=True)
         with self.assertRaisesRegex(fnas.FnasError, "isn't a share"):
             fnas.create_share("media", "tank", "shared", None, True, False)
         self.assertEqual(fake.calls, [])
         self.chown.assert_not_called()
 
     def test_needs_a_lan_subnet(self):
-        fake = self.use(ShareFake())
-        with mock.patch.object(fnas, "LAN_FILE", "/nonexistent/nas-lan"):
+        fake = self.fake()
+        with patch("LAN_FILE", "/nonexistent/nas-lan"):
             with self.assertRaisesRegex(fnas.FnasError, "no LAN subnet"):
                 fnas.create_share("media", "tank", "shared", None, True, False)
         self.assertEqual(fake.calls, [])
 
     def test_smb_needs_its_package(self):
-        self.use(ShareFake())
-        with mock.patch.object(fnas, "SMB_DIR", "/nonexistent"):
+        self.fake()
+        with patch("SMB_DIR", "/nonexistent"):
             with self.assertRaisesRegex(fnas.FnasError, "fellowship-nas-smb"):
                 fnas.create_share("media", "tank", "shared", None, False, True)
 
-    def test_failed_export_brings_shares_back(self):
-        fake = ShareFake()
+    def test_export_unshares_first_and_shares_again_if_it_fails(self):
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": True})
+        fake = ShareFake(volume_line("media"), config_dir=self.config_dir)
+        seen = []
 
         def busy(*command, check=True):
             if command[:2] == ("zpool", "export"):
+                seen.append(self.exports())
                 fake.calls.append(command)
                 return SimpleNamespace(stdout="", stderr="pool or dataset is busy", returncode=1)
             return fake(*command, check=check)
@@ -440,61 +917,88 @@ class Sharing(Base):
         self.use(busy)
         with self.assertRaisesRegex(fnas.FnasError, "disconnect any clients"):
             fnas.export_pool("tank")
-        self.assertEqual(fake.calls, [("zpool", "export", "tank"), ("zfs", "share", "-a")])
+        self.assertEqual(seen, [[]])
+        self.assertEqual(len(self.exports()), 1)
+        self.assertEqual(os.listdir(os.path.join(self.smb_dir, "shares")), ["media.conf"])
 
-    def test_list_ignores_other_datasets(self):
-        other = "tank/shares\t/tank/shares\toff\t-\t-\t-\toff\ntank/home\t/tank/home\toff\t-\t-\t-\toff\n"
-        nested = share_line("media/old")
-        unmanaged = share_line("plain", mode="-")
-        self.use(ShareFake(other + nested + unmanaged + share_line("media", sharenfs="rw=@x", smb="on")))
+    def test_list_needs_both_a_volume_and_its_settings(self):
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": True},
+                            gone={"mode": "shared", "nfs": True, "smb": False})
+        nested = "tank/shares/media/old\t/tank/shares/media/old\toff\toff\t-\t-\t-\n"
+        self.fake(volume_line("media") + volume_line("plain") + nested)
         self.assertEqual(fnas.list_shares(), [{
-            "name": "media", "pool": "tank", "dataset": "tank/shares/media",
+            "name": "media", "pool": "tank", "engine": "zfs", "dataset": "tank/shares/media",
             "path": "/tank/shares/media", "mode": "shared", "nfs": True, "smb": True,
             "policy": fnas.DEFAULT_POLICY, "readonly": False}])
 
-    def test_smb_files_follow_zfs(self):
-        self.use(ShareFake(share_line("media", smb="on") + share_line("chris", "matched", smb="on")
-                           + share_line("nfsonly")))
-        fnas.write_smb_config()
+    def test_damaged_settings_are_ignored(self):
+        self.write_settings(media={"mode": "evil", "nfs": True},
+                            docs={"mode": "matched", "nfs": "yes", "smb": True,
+                                  "policy": {"hourly": -5, "daily": 7, "monthly": "x"}})
+        self.fake(volume_line("media") + volume_line("docs"))
+        [docs] = fnas.list_shares()
+        self.assertEqual((docs["name"], docs["nfs"], docs["smb"]), ("docs", False, True))
+        self.assertEqual(docs["policy"], {"hourly": 24, "daily": 7, "monthly": 6})
+
+    def test_old_settings_move_into_the_pool(self):
+        fake = self.fake(share_line("media", sharenfs="rw=@x", smb="on", policy="0,7,1"))
+        [media] = fnas.list_shares()
+        self.assertEqual((media["mode"], media["nfs"], media["smb"]), ("shared", True, True))
+        fnas.migrate()
+        self.assertEqual(self.settings(), {"media": {"mode": "shared", "nfs": True, "smb": True,
+                                                     "policy": {"hourly": 0, "daily": 7, "monthly": 1}}})
+        self.assertIn(("zfs", "set", "sharenfs=off", "tank/shares/media"), fake.calls)
+        self.assertIn(("zfs", "inherit", fnas.LEGACY_MODE, "tank/shares/media"), fake.calls)
+
+    def test_smb_files_follow_the_settings(self):
+        self.write_settings(media={"mode": "shared", "nfs": False, "smb": True},
+                            chris={"mode": "matched", "nfs": False, "smb": True},
+                            nfsonly={"mode": "shared", "nfs": True, "smb": False})
+        self.fake(volume_line("media") + volume_line("chris") + volume_line("nfsonly"))
+        fnas.write_config()
         self.assertEqual(sorted(os.listdir(os.path.join(self.smb_dir, "shares"))),
                          ["chris.conf", "media.conf"])
-        master = self.smb_file("shares.conf")
-        self.assertEqual(master.count("include = "), 2)
+        self.assertEqual(self.smb_file("shares.conf").count("include = "), 2)
         media = self.smb_file("shares", "media.conf")
         self.assertIn("[media]\npath = /tank/shares/media\n", media)
         self.assertIn("hosts allow = 192.168.1.0/24 127.0.0.1\n", media)
         self.assertIn("force user = nas-share\n", media)
+        self.assertIn("shadow:snapdir = .zfs/snapshot\n", media)
         self.assertNotIn("shadow:localtime", media)
         self.assertNotIn("force user", self.smb_file("shares", "chris.conf"))
+        self.assertEqual(len(self.exports()), 1)
 
-    def test_smb_file_goes_when_share_stops(self):
-        self.use(ShareFake(share_line("media", smb="on")))
-        fnas.write_smb_config()
-        self.use(ShareFake(share_line("media")))
-        fnas.write_smb_config()
-        self.assertEqual(os.listdir(os.path.join(self.smb_dir, "shares")), [])
-        self.assertEqual(self.smb_file("shares.conf"), "")
+    def test_read_only_pool_shares_read_only(self):
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": True})
+        self.fake(volume_line("media"), pools="tank\t100\t1\t99\tONLINE\ton\n")
+        fnas.write_config()
+        self.assertIn("(ro,", self.exports()[0])
+        self.assertIn("read only = yes\n", self.smb_file("shares", "media.conf"))
 
-    def test_smb_reload_is_asked_for(self):
-        fake = self.use(ShareFake())
-        fnas.write_smb_config()
-        self.assertEqual(fake.calls, [("smbcontrol", "smbd", "reload-config")])
+    def test_reloads_are_asked_for(self):
+        fake = self.fake()
+        fnas.write_config()
+        self.assertEqual(fake.calls, [("exportfs", "-ra"), ("smbcontrol", "smbd", "reload-config")])
 
     def test_set_turns_protocols_on_and_off(self):
-        fake = self.use(ShareFake(share_line("media", sharenfs="rw=@x", smb="on")))
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": True})
+        fake = self.fake(volume_line("media"))
+        fnas.write_config()
         fnas.set_share("media", "off", "off")
-        self.assertIn(("zfs", "set", "sharenfs=off", "tank/shares/media"), fake.calls)
-        self.assertIn(("zfs", "set", f"{fnas.SMB_PROPERTY}=off", "tank/shares/media"), fake.calls)
+        self.assertEqual((self.settings()["media"]["nfs"], self.settings()["media"]["smb"]), (False, False))
+        self.assertEqual(self.exports(), [])
+        self.assertEqual(os.listdir(os.path.join(self.smb_dir, "shares")), [])
         self.assertFalse([c for c in fake.calls if c[:2] == ("zfs", "destroy")])
 
     def test_set_needs_a_change(self):
-        self.use(ShareFake(share_line("media")))
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": True})
+        self.fake(volume_line("media"))
         with self.assertRaisesRegex(fnas.FnasError, "nothing to change"):
             fnas.set_share("media", None, None)
 
     def test_delete_lists_what_is_lost(self):
-        snapshots = "tank/shares/media@a\ntank/shares/media@b\n"
-        fake = self.use(ShareFake(share_line("media"), snapshots))
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": False})
+        fake = self.fake(volume_line("media"), snapshots="tank/shares/media@a\ntank/shares/media@b\n")
         with self.assertRaises(fnas.FnasError) as refused:
             fnas.delete_share("media", "delete media")
         self.assertIn("tank/shares/media@a", str(refused.exception))
@@ -502,16 +1006,19 @@ class Sharing(Base):
         self.assertEqual(fake.calls, [])
 
     def test_delete_with_confirmation(self):
-        fake = self.use(ShareFake(share_line("media"), "tank/shares/media@a\n"))
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": False})
+        fake = self.fake(volume_line("media"), snapshots="tank/shares/media@a\n")
         fnas.delete_share("media", "delete media and 1 snapshot")
         self.assertIn(("zfs", "destroy", "-r", "tank/shares/media"), fake.calls)
+        self.assertEqual(self.settings(), {})
+        self.assertEqual(self.exports(), [])
 
-    def test_lan_change_updates_nfs_shares_only(self):
-        fake = self.use(ShareFake(share_line("media", sharenfs="rw=@x") + share_line("smbonly", smb="on")))
+    def test_lan_change_rewrites_both_protocols(self):
+        self.write_settings(media={"mode": "shared", "nfs": True, "smb": False},
+                            smbonly={"mode": "shared", "nfs": False, "smb": True})
+        self.fake(volume_line("media") + volume_line("smbonly"))
         self.assertEqual(fnas.set_lan("10.1.2.3/16"), "10.1.0.0/16")
-        changed = [c for c in fake.calls if c[:2] == ("zfs", "set")]
-        self.assertEqual(len(changed), 1)
-        self.assertIn("rw=@10.1.0.0/16,", changed[0][2])
+        self.assertIn(" 10.1.0.0/16(", self.exports()[0])
         self.assertEqual(fnas.lan_subnet(), "10.1.0.0/16")
         self.assertIn("hosts allow = 10.1.0.0/16 ", self.smb_file("shares", "smbonly.conf"))
 
@@ -527,25 +1034,20 @@ class ProtectionFake(ShareFake):
 
     def __init__(self, datasets="", pools="tank\t100\t1\t99\tONLINE\toff\n", snapshots="",
                  status="", created=0, sanoid_failed=False, syncoid_error="", config_dir=None):
-        super().__init__(datasets)
-        self.pool_lines, self.dated_snapshots, self.status = pools, snapshots, status
+        super().__init__(datasets, config_dir=config_dir, pools=pools)
+        self.dated_snapshots, self.status = snapshots, status
         self.created, self.sanoid_failed = created, sanoid_failed
-        self.syncoid_error, self.config_dir = syncoid_error, config_dir
+        self.syncoid_error = syncoid_error
         self.backups, self.mail = "", None
 
     def __call__(self, *command, check=True, stdin=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
-        if command[:2] == ("zpool", "list") and "-Hp" in command:
-            ok.stdout = self.pool_lines
-        elif command[:2] == ("zpool", "status"):
+        if command[:2] == ("zpool", "status"):
             ok.stdout = self.status
         elif command[:3] == ("zfs", "list", "-Hp"):
             ok.stdout = self.dated_snapshots
         elif command[:2] == ("zfs", "get") and "creation" in command:
             ok.stdout = f"{self.created}\n"
-        elif command[:2] == ("zfs", "get") and "mountpoint" in command:
-            ok.stdout = f"{self.config_dir}\n"
-            ok.returncode = 0 if self.config_dir else 1
         elif "-r" in command and command[:2] == ("zfs", "list"):
             ok.stdout = self.backups
             ok.returncode = 0 if self.backups else 1
@@ -563,6 +1065,7 @@ class ProtectionFake(ShareFake):
 
 class Protection(Base):
     def setUp(self):
+        super().setUp()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = directory.name
@@ -578,7 +1081,7 @@ class Protection(Base):
                      "MSMTP_FILE", "ALERT_LOG", "ALERT_LOCK", "CHECK_STATE", "INSTALL_ID_FILE"):
             paths[name] = self.path(name)
         for name, value in paths.items():
-            patcher = mock.patch.object(fnas, name, value)
+            patcher = patch(name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -634,9 +1137,10 @@ class Protection(Base):
             self.assertNotIn("usb", file.read())
 
     def test_policy_changes_only_what_was_asked(self):
-        fake = self.fake(share_line("media", policy="1,2,3"))
+        self.fake(share_line("media", policy="1,2,3"))
         fnas.set_policy("media", None, 9, None)
-        self.assertIn(("zfs", "set", f"{fnas.POLICY_PROPERTY}=1,9,3", "tank/shares/media"), fake.calls)
+        saved = fnas.read_json(os.path.join(self.pool_dir, "shares.json"))["shares"]["media"]
+        self.assertEqual(saved["policy"], {"hourly": 1, "daily": 9, "monthly": 3})
 
     def test_policy_refusals(self):
         fake = self.fake(share_line("media"))
@@ -646,10 +1150,6 @@ class Protection(Base):
             with self.subTest(args), self.assertRaisesRegex(fnas.FnasError, message):
                 fnas.set_policy(*args)
         self.assertEqual(fake.calls, [])
-
-    def test_damaged_policy_falls_back_to_the_default(self):
-        for value in ("-", "1,2", "a,b,c", "1,2,3,4"):
-            self.assertEqual(fnas.parse_policy(value), fnas.DEFAULT_POLICY)
 
     # Backup
 
@@ -699,7 +1199,8 @@ class Protection(Base):
 
     def backup_fake(self, datasets=""):
         fake = self.use(ProtectionFake(
-            datasets, pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n"))
+            datasets, pools="tank\t100\t1\t99\tONLINE\toff\nusb\t100\t1\t99\tONLINE\toff\n",
+            config_dir=self.pool_dir))
         fake.backups = ("usb/fellowship-backup\nusb/fellowship-backup/tank\n"
                         "usb/fellowship-backup/tank/shares\nusb/fellowship-backup/tank/shares/media\n")
         return fake
@@ -710,13 +1211,15 @@ class Protection(Base):
             fnas.restore_backup("media", "usb", None)
         self.assertEqual(fake.calls, [])
 
-    def test_restore_uses_the_current_subnet(self):
+    def test_restore_brings_back_how_the_share_was_shared(self):
+        fnas.write_json(os.path.join(self.pool_dir, "backup-of-tank.json"),
+                        {"shares": {"media": {"mode": "shared", "nfs": True, "smb": False}}})
         fake = self.backup_fake()
         real = fake.__class__.__call__
 
         def restored(*command, check=True, stdin=None):
             if command[0] == "syncoid":
-                fake.datasets = share_line("media", sharenfs="rw=@10.9.9.0/24")
+                fake.datasets = volume_line("media")
                 fake.existing = False
             return real(fake, *command, check=check, stdin=stdin)
 
@@ -724,8 +1227,17 @@ class Protection(Base):
         fnas.restore_backup("media", "usb", None)
         self.assertIn(("syncoid", "--quiet", "--no-sync-snap", "--sendoptions=p",
                        "usb/fellowship-backup/tank/shares/media", "tank/shares/media"), fake.calls)
-        value = fnas.sharenfs_value("shared", "192.168.1.0/24")
-        self.assertIn(("zfs", "set", f"sharenfs={value}", "tank/shares/media"), fake.calls)
+        [media] = fnas.list_shares()
+        self.assertEqual((media["mode"], media["nfs"], media["smb"]), ("shared", True, False))
+
+    def test_backup_carries_the_share_settings(self):
+        self.two_pools().datasets = volume_line("media")
+        fnas.write_json(os.path.join(self.pool_dir, "shares.json"),
+                        {"version": 1, "shares": {"media": {"mode": "matched", "nfs": False, "smb": True}}})
+        fnas.write_json(fnas.BACKUP_FILE, {"source": "tank", "target": "usb", "since": 0})
+        fnas.run_backup()
+        copied = fnas.read_json(os.path.join(self.pool_dir, "backup-of-tank.json"))
+        self.assertEqual(copied["shares"]["media"]["mode"], "matched")
 
     def test_restore_of_an_unknown_backup(self):
         self.backup_fake()
@@ -739,7 +1251,7 @@ class Protection(Base):
         self.assertEqual(self.titles(), ["Two lines"])
 
     def test_alert_log_stays_bounded(self):
-        with mock.patch.object(fnas, "MAX_ALERTS", 3):
+        with patch("MAX_ALERTS", 3):
             for number in range(5):
                 fnas.send_alert("info", str(number), "body")
         self.assertEqual(self.titles(), ["2", "3", "4"])
@@ -762,13 +1274,13 @@ class Protection(Base):
         fnas.set_alert_channel("ntfy", {"url": "http://x/y"})
         sent = []
         down = mock.Mock(side_effect=fnas.FnasError("ntfy: unreachable"))
-        with mock.patch.object(fnas, "send_email", lambda *a: sent.append("email")), \
-                mock.patch.object(fnas, "send_ntfy", down):
+        with patch("send_email", lambda *a: sent.append("email")), \
+                patch("send_ntfy", down):
             fnas.send_alert("critical", "Pool bad", "body")
         self.assertEqual(sent, ["email"])
 
-        with mock.patch.object(fnas, "send_email", lambda *a: sent.append("email")), \
-                mock.patch.object(fnas, "send_ntfy", lambda *a: sent.append("ntfy")):
+        with patch("send_email", lambda *a: sent.append("email")), \
+                patch("send_ntfy", lambda *a: sent.append("ntfy")):
             fnas.retry_alerts(fnas.time.time())
             fnas.retry_alerts(fnas.time.time())
         self.assertEqual(sent, ["email", "ntfy"])
@@ -776,9 +1288,9 @@ class Protection(Base):
 
     def test_old_undelivered_alerts_are_dropped(self):
         fnas.set_alert_channel("ntfy", {"url": "http://x/y"})
-        with mock.patch.object(fnas, "send_ntfy", side_effect=fnas.FnasError("ntfy: unreachable")):
+        with patch("send_ntfy", side_effect=fnas.FnasError("ntfy: unreachable")):
             fnas.send_alert("critical", "Pool bad", "body")
-        with mock.patch.object(fnas, "send_ntfy") as ntfy:
+        with patch("send_ntfy") as ntfy:
             fnas.retry_alerts(fnas.time.time() + fnas.RETRY_FOR + 1)
         ntfy.assert_not_called()
 
@@ -964,7 +1476,7 @@ class Protection(Base):
             paths[pool] = os.path.join(self.root, f"{pool}.json")
             fnas.write_json(paths[pool], {"version": 1, "install": install, "saved": 1, "lan": None,
                                           "backup": None, "alerts": {}, "shares": [], "users": []})
-        with mock.patch.object(fnas, "config_path", side_effect=paths.get):
+        with patch("config_path", side_effect=paths.get):
             fnas.restore_config("tank")
             self.assertEqual(fnas.foreign_config_pools(), ["spare"])
 
@@ -980,7 +1492,7 @@ class Protection(Base):
             self.fake()
             self.write_saved(users=[user], **fields)
             with self.subTest(fields), self.assertRaises(fnas.FnasError), \
-                    mock.patch.object(fnas, "restore_user") as restore_user:
+                    patch("restore_user") as restore_user:
                 fnas.restore_config("tank")
             restore_user.assert_not_called()
             self.assertFalse(os.path.exists(fnas.MSMTP_FILE))
@@ -1050,7 +1562,7 @@ class DiskHealth(unittest.TestCase):
 
     def health(self, data):
         output = SimpleNamespace(stdout=json.dumps(data) if data is not None else "", returncode=0)
-        with mock.patch.object(fnas, "run", return_value=output):
+        with patch("run", return_value=output):
             return fnas.disk_health(self.DISK)
 
     def ata(self, passed=True, reallocated=0, temperature=35):
@@ -1092,10 +1604,10 @@ class SmbPassword(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        patch = mock.patch.object(fnas, "SMB_DIR", directory.name)
-        patch.start()
-        self.addCleanup(patch.stop)
-        self.run_mock = mock.patch.object(fnas, "run").start()
+        patcher = patch("SMB_DIR", directory.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.run_mock = patch("run").start()
         self.addCleanup(mock.patch.stopall)
 
     def account(self, uid, shell="/bin/bash"):
@@ -1131,9 +1643,9 @@ class System(unittest.TestCase):
         self.dir = directory.name
         for name, value in {"WEB_DIR": self.dir, "WEB_CERT": f"{self.dir}/cert.pem",
                             "WEB_KEY": f"{self.dir}/key.pem", "WEB_SELF_SIGNED": f"{self.dir}/self-signed"}.items():
-            patch = mock.patch.object(fnas, name, value)
-            patch.start()
-            self.addCleanup(patch.stop)
+            patcher = patch(name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.chown = mock.patch.object(fnas.os, "chown").start()
         self.addCleanup(mock.patch.stopall)
 
@@ -1174,20 +1686,20 @@ class System(unittest.TestCase):
         self.assertTrue(info["self_signed"])
 
     def test_hostname_is_checked(self):
-        with mock.patch.object(fnas, "run") as run:
+        with patch("run") as run:
             for name in ("", "-nas", "nas-", "NAS", "my_nas", "a" * 64, "nas.local"):
                 with self.subTest(name), self.assertRaises(fnas.FnasError):
                     fnas.set_hostname(name)
             run.assert_not_called()
 
     def test_unknown_time_zone(self):
-        with mock.patch.object(fnas, "run", return_value=SimpleNamespace(stdout="Europe/London\nUTC\n")) as run, \
+        with patch("run", return_value=SimpleNamespace(stdout="Europe/London\nUTC\n")) as run, \
                 self.assertRaisesRegex(fnas.FnasError, "unknown time zone"):
             fnas.set_timezone("Mars/Olympus")
         self.assertEqual(run.call_count, 1)
 
     def test_power_needs_the_phrase(self):
-        with mock.patch.object(fnas, "run") as run:
+        with patch("run") as run:
             with self.assertRaisesRegex(fnas.FnasError, '"restart the NAS"'):
                 fnas.power("restart", "yes")
             run.assert_not_called()

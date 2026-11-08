@@ -193,16 +193,35 @@ The `nas-node` role installs ZFS from the local apt repo on the ISO. Manage pool
 sudo fnas disk list
 sudo fnas pool scan
 sudo fnas pool import tank --readonly
-sudo fnas pool create tank raidz1 SERIAL1 SERIAL2 SERIAL3 --confirm "erase 3 disks"
+sudo fnas pool layouts SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5
+sudo fnas pool create tank raidz2 SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5 --width 4 --spares 1 --confirm "erase 5 disks"
 ```
 
 Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
 
-On a machine installed with the NAS installer, `disk list` also offers the empty data partition on the system disk as "the free part of the system disk", so a machine with one disk can still hold a pool. Only that partition is used; the system's own partitions are never offered.
+`pool layouts` lists every layout the chosen disks fit (single, mirror, RAIDZ1, RAIDZ2 or RAIDZ3, in one or more groups, with up to two hot spares), with the usable space and how many failed disks each group survives. The first is the recommended one: RAIDZ2 in groups of 6 to 10 disks for larger sets. `--width` is the number of disks in each group, and `--spares` how many of the disks stand by to replace a failed one at once. Disks of similar size are grouped together and the largest become the spares; disks of different sizes in one group work, but the extra space on the larger ones goes unused, and the Storage app says how much.
+
+Pools grow, and failed disks are replaced, without losing what's on them:
+
+```bash
+sudo fnas pool grow tank group SERIAL6 SERIAL7 SERIAL8 SERIAL9 --confirm "erase 4 disks"
+sudo fnas pool grow tank expand SERIAL6 --target raidz2-0 --confirm "erase 1 disk"
+sudo fnas pool grow tank mirror SERIAL6 --target DISK --confirm "erase 1 disk"
+sudo fnas pool grow tank spare SERIAL6 --confirm "erase 1 disk"
+sudo fnas pool replace tank OLD-DISK SERIAL6 --confirm "erase 1 disk"
+sudo fnas job list
+sudo fnas disk identify SERIAL6
+```
+
+`group` adds another group like the existing ones, `expand` adds one disk to a RAIDZ group, `mirror` turns a disk on its own into a mirror, and `spare` adds hot spares. Replacing, mirroring, expanding and scrubbing keep going in the background as jobs; `job list` and the desktop show their progress, and they finish even if the browser closes. `disk identify` lights the disk's bay where the enclosure reports bays, and otherwise reads from the disk for a minute so its activity light gives it away.
+
+On a machine installed with the NAS installer, `disk list` also offers the empty data partition on the system disk as "the free part of the system disk", so a machine with one disk can still hold a pool. Only that partition is used; the system's own partitions are never offered. Such a pool has no redundancy until a second disk mirrors it, which Storage suggests.
+
+The installer also leaves room beside the system on its LVM volume group. Give the system more of it from Settings → System space, or with `sudo fnas system grow 8G` (or `all`); it needs no restart, but can't be undone.
 
 ## NAS Shares
 
-Each share is a dataset in `POOL/shares`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard:
+Each share is a dataset in `POOL/shares`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard. Its settings live in the pool's `fellowship-config/shares.json`, so they move with the pool, and `fnas` writes `/etc/exports.d/fellowship.exports` and the Samba files from them:
 
 ```bash
 sudo fnas share create media tank --mode shared --nfs --smb
@@ -259,7 +278,7 @@ sudo fnas config restore tank
 
 `--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the ones to set again, and SMB users need their password set again on the Shares page or with `fnas user smb-password`. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
 
-To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with four data disks.
+To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with data disks: four by default, or any number and sizes with `FELLOWSHIP_DATA_DISKS="8G 8G 16G"`.
 
 ## Customization Guide
 

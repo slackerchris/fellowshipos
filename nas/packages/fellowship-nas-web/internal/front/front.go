@@ -5,6 +5,7 @@ package front
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"fellowship-nas-web/internal/helper"
 	"fellowship-nas-web/internal/protocol"
@@ -47,6 +49,8 @@ type Server struct {
 	Passwd string
 	// "https" except when trying the desktop out over plain HTTP on this machine
 	Scheme string
+	// How often the jobs stream asks fnas for progress; a second when unset
+	JobPoll time.Duration
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string)
@@ -60,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users", s.withSession(false, s.users))
 	mux.HandleFunc("GET /api/sessions", s.withSession(false, s.sessions))
 	mux.HandleFunc("POST /api/sessions/end", s.withSession(true, s.endSession))
+	mux.HandleFunc("GET /api/jobs/events", s.withSession(false, s.jobEvents))
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }
@@ -324,4 +329,54 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	http.ServeContent(w, r, name, info.ModTime(), file.(io.ReadSeeker))
+}
+
+// jobEvents streams the list of long jobs as server-sent events, sending it
+// again whenever a job moves on. Asking for progress doesn't count as using
+// the desktop, so an idle session still ends, and the stream with it.
+func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming isn't supported")
+		return
+	}
+	poll := s.JobPoll
+	if poll == 0 {
+		poll = time.Second
+	}
+	w.Header().Set(contentType, "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	last, quiet := "", 0
+	for {
+		response, err := s.Call(protocol.Request{Op: protocol.OpFnas, Session: token,
+			Args: []string{"--json", "job", "list"}})
+		switch {
+		case err != nil || response.Code == protocol.CodeUnauthenticated:
+			// The page logs in again, or waits for the helper, and reconnects
+			io.WriteString(w, "event: ended\ndata: {}\n\n")
+			flusher.Flush()
+			return
+		case response.Code == "" && response.Output != last:
+			// Each event is one line of data, so the JSON is sent compacted
+			var compact bytes.Buffer
+			if json.Compact(&compact, []byte(response.Output)) != nil {
+				break
+			}
+			last, quiet = response.Output, 0
+			io.WriteString(w, "event: jobs\ndata: "+compact.String()+"\n\n")
+		case quiet*int(poll/time.Millisecond) >= 15000:
+			// A comment now and then keeps proxies from closing a quiet stream
+			quiet = 0
+			io.WriteString(w, ": still here\n\n")
+		default:
+			quiet++
+		}
+		flusher.Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(poll):
+		}
+	}
 }

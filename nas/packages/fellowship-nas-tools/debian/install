@@ -1,2 +1,3 @@
 fnas usr/sbin
 fellowship-nas-notify usr/sbin
+fellowship_nas usr/lib/python3/dist-packages
