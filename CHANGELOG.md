@@ -14,6 +14,14 @@ bump.
 
 ### Added
 
+- Traditional RAID, as a second storage engine: a pool is one array of RAID 1, 5,
+  6 or 10 with up to two hot spares, on XFS (recommended, and preselected) or
+  ext4. RAID 10 uses the standard two-copy layout. Arrays can be created, grown
+  by one disk, have a failed disk replaced, have a spare added or removed, and be
+  exported and imported, from the CLI or from the desktop.
+- `fnas pool scrub` checks every block of any pool, and `fnas pool repair` mends
+  the blocks a check found to be wrong. A repair is never automatic: it can keep
+  the wrong copy, so it needs its own confirmation.
 - CI in [.github/workflows/ci.yml](.github/workflows/ci.yml): the Python unit
   tests, `gofmt` and `go vet` plus `go test` for both Go modules, both frontend
   builds, and ShellCheck over the shell scripts. The ISO build stays a local
@@ -57,6 +65,9 @@ bump.
   one it does not have, and says what it offers.
 - Severity has one five-step scale across the panel and its widget: green good,
   yellow low, orange medium, red high, purple critical.
+- Health's monthly pool check is now **Monthly storage checks**, it covers every
+  writable pool rather than only ZFS ones, and each engine names its own action:
+  Scrub for a ZFS pool, Array check for traditional RAID.
 
 ### Fixed
 

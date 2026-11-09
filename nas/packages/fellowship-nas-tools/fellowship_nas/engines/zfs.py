@@ -23,6 +23,8 @@ MAX_SPARES = 2
 # start with one of these. Other engines have no such rule.
 RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 SCRUB_DONE = re.compile(r"scrub (?:repaired|canceled).* on (\w{3} \w{3} +\d+ [\d:]+ \d{4})")
+# What this engine calls its monthly check, for Health's wording
+CHECK_WORD = "scrub"
 MODULE_DIR = "/sys/module/zfs"
 SIZE_ONLY = re.compile(r"^\s*(mirror|raidz) contains devices of different sizes$")
 CONFIG_DATASET = "fellowship-config"
@@ -200,7 +202,9 @@ def check_reserved_name(name):
         raise FnasError(f"{name} starts with a word ZFS reserves")
 
 
-def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0):
+def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0, filesystem=None):
+    if filesystem:
+        raise FnasError("--filesystem is for arrays: a ZFS pool brings its own filesystem")
     chosen = disks.choose(wanted, wipe_disks)
     groups, spare = plan(layout, [d["size"] for d in chosen], width, spares)
     check_reserved_name(name)
@@ -286,6 +290,22 @@ def feature_ready(name, feature):
 
 def member_paths(status):
     return [d["path"] for g in status["groups"] for d in leaves(g)] + [s["path"] for s in status["spares"]]
+
+
+def member_disks(status):
+    """Every disk a pool has, without the spares."""
+    return [disk for group in status["groups"] for disk in leaves(group)]
+
+
+def repair_pool(name, confirm=""):
+    """ZFS mends a bad block from its other copies as soon as it reads it, so
+    there is no separate repair to run."""
+    raise FnasError("ZFS mends its own blocks from their checksums: a scrub is all it needs")
+
+
+def last_scrub(name):
+    """When a scrub last finished, in seconds since the epoch, or 0."""
+    return scrub_finished(name) or 0
 
 
 def leaves(vdev):

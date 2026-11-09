@@ -61,7 +61,7 @@ def health_findings(found_pools):
         if pool["health"] == "ONLINE":
             continue
         status = pools.ENGINES[pool["engine"]].pool_status(pool["name"])
-        bad = [disk for group in status["groups"] for disk in zfs.leaves(group)
+        bad = [disk for disk in pools.ENGINES[pool["engine"]].member_disks(status)
                if disk["state"] not in ("ONLINE",)]
         named = "; ".join(f"{describe_disk(d['path'], slots)} is {d['state'].lower()}" for d in bad)
         # Missing a disk is broken too: the pool has lost its protection
@@ -73,13 +73,21 @@ def health_findings(found_pools):
     return found
 
 
-def scrub_findings(pools, now):
+def engine_of(name):
+    """The engine that owns a pool, so the shared checks ask it rather than
+    assuming ZFS."""
+    return pools.ENGINES[pools.find_pool(name)["engine"]]
+
+
+def scrub_findings(names, now):
     found = []
-    for pool in pools:
-        age = now - zfs.last_scrub(pool)
+    for pool in names:
+        engine = engine_of(pool)
+        age = now - engine.last_scrub(pool)
         if age > SCRUB_MAX_AGE:
-            found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't been scrubbed",
-                                 f"The last scrub was {age // DAY:.0f} days ago. "
+            word = "been checked" if engine.CHECK_WORD == "check" else "been scrubbed"
+            found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't {word}",
+                                 f"The last {engine.CHECK_WORD} was {age // DAY:.0f} days ago. "
                                  f"Start one with Check for damage in Storage, or sudo fnas pool scrub {pool}"))
     return found
 
@@ -188,7 +196,8 @@ def check(key, section, title, findings, passed, not_applicable="", alerting=Tru
 
 def all_checks(now, found_disks=None):
     found = pools.list_pools()
-    writable = [p["name"] for p in found if not p["readonly"] and p["engine"] == "zfs"]
+    writable = [p["name"] for p in found if not p["readonly"]]
+    checkable = [p for p in found if not p["readonly"]]
     zfs_shares = [s for s in shares.list_shares() if s["engine"] == "zfs"]
     no_pool = "" if found else "No pool yet"
     count = f"{len(found)} pool" + ("" if len(found) == 1 else "s")
@@ -204,9 +213,9 @@ def all_checks(now, found_disks=None):
               f"{count}, every disk present", no_pool),
         check("pool-space", "Pools", "Pools have free space", pool_findings(found),
               f"Every pool under {FULL_WARNING}% full", no_pool),
-        check("scrub", "Pools", "Pools are scrubbed every month", scrub_findings(writable, now),
-              f"Each pool checked in the last {SCRUB_MAX_AGE // DAY:.0f} days",
-              "" if writable else no_pool or "No writable pool to scrub"),
+        check("scrub", "Storage", "Monthly storage checks", scrub_findings(writable, now),
+              f"Every pool checked in the last {SCRUB_MAX_AGE // DAY:.0f} days",
+              "" if checkable else no_pool or "No writable pool to check"),
         check("snapshots", "Protection", "Snapshots are being taken", snapshot_findings(zfs_shares, now),
               "Every share's newest snapshot is on time", "" if zfs_shares else "No shares yet"),
         check("backup", "Protection", "Backups are up to date", backup_findings(now),
@@ -326,7 +335,7 @@ def pool_details(found, histories=None):
         recorded = histories.get(pool["name"], {})
         shown.append({**pool,
                       "shares": len([s for s in found_shares if s["pool"] == pool["name"]]),
-                      "last_scrub": zfs.scrub_finished(pool["name"]) if zfs_pool else None,
+                      "last_scrub": pools.ENGINES[pool["engine"]].last_scrub(pool["name"]) or None,
                       "last_snapshot": newest_snapshot(pool["name"], found_shares) if zfs_pool else None,
                       "history": {"hourly": recorded.get("hourly", []), "daily": recorded.get("daily", [])},
                       "projection": usage.projection(recorded.get("daily") or recorded.get("hourly") or []),

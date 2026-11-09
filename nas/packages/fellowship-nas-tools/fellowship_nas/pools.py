@@ -4,14 +4,14 @@ import os
 import re
 
 from .common import FnasError
-from .engines import zfs
+from .engines import mdadm, zfs
 
 
 POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-ENGINES = {"zfs": zfs}
+ENGINES = {"zfs": zfs, "mdadm": mdadm}
 # Every engine in the plan, built or not, so the desktop can show them all:
 # name, title, and the plan phase that builds it
-CATALOGUE = [("zfs", "ZFS", None), ("mergerfs", "Unraid-style", 11), ("mdadm", "Traditional RAID", 10),
+CATALOGUE = [("zfs", "ZFS", None), ("mergerfs", "Unraid-style", 11), ("mdadm", "Traditional RAID", None),
              ("btrfs", "Btrfs", 14)]
 # Every pool is mounted at /mnt/NAME, on every engine, so no pool name can
 # collide with a folder the system uses

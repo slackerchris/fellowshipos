@@ -327,6 +327,7 @@ def build_parser():
     create.add_argument("--width", type=int, help="disks in each group (mirror: 2; RAIDZ: all of them)")
     create.add_argument("--spares", type=int, default=0, help="how many of the disks are hot spares")
     create.add_argument("--engine", default="zfs", help="the storage engine")
+    create.add_argument("--filesystem", help="an array's filesystem: xfs (recommended) or ext4")
     create.add_argument("--confirm", default="", help='type "erase N disks"')
     create.add_argument("--wipe", action="store_true", help="erase disks that hold old data")
     grow = pool.add_parser("grow", help="add disks to a pool")
@@ -357,6 +358,9 @@ def build_parser():
     export = pool.add_parser("export", help="export a pool")
     export.add_argument("name")
     pool.add_parser("scrub", help="check every block on a pool now").add_argument("name")
+    repair = pool.add_parser("repair", help="mend the blocks a check found to be wrong")
+    repair.add_argument("name")
+    repair.add_argument("--confirm", default="", help='type "repair NAME"')
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
@@ -660,7 +664,8 @@ def dispatch_pool(args, show):
         show(pools.engine_named(args.engine).layouts(sizes), print_layouts)
     elif args.action == "create":
         pools.engine_named(args.engine).create_pool(args.name, args.layout, args.disks, args.confirm,
-                                                    args.wipe, args.width, args.spares)
+                                                    args.wipe, args.width, args.spares,
+                                                    filesystem=args.filesystem)
         print(f"Created pool {args.name}")
     elif args.action == "grow":
         job = pools.engine_for(args.name).grow(args.name, args.how, args.disks, args.confirm,
@@ -685,6 +690,8 @@ def dispatch_pool(args, show):
         print(f"Exported {args.name}")
     elif args.action == "scrub":
         started(pools.engine_for(args.name).scrub_pool(args.name))
+    elif args.action == "repair":
+        started(pools.engine_for(args.name).repair_pool(args.name, args.confirm))
 
 
 def dispatch_job(args, show):

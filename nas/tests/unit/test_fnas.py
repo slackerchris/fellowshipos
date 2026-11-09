@@ -18,17 +18,27 @@ MODULES = [importlib.import_module(info.name)
 
 
 class Package:
-    """Every name in the package, wherever it lives, as if fnas were one file."""
+    """Every name in the package, wherever it lives, as if fnas were one file.
+
+    Engines share function names by design, so a name they disagree about
+    resolves to ZFS, the engine fnas started with. A test for another engine
+    reaches for that engine's module by name instead."""
 
     def __getattr__(self, name):
         for module in MODULES:
+            if module.__name__.startswith("fellowship_nas.engines."):
+                continue
             if name in vars(module):
+                return vars(module)[name]
+        for module in MODULES:
+            if module.__name__ == "fellowship_nas.engines.zfs" and name in vars(module):
                 return vars(module)[name]
         raise AttributeError(name)
 
 
 fnas = Package()
 zfs = importlib.import_module("fellowship_nas.engines.zfs")
+mdadm = importlib.import_module("fellowship_nas.engines.mdadm")
 
 
 class patch:
@@ -132,6 +142,9 @@ class Base(unittest.TestCase):
         for patcher in (patch("run", fake),
                         patch("by_id_links", links),
                         patch("unavailable", lambda: ""),
+                        # These tests are the ZFS world; the array engine has its
+                        # own class, and would ask the fake about arrays otherwise
+                        mock.patch.object(mdadm, "unavailable", lambda: "mdadm isn't installed"),
                         patch("bays", dict)):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -1999,15 +2012,21 @@ class Engines(unittest.TestCase):
             found = fnas.engines()
         self.assertEqual([(e["name"], e["title"], e["available"]) for e in found],
                          [("zfs", "ZFS", True), ("mergerfs", "Unraid-style", False),
-                          ("mdadm", "Traditional RAID", False), ("btrfs", "Btrfs", False)])
-        self.assertEqual(found[2]["reason"], "Not built yet (Phase 10)")
+                          ("mdadm", "Traditional RAID", True), ("btrfs", "Btrfs", False)])
+        self.assertEqual(found[3]["reason"], "Not built yet (Phase 14)")
 
     def test_an_unbuilt_engine_says_so(self):
-        with patch("unavailable", lambda: ""), self.assertRaisesRegex(fnas.FnasError, "Traditional RAID can't be used "
-                                                                       r"here: Not built yet \(Phase 10\)"):
-            fnas.engine_named("mdadm")
+        with patch("unavailable", lambda: ""), self.assertRaisesRegex(fnas.FnasError, "Btrfs can't be used "
+                                                                       r"here: Not built yet \(Phase 14\)"):
+            fnas.engine_named("btrfs")
         with self.assertRaisesRegex(fnas.FnasError, "no such engine"):
             fnas.engine_named("lvm")
+
+    def test_an_array_engine_says_why_it_cant_be_used(self):
+        with mock.patch.object(mdadm, "unavailable", lambda: "mdadm isn't installed"), \
+                self.assertRaisesRegex(fnas.FnasError, "Traditional RAID can't be used here: "
+                                                            "mdadm isn't installed"):
+            fnas.engine_named("mdadm")
 
     def test_zfs_says_why_it_cant_be_used(self):
         with patch("unavailable", lambda: "Secure Boot is on"):
@@ -2053,15 +2072,16 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         self.assertEqual(self.best(3), ("raid5", 3, 1, 0))
         self.assertEqual(self.best(6), ("raid5", 6, 1, 0))
         self.assertEqual(self.best(8), ("raid6", 8, 1, 0))
-        self.assertEqual(self.best(16), ("raid6", 8, 2, 0))
+        self.assertEqual(self.best(16), ("raid6", 16, 1, 0))
         self.assertIsNone(self.engine.recommended(1))
         self.assertEqual(self.options(1), [])
 
-    def test_only_layouts_that_fit_are_offered(self):
+    def test_an_array_is_one_group_of_every_disk(self):
         for count in range(2, 17):
             for option in self.options(count):
                 with self.subTest(count=count, option=option):
-                    self.assertEqual(option["width"] * option["groups"] + option["spares"], count)
+                    self.assertEqual(option["groups"], 1)
+                    self.assertEqual(option["width"] + option["spares"], count)
                     low, high = self.engine.WIDTHS[option["layout"]]
                     self.assertTrue(low <= option["width"] <= high)
         self.assertNotIn("raid6", {o["layout"] for o in self.options(3)})
@@ -2070,27 +2090,153 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
     def test_usable_space_and_survival(self):
         four = self.options(4)
         for layout, usable, survives in (("raid5", 3 * 4 * GB, 1), ("raid6", 2 * 4 * GB, 2),
-                                         ("raid10", 2 * 4 * GB, 1), ("mirror", 2 * 4 * GB, 1)):
-            option = next(o for o in four if o["layout"] == layout)
+                                         ("raid10", 2 * 4 * GB, 1)):
+            option = next(o for o in four if o["layout"] == layout and not o["spares"])
             with self.subTest(layout=layout):
                 self.assertEqual((option["usable"], option["survives"]), (usable, survives))
-        self.assertEqual(next(o for o in four if o["layout"] == "mirror")["groups"], 2)
+        # A mirror of two disks with the other two waiting as spares
+        mirror = next(o for o in four if o["layout"] == "mirror")
+        self.assertEqual((mirror["width"], mirror["spares"], mirror["usable"]), (2, 2, 4 * GB))
 
-    def test_mixed_sizes_group_alike_and_spare_the_largest(self):
-        sizes = [4 * GB, 8 * GB, 4 * GB, 8 * GB, 8 * GB]
-        groups, spares = self.engine.plan("mirror", sizes, 2, 1)
-        self.assertEqual([[sizes[i] for i in g] for g in groups], [[4 * GB, 4 * GB], [8 * GB, 8 * GB]])
-        self.assertEqual(sizes[spares[0]], 8 * GB)
-        option = next(o for o in self.engine.layouts(sizes[:4]) if o["layout"] == "raid5" and o["width"] == 4)
-        self.assertEqual(option["unused"], 2 * 4 * GB)
+    def test_mixed_sizes_keep_alike_disks_together_and_spare_the_largest(self):
+        sizes = [4 * GB, 8 * GB, 4 * GB, 8 * GB]
+        groups, spares = self.engine.plan("mirror", sizes, 2, 2)
+        self.assertEqual([[sizes[i] for i in g] for g in groups], [[4 * GB, 4 * GB]])
+        self.assertEqual(sorted(sizes[i] for i in spares), [8 * GB, 8 * GB])
+        option = next(o for o in self.options(4) if o["layout"] == "raid5" and not o["spares"])
+        self.assertEqual(option["unused"], 0)
+        mixed = next(o for o in self.engine.layouts([4 * GB, 8 * GB, 4 * GB, 8 * GB])
+                     if o["layout"] == "raid5" and not o["spares"])
+        self.assertEqual(mixed["unused"], 2 * 4 * GB)
 
     def test_a_layout_that_does_not_fit_says_so(self):
         with self.assertRaisesRegex(fnas.FnasError, "mdadm offers"):
             self.engine.plan("raidz2", [4 * GB] * 4)
-        with self.assertRaisesRegex(fnas.FnasError, "raid6 groups take 4 to 12"):
+        with self.assertRaisesRegex(fnas.FnasError, "raid6 takes 4 to 16 disks"):
             self.engine.plan("raid6", [4 * GB] * 3)
-        with self.assertRaisesRegex(fnas.FnasError, r"5 disks don't divide"):
+        with self.assertRaisesRegex(fnas.FnasError, "an array uses every disk it has"):
             self.engine.plan("mirror", [4 * GB] * 5, 2)
+
+    def test_creating_an_array(self):
+        commands = []
+
+        def fake(*command, check=True, stdin=None, timeout=None):
+            commands.append(command)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+        disks_in = [{"by_id": f"/dev/disk/by-id/ata-{n}-part1", "path": f"/dev/sd{n}1",
+                     "size": 4 * GB, "state": "empty", "notes": []} for n in "bcd"]
+        with mock.patch.object(self.engine, "run", fake), \
+                mock.patch.object(self.engine.disks, "choose", lambda wanted, wipe: disks_in), \
+                mock.patch.object(self.engine.disks, "check_confirmation", lambda chosen, confirm: None), \
+                mock.patch.object(self.engine.disks, "prepare", lambda chosen, wipe: None), \
+                mock.patch.object(self.engine.pools, "check_new_name", lambda name: None), \
+                mock.patch.object(self.engine, "save_conf", lambda: None), \
+                mock.patch.object(self.engine, "mount_pool", lambda *a: None), \
+                mock.patch.object(self.engine.os, "makedirs", lambda *a, **k: None):
+            self.engine.create_pool("tank", "raid5", ["a", "b", "c"], "erase 3 disks", False)
+        create = next(c for c in commands if c[0] == "mdadm")
+        self.assertEqual(create[:2], ("mdadm", "--create"))
+        self.assertIn("--level=5", create)
+        self.assertIn("--raid-devices=3", create)
+        self.assertNotIn("--layout=n2", create)
+        # The array is made, then XFS is put on it
+        self.assertEqual(next(c for c in commands if c[0] == "mkfs.xfs")[-1], "/dev/md/tank")
+
+    def test_raid10_uses_two_copies_and_ext4_when_asked(self):
+        commands = []
+
+        def fake(*command, check=True, stdin=None, timeout=None):
+            commands.append(command)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+        disks_in = [{"by_id": f"/dev/disk/by-id/ata-{n}-part1", "path": f"/dev/sd{n}1",
+                     "size": 4 * GB, "state": "empty", "notes": []} for n in "bcde"]
+        with mock.patch.object(self.engine, "run", fake), \
+                mock.patch.object(self.engine.disks, "choose", lambda wanted, wipe: disks_in), \
+                mock.patch.object(self.engine.disks, "check_confirmation", lambda chosen, confirm: None), \
+                mock.patch.object(self.engine.disks, "prepare", lambda chosen, wipe: None), \
+                mock.patch.object(self.engine.pools, "check_new_name", lambda name: None), \
+                mock.patch.object(self.engine, "save_conf", lambda: None), \
+                mock.patch.object(self.engine, "mount_pool", lambda *a: None), \
+                mock.patch.object(self.engine.os, "makedirs", lambda *a, **k: None):
+            self.engine.create_pool("tank", "raid10", ["a", "b", "c", "d"], "erase 4 disks",
+                                    False, filesystem="ext4")
+        create = next(c for c in commands if c[0] == "mdadm")
+        self.assertIn("--level=10", create)
+        self.assertIn("--layout=n2", create)
+        self.assertTrue(any(c[0] == "mkfs.ext4" for c in commands))
+
+    def test_a_filesystem_must_be_one_we_can_make(self):
+        with self.assertRaisesRegex(fnas.FnasError, "no such filesystem: btrfs"):
+            self.engine.check_filesystem("btrfs")
+        self.assertEqual(self.engine.check_filesystem(None), "xfs")
+
+    def test_reading_an_array_detail(self):
+        detail = """/dev/md127:
+           Version : 1.2
+        Raid Level : raid5
+     Raid Devices : 3
+            State : clean, degraded
+            Name : gandolf:tank
+            UUID : 1a2b:3c4d
+
+    Number   Major   Minor   RaidDevice State
+       0       8       17        0      active sync   /dev/sdb1
+       1       8       33        1      active sync   /dev/sdc1
+       -       0        0        2      removed
+       2       8       49        -      spare   /dev/sdd1
+"""
+        output = SimpleNamespace(stdout=detail, stderr="", returncode=0)
+        with mock.patch.object(self.engine, "array_device", lambda name: "/dev/md127"), \
+                mock.patch.object(self.engine, "run", lambda *c, check=True: output):
+            found = self.engine.detail("tank")
+        self.assertEqual(found["fields"]["raid level"], "raid5")
+        self.assertEqual([(r["raid_device"], r["state"], r["path"]) for r in found["rows"]],
+                         [(0, "active sync", "/dev/sdb1"), (1, "active sync", "/dev/sdc1"),
+                          (2, "removed", ""), (None, "spare", "/dev/sdd1")])
+
+    def test_a_pool_status_names_its_disks_and_spares(self):
+        status = {"groups": [{"disks": [{"path": "/dev/sdb1"}, {"path": "/dev/sdc1"}]}],
+                  "spares": [{"path": "/dev/sdd1"}]}
+        self.assertEqual([d["path"] for d in self.engine.member_disks(status)],
+                         ["/dev/sdb1", "/dev/sdc1"])
+
+    def test_a_repair_needs_asking_for_it(self):
+        with self.assertRaisesRegex(fnas.FnasError, "confirm by passing --confirm \"repair tank\""):
+            self.engine.repair_pool("tank", "")
+
+    def test_growing_an_array_by_one_disk(self):
+        status = {"groups": [{"type": "raid5",
+                            "disks": [{"path": f"/dev/sd{n}1", "size": 4 * GB} for n in "bcd"]}],
+                  "spares": []}
+        commands = []
+
+        def fake(*command, check=True, stdin=None, timeout=None):
+            commands.append(command)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+        disks_in = [{"by_id": "/dev/disk/by-id/ata-e-part1", "path": "/dev/sde1",
+                     "size": 4 * GB, "state": "empty", "notes": []}]
+        with mock.patch.object(self.engine, "pool_status", lambda name: status), \
+                mock.patch.object(self.engine, "array_device", lambda name: "/dev/md/tank"), \
+                mock.patch.object(self.engine, "run", fake), \
+                mock.patch.object(self.engine.disks, "choose", lambda wanted, wipe: disks_in), \
+                mock.patch.object(self.engine.disks, "check_confirmation", lambda chosen, confirm: None), \
+                mock.patch.object(self.engine.disks, "prepare", lambda chosen, wipe: None), \
+                mock.patch.object(self.engine.jobs, "start", lambda kind, title, pool=None:
+                                  {"kind": kind, "title": title, "pool": pool}):
+            job = self.engine.grow("tank", "expand", ["e"], "erase 1 disk", False)
+        self.assertEqual(job["kind"], "expand")
+        self.assertIn(("mdadm", "--grow", "/dev/md/tank", "--raid-devices=4"), commands)
+
+    def test_an_array_has_no_groups_to_add(self):
+        status = {"groups": [{"type": "raid5", "disks": [{"path": "/dev/sdb1"}]}], "spares": []}
+        with mock.patch.object(self.engine, "pool_status", lambda name: status), \
+                mock.patch.object(self.engine, "array_device", lambda name: "/dev/md/tank"), \
+                mock.patch.object(self.engine.disks, "choose", lambda wanted, wipe: []), \
+                self.assertRaisesRegex(fnas.FnasError, "an array is a single group"):
+            self.engine.grow("tank", "group", [], "", False)
 
     def test_reading_the_kernel_arrays(self):
         with mock.patch.object(self.engine, "read", lambda path: self.MDSTAT):
