@@ -19,8 +19,8 @@ jobs:
     name: Python
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Unit tests
@@ -38,10 +38,13 @@ jobs:
           - installer
           - nas/packages/fellowship-nas-web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
+          # Neither module has dependencies yet, so there is no go.sum to key a
+          # cache on, and asking for one only logs a restore failure
+          cache: false
       # The web helper links libpam through cgo
       - name: PAM development headers
         run: sudo apt-get update -qq && sudo apt-get install -y libpam0g-dev
@@ -72,8 +75,8 @@ jobs:
           - nas/packages/fellowship-nas-web/web
           - installer/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -90,7 +93,7 @@ jobs:
     name: Shell scripts
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       # Errors only to start with, so the first runs are about real bugs.
