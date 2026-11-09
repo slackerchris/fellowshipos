@@ -46,7 +46,7 @@ def sync_backup(settings):
     # away for longer than Sanoid keeps anything. Properties go too, so a restored
     # share is still a share.
     result = run("syncoid", "--recursive", "--quiet", "--identifier=fellowship", "--sendoptions=p",
-                 f"{settings['source']}/shares", f"{target}/shares", check=False)
+                 f"{settings['source']}/shares", f"{target}/shares", check=False, timeout=None)
     if result.returncode != 0:
         return (result.stderr or result.stdout).strip() or "syncoid failed"
     # Share settings live in the source pool's config folder, so a copy goes
@@ -117,7 +117,7 @@ def restore_backup(name, from_pool, to_pool):
     dataset = f"{pool}/shares/{name}"
     if run("zfs", "list", "-H", "-o", "name", dataset, check=False).returncode == 0:
         raise FnasError(f"{dataset} already exists and isn't a share")
-    run("syncoid", "--quiet", "--no-sync-snap", "--sendoptions=p", backups[0]["dataset"], dataset)
+    run("syncoid", "--quiet", "--no-sync-snap", "--sendoptions=p", backups[0]["dataset"], dataset, timeout=None)
     folder = zfs.config_dir(backup_target(from_pool))
     saved = read_json(os.path.join(folder, f"backup-of-{backups[0]['pool']}.json"), {}) if folder else {}
     settings = shares.check_settings(name, (saved.get("shares") or {}).get(name, {}))

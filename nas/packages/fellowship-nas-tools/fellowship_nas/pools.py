@@ -8,7 +8,6 @@ from .engines import zfs
 
 
 POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 ENGINES = {"zfs": zfs}
 # Every engine in the plan, built or not, so the desktop can show them all:
 # name, title, and the plan phase that builds it
@@ -20,11 +19,11 @@ ROOT = "/mnt"
 
 
 def check_pool_name(name):
+    """The name every engine must accept. An engine may be stricter: ZFS, for
+    one, can't use a name that starts with a word it reserves."""
     if not POOL_NAME.match(name):
         raise FnasError("pool names use lowercase letters, numbers, - and _, "
                         "start with a letter, and are at most 32 characters")
-    if name.startswith(RESERVED_POOL_PREFIXES):
-        raise FnasError(f"{name} starts with a word ZFS reserves")
 
 
 def engines():

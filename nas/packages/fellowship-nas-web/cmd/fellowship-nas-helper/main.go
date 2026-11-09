@@ -26,6 +26,12 @@ import (
 
 const outputLimit = 4 << 20
 
+// maxRunning caps how many fnas processes run at once. Each one is a root
+// Python process, so a flood of requests mustn't be able to fill the machine.
+const maxRunning = 8
+
+var slots = make(chan struct{}, maxRunning)
+
 var (
 	socket     = flag.String("socket", protocol.Socket, "where to listen")
 	fnasPath   = flag.String("fnas", "/usr/sbin/fnas", "the fnas command")
@@ -45,6 +51,10 @@ func (l *limited) Write(data []byte) (int, error) {
 }
 
 func runFnas(args []string, input string) (string, string, error) {
+	// Wait for a free slot rather than refusing: the work still has to happen,
+	// and a queue of a few hundred goroutines costs nothing
+	slots <- struct{}{}
+	defer func() { <-slots }()
 	command := exec.Command(*fnasPath, args...)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
 	command.Stdin = strings.NewReader(input)

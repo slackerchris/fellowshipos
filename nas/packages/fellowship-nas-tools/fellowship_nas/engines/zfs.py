@@ -19,6 +19,9 @@ LAYOUTS = ("single", "mirror", "raidz1", "raidz2", "raidz3")
 WIDTHS = {"single": (1, 1), "mirror": (2, 3), "raidz1": (3, 8), "raidz2": (4, 12), "raidz3": (5, 16)}
 PARITY = {"raidz1": 1, "raidz2": 2, "raidz3": 3}
 MAX_SPARES = 2
+# ZFS reads a dataset's first word as something of its own, so a pool can't
+# start with one of these. Other engines have no such rule.
+RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 SCRUB_DONE = re.compile(r"scrub (?:repaired|canceled).* on (\w{3} \w{3} +\d+ [\d:]+ \d{4})")
 MODULE_DIR = "/sys/module/zfs"
 SIZE_ONLY = re.compile(r"^\s*(mirror|raidz) contains devices of different sizes$")
@@ -102,7 +105,7 @@ def plan(layout, sizes, width=None, spares=0):
     since a spare can only stand in for a disk no bigger than itself.
     Returns ([[index, ...], ...], [index, ...])."""
     if layout not in LAYOUTS:
-        raise FnasError(f"no such layout: {layout}")
+        raise FnasError(f"no such layout: {layout} (ZFS offers {', '.join(LAYOUTS)})")
     if not 0 <= spares <= MAX_SPARES:
         raise FnasError(f"a pool takes 0 to {MAX_SPARES} spares")
     if layout == "single" and (len(sizes) != 1 or spares):
@@ -191,9 +194,16 @@ def run_accepting_sizes(*command):
     raise FnasError(result.stderr.strip() or f"{command[0]} {command[1]} failed")
 
 
+def check_reserved_name(name):
+    """ZFS's own extra rule on a pool's name, on top of the shared ones."""
+    if name.startswith(RESERVED_POOL_PREFIXES):
+        raise FnasError(f"{name} starts with a word ZFS reserves")
+
+
 def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0):
     chosen = disks.choose(wanted, wipe_disks)
     groups, spare = plan(layout, [d["size"] for d in chosen], width, spares)
+    check_reserved_name(name)
     pools.check_new_name(name)
     disks.check_confirmation(chosen, confirm)
     disks.prepare(chosen, wipe_disks)
@@ -430,7 +440,9 @@ def volume_snapshots(share):
 
 
 def destroy_volume(share):
-    run("zfs", "destroy", "-r", share["dataset"])
+    # A large share takes as long as it takes; the typed confirmation already
+    # covers the decision
+    run("zfs", "destroy", "-r", share["dataset"], timeout=None)
 
 
 def import_pool(pool, readonly, force=False):

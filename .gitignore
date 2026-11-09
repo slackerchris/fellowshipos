@@ -15,3 +15,7 @@ config/common
 config/source
 config/includes.chroot/usr/share/fellowshipos/nas-repo/
 config/packages.chroot/*.deb
+__pycache__/
+*.pyc
+# The editor's own workspace file is per-machine, not part of the project
+*.code-workspace

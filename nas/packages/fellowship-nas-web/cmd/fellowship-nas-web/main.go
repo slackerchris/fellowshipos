@@ -47,18 +47,22 @@ func main() {
 	if *devHTTP {
 		log.Printf("WARNING: plain HTTP for development on %s; passwords cross the network unencrypted", *listen)
 		server.Scheme = "http"
-		plain := &http.Server{Addr: *listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		plain := &http.Server{Addr: *listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout: 60 * time.Second}
 		log.Fatal(plain.ListenAndServe())
 	}
 	pair, err := tls.LoadX509KeyPair(*cert, *key)
 	if err != nil {
 		log.Fatalf("the certificate: %v", err)
 	}
+	// No WriteTimeout: the jobs stream sends events for as long as a job runs.
+	// ReadTimeout covers the whole request, so a slow body can't hold a worker.
 	https := &http.Server{
 		Addr:              *listen,
 		Handler:           server.Handler(),
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}},
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    64 << 10,
 	}

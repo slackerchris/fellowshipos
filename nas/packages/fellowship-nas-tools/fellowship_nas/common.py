@@ -12,18 +12,24 @@ HOUR = 3600
 DAY = 24 * HOUR
 STATE_DIR = "/var/lib/fellowship-nas"
 ACCOUNT_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+# Anything that can take longer than this belongs in a job, which runs as its
+# own systemd unit. A command still running after this long is stuck, and
+# stopping it beats holding a root process and the browser's request forever.
+TIMEOUT = 300
 
 
 class FnasError(Exception):
     pass
 
 
-def run(*command, check=True, stdin=None):
+def run(*command, check=True, stdin=None, timeout=TIMEOUT):
     try:
-        result = subprocess.run(command, input=stdin, capture_output=True, text=True,
+        result = subprocess.run(command, input=stdin, capture_output=True, text=True, timeout=timeout,
                                 env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "HOME": "/root"})
     except FileNotFoundError:
         raise FnasError(f"{command[0]} is not installed") from None
+    except subprocess.TimeoutExpired:
+        raise FnasError(f"{command[0]} was still running after {timeout} seconds and was stopped") from None
     if check and result.returncode != 0:
         raise FnasError(result.stderr.strip() or f"{command[0]} failed")
     return result

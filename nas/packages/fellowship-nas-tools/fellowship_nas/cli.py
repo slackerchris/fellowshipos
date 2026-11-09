@@ -8,7 +8,6 @@ import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, ssh, system, usage, users
-from .engines import zfs
 
 
 # Actions that change nothing worth saving
@@ -319,9 +318,11 @@ def build_parser():
     pool.add_parser("details", help="what uses a pool's space, its history and when it fills").add_argument("name")
     layouts = pool.add_parser("layouts", help="list the layouts these disks fit")
     layouts.add_argument("disks", nargs="+", metavar="disk")
+    layouts.add_argument("--engine", default="zfs", help="the storage engine")
     create = pool.add_parser("create", help="create a pool, erasing its disks")
     create.add_argument("name")
-    create.add_argument("layout", choices=zfs.LAYOUTS)
+    create.add_argument("layout", metavar="layout",
+                        help="a layout the engine offers; fnas pool layouts lists the ones that fit")
     create.add_argument("disks", nargs="+", metavar="disk", help="by-id path, device path or serial")
     create.add_argument("--width", type=int, help="disks in each group (mirror: 2; RAIDZ: all of them)")
     create.add_argument("--spares", type=int, default=0, help="how many of the disks are hot spares")
@@ -351,6 +352,8 @@ def build_parser():
     import_.add_argument("--readonly", action="store_true", help="import without writing to the pool")
     import_.add_argument("--force", action="store_true",
                          help="import a pool last used by another system, as after a reinstall")
+    import_.add_argument("--engine", default="zfs",
+                         help="the engine whose scan didn't list it; the one that did is used instead")
     export = pool.add_parser("export", help="export a pool")
     export.add_argument("name")
     pool.add_parser("scrub", help="check every block on a pool now").add_argument("name")
@@ -654,7 +657,7 @@ def dispatch_pool(args, show):
     elif args.action == "layouts":
         found = disks.list_disks()
         sizes = [disks.find_disk(found, wanted)["size"] for wanted in args.disks]
-        show(zfs.layouts(sizes), print_layouts)
+        show(pools.engine_named(args.engine).layouts(sizes), print_layouts)
     elif args.action == "create":
         pools.engine_named(args.engine).create_pool(args.name, args.layout, args.disks, args.confirm,
                                                     args.wipe, args.width, args.spares)
@@ -671,7 +674,8 @@ def dispatch_pool(args, show):
         print(f"Removed the spare from {args.name}")
     elif args.action == "import":
         found = [p for p in pools.scan_pools() if args.pool in (p.get("pool"), p.get("id"))]
-        engine = pools.ENGINES[found[0]["engine"]] if found else zfs
+        # The engine that found it knows how to import it; otherwise the one named
+        engine = pools.ENGINES[found[0]["engine"]] if found else pools.engine_named(args.engine)
         engine.import_pool(args.pool, args.readonly, args.force)
         print(f"Imported {args.pool}" + (" read-only" if args.readonly else ""))
         for pool in config.foreign_config_pools():
