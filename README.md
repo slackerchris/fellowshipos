@@ -40,11 +40,11 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 | **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
 | **Settings** | Manage your password, sessions, certificates, system disk space, SSH, and power controls. |
 
-**Available today.** ZFS is the implemented storage engine. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. Traditional RAID is the next planned storage phase, followed by Unraid-style storage, more share protocols, the Files app, and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
+**Available today.** ZFS pools and traditional RAID arrays are the implemented storage engines. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. Unraid-style storage is the next planned storage phase, followed by more share protocols, the Files app, and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
 
 ### Storage and shares
 
-Pools mount at `/mnt/POOL`, with shares at `/mnt/POOL/shares/NAME`. ZFS supports single disks, mirrors, RAIDZ1/2/3, and hot spares. The graphical installer's eligible data partition can hold a single-disk pool. For the OS volume itself, **Settings → System space** can allocate free space from its LVM volume group.
+Pools mount at `/mnt/POOL`, with shares at `/mnt/POOL/shares/NAME`. ZFS supports single disks, mirrors, RAIDZ1/2/3, and hot spares. Traditional RAID supports RAID 1, 5, 6 and 10 with hot spares, on XFS or ext4, as one array per pool. The graphical installer's eligible data partition can hold a single-disk pool. For the OS volume itself, **Settings → System space** can allocate free space from its LVM volume group.
 
 ```bash
 sudo fnas disk list

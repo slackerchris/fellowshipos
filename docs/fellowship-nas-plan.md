@@ -262,6 +262,35 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **Replacing:** a failed disk is marked failed, removed and replaced through the same guided flow as ZFS. The rebuild runs as a job, and a hot spare takes over by itself.
 - **Importing:** an array from another Linux machine is assembled read-only first, then mounted.
 
+**As built after Phase 10's engine work**
+
+- **One array per pool.** An mdadm pool is a single array of every disk it has, so the
+  layout list offers one group rather than ZFS's several: RAID 5 up to six disks, RAID 6
+  above that, and RAID 10 with the standard two-copy layout. A mirror of two disks with
+  the rest waiting as spares is offered when the disks outnumber what the layout needs.
+- **Filesystem:** XFS is preselected in the CLI and ext4 sits beside it. The choice is
+  recorded by the mount itself, so growing knows which tool to use.
+- **Creating:** the array is made with an internal write-intent bitmap, recorded in
+  `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID from
+  `/etc/fstab`. This departs from the design above, which called for a systemd mount
+  unit; `/etc/fstab` was used instead, and that is open to change.
+- **Growing:** one disk at a time. The reshape runs as a job, and the filesystem is
+  grown when the kernel finishes. A spare is added or removed without a job.
+- **Checking and repairing:** a check writes `check` to the array's `sync_action`, runs
+  as a job, and reports the blocks that do not match. Repair is a separate command with
+  its own typed confirmation, because it can keep the wrong copy. When each check
+  finished is kept in `/var/lib/fellowship-nas/checks.json`.
+- **Health:** the monthly check is now **Monthly storage checks**. It covers every
+  writable pool, not only ZFS ones, and each engine names the action in its own words:
+  Scrub for a ZFS pool, Array check for an array.
+- **No snapshots:** a share on an array keeps no history, so Previous Versions has
+  nothing to offer, and the backup engine still covers ZFS pools only. Both stay visible
+  in the desktop with that reason rather than disappearing.
+- **Not yet verified:** the whole feature is tested only against a fake, with no array
+  on a real disk. Creating, growing, replacing, checking and importing are all written
+  from mdadm's documented behaviour. The four-disk and sixteen-disk gate below is what
+  turns that into a proven feature.
+
 **Unraid-style (mergerfs + SnapRAID)** (absorbs the old storage node)
 
 - **Disks:** each data disk gets its own XFS filesystem, mounted at `/srv/disks/SERIAL`, and mergerfs joins them at `/mnt/NAME`.
@@ -643,7 +672,7 @@ No phase starts until the previous gate passes in a VM. Each storage gate runs o
 | 7. Any number of drives and ZFS depth | System growth from Settings, long-job progress, drive bays and identify, multi-group pools, RAIDZ3, spares, growing, guided replacement, share settings in pool config, NFS through `exports.d`, the engine layer in `fnas`, pools at `/mnt/NAME` | Layouts that fit on 0, 1, 2, 4 and 16 disks; on sixteen, a two-group RAIDZ2 pool with a spare survives a failed disk replaced from the desktop | Done. Bay lights tested against a fake sysfs only |
 | 8. Show everything | The fixes from Chris's review of the existing apps: engine choice first in Create pool (only ZFS usable, the others "Not built yet"); plain-word layout labels without nonsense layouts; "Ways to share" on Shares; Health rewritten around every check; Setup once, then Settings; Snapshots and backup app holding the backup jobs | With no pool, every app still shows every feature and why it can't be used yet; Setup appears on first login only; Health lists each check with a time | Done. On a fresh VM install: Setup opened on first login, stayed gone after Skip and a new login, and came back from Settings. Health caught a stopped Samba with a critical alert, then a Resolved one. The gate found and fixed a disks widget that said "all healthy" with no SMART data |
 | 9. Users and sharing settings | The Users app (accounts, shares-only accounts, groups, one password); share access by users and groups; every SMB and NFS setting listed under Sharing; existing shares migrated | From the desktop alone: add two shares-only users and a group; give one read and the other read and write; over SMB each gets exactly that and a guest gets nothing; a read-only NFS network can't write; recycle bin and Time Machine settings pass `testparm`; settings survive a reinstall and restore | Done. From the desktop: added Sam and Kim (shares only) and the family group, made docs with Sam read and family read and write, turned on guests and the recycle bin for media, and set the NAS-wide SMB and NFS settings. Over SMB, Sam read but couldn't write, Kim wrote through family, guests read media only, and deletes went to `.recycle`. Over NFS a read-only client couldn't write. After reinstalling the system disk, importing and restoring from the desktop brought back the accounts with their IDs, the group, the share access and both protocols' settings; passwords are set again in Users. The gate found and fixed: lockd and statd ignoring fixed ports, restored accounts shown as turned off, and guests silently shut out by required encryption (now refused with the reason). NFS access per user and the Time Machine setting were checked from the server side only (exports and `testparm`), with no Linux or Mac client |
-| 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | |
+| 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | Engine, CLI and Health are built. Create pool, grow, replace, spare, export, import, status and check all work through `fnas`. Outstanding: the desktop screens for arrays, `mdadm --monitor` alerts wired into notifications, the monthly check schedule, and the gate itself, which has not run on real disks. |
 | 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync | |
 | 12. More ways to share | SFTP, FTP (FTPS by default) and WebDAV, using Phase 9's users and access lists | Two users with different access see only their shares over SFTP, FTP and WebDAV; plain FTP stays off until turned on | |
 | 13. Files | The Files app, snapshot browse and restore | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
@@ -703,6 +732,9 @@ Web and access:
 **Still to confirm**
 
 - [ ] Does the TrueNAS pool import read-only on Debian's ZFS?
+- [ ] Traditional RAID mounts its array from `/etc/fstab`, not from the systemd mount
+      unit this plan called for. Keep `/etc/fstab`, or switch to a unit so the mount and
+      its options live with the other unit files?
 - [ ] On Chris's own server: does the HBA run in IT mode, and does the backplane report bays (SES)? This only decides whether that box gets bay numbers; nothing depends on it
 - [ ] Where will the signed apt repo be hosted?
 
@@ -724,4 +756,10 @@ Web and access:
 | Features decided without Chris | Rework and lost trust, as in revisions 2 and 3 | Rule 7: his reference list is the scope; anything cut is put to him first |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step for Claude Code:** "Read `CLAUDE.md` and this plan, then start Phase 10." Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs a real Windows client: mount a share, then check Previous Versions.
+**Next step:** the desktop's screens for arrays. Create pool needs the filesystem choice
+with XFS preselected and "RAID 10 · Two copies" named in full; Snapshots, Previous
+Versions and Backup stay visible but disabled, saying "This pool doesn't support
+snapshots" and "The current backup engine only supports ZFS pools"; and the pool view
+needs a Check array button beside ZFS's Scrub. Then the four-disk and sixteen-disk gate.
+Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs
+a real Windows client: mount a share, then check Previous Versions.
