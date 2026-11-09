@@ -15,6 +15,10 @@ if [ "$1" = "configure" ]; then
     # settings (NFSv4 only unless changed), restarting it if they changed
     fnas share refresh || true
 
+    # Lets only accounts set to Shares and SSH log in over SSH, and never root.
+    # Every account with a login shell joins nas-ssh, so nobody is locked out
+    fnas ssh refresh || true
+
     # Picks up the alert hook
     systemctl try-restart zfs-zed.service
     systemctl daemon-reload

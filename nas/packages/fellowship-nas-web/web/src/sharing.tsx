@@ -7,6 +7,7 @@ import { Badge, Button, Card, Field, Loading, Notice, Result, useAction, useLoad
 
 export const STATE_BADGE = {
     running: "good", stopped: "warning", failed: "bad", missing: "bad", "not-built": "neutral", later: "neutral",
+    off: "neutral",
 } as const;
 
 /** How to reach a share, or every share, over one protocol. */

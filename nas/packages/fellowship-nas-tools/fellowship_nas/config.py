@@ -7,7 +7,7 @@ import time
 import uuid
 
 from .common import ACCOUNT_NAME, FnasError, read_json, run, write_file, write_json
-from . import alerts, backup, pools, shares, snapshots, users
+from . import alerts, backup, pools, shares, snapshots, ssh, users
 
 
 INSTALL_ID_FILE = "/etc/fellowshipos/nas-install-id"
@@ -52,7 +52,9 @@ def local_users():
              "group": groups.get(user.pw_gid), "comment": user.pw_gecos.split(",")[0],
              "kind": details.get(user.pw_name, {}).get("kind", "ssh"),
              "admin": details.get(user.pw_name, {}).get("admin", False),
-             "groups": details.get(user.pw_name, {}).get("groups", [])}
+             "groups": details.get(user.pw_name, {}).get("groups", []),
+             # Public keys only, so nothing secret
+             "keys": [key["line"] for key in ssh.list_keys(user.pw_name)] if user.pw_name in details else []}
             for user in pwd.getpwall() if 1000 <= user.pw_uid < 60000 and user.pw_name not in users.SERVICE_ACCOUNTS]
 
 
@@ -65,7 +67,7 @@ def current_config():
             "lan": lan, "backup": read_json(backup.BACKUP_FILE), "alerts": read_json(alerts.ALERTS_FILE, {}),
             "shares": shares.list_shares(), "users": local_users(),
             "groups": [{"name": g["name"], "gid": g["gid"]} for g in users.list_groups()],
-            "sharing": shares.sharing_settings()}
+            "sharing": shares.sharing_settings(), "ssh": ssh.settings()}
 
 
 def save_config(claim=()):
@@ -174,6 +176,19 @@ def restore_config(pool):
             except KeyError:
                 continue
             restore_memberships(user)
+            if user.get("kind") == "ssh" and isinstance(user.get("keys"), list) and user["keys"]:
+                try:
+                    ssh.set_keys(user["name"], "\n".join(k for k in user["keys"] if isinstance(k, str)))
+                except FnasError as error:
+                    notes.append(f"{user['name']}'s SSH keys weren't restored: {error}")
+    saved_ssh = saved.get("ssh")
+    try:
+        ssh.sync_members()
+        if isinstance(saved_ssh, dict):
+            ssh.set_settings(saved_ssh.get("enabled") if isinstance(saved_ssh.get("enabled"), bool) else None,
+                             saved_ssh.get("passwords") if isinstance(saved_ssh.get("passwords"), bool) else None)
+    except FnasError as error:
+        notes.append(f"the SSH settings weren't restored: {error}")
     sharing = saved.get("sharing")
     if isinstance(sharing, dict):
         for protocol in ("smb", "nfs"):

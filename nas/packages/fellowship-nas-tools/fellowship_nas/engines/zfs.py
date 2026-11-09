@@ -481,6 +481,46 @@ def created_at(dataset):
     return int(run("zfs", "get", "-Hp", "-o", "value", "creation", dataset).stdout)
 
 
+BACKUP_DATASET = "fellowship-backup"
+
+
+def space(name):
+    """What uses a pool's space, in parts that add up to what's used: each share's
+    files, every snapshot, backups of other pools, and the rest."""
+    fields = ("name", "used", "usedbysnapshots", "usedbydataset", "usedbychildren", "available")
+    output = run("zfs", "list", "-Hp", "-t", "filesystem", "-o", ",".join(fields), "-r", name).stdout
+    rows = [dict(zip(fields, line.split("\t"))) for line in output.splitlines()]
+    for row in rows:
+        for key in fields[1:]:
+            row[key] = int(row[key])
+    root = next(row for row in rows if row["name"] == name)
+    backups_root = f"{name}/{BACKUP_DATASET}"
+    in_backups = lambda row: row["name"] == backups_root or row["name"].startswith(backups_root + "/")
+    shares = [{"name": row["name"].split("/")[2], "files": row["usedbydataset"] + row["usedbychildren"],
+               "snapshots": row["usedbysnapshots"]}
+              for row in rows if row["name"].count("/") == 2 and row["name"].startswith(f"{name}/shares/")]
+    snapshots = sum(row["usedbysnapshots"] for row in rows if not in_backups(row))
+    backups = sum(row["used"] for row in rows if row["name"] == backups_root)
+    files = sum(share["files"] for share in shares)
+    return {"used": root["used"], "free": root["available"], "shares": sorted(shares, key=lambda s: -s["files"]),
+            "parts": {"shares": files, "snapshots": snapshots, "backups": backups,
+                      "other": max(root["used"] - files - snapshots - backups, 0)}}
+
+
+def pool_details(name):
+    """Everything the pool's details view shows, besides its history."""
+    pools.find_pool(name)
+    ratio, logical = run("zfs", "get", "-Hp", "-o", "value", "compressratio,logicalused", name).stdout.split()
+    size, allocated, fragmentation = run("zpool", "list", "-Hp", "-o", "size,alloc,frag", name).stdout.split()
+    status = pool_status(name)
+    return {"name": name, "size": int(size), "allocated": int(allocated),
+            "fragmentation": None if fragmentation == "-" else int(fragmentation.rstrip("%")),
+            "compression": float(ratio.rstrip("x")), "logical": int(logical),
+            "created": created_at(name), "last_scrub": scrub_finished(name),
+            "errors": sum(disk["errors"] for group in status["groups"] for disk in leaves(group)),
+            "space": space(name)}
+
+
 def scrub_finished(pool):
     """When a scrub last finished, or None if none has."""
     match = SCRUB_DONE.search(run("zpool", "status", pool).stdout)

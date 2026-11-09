@@ -4,6 +4,11 @@
    The light theme is the same palette turned to daylight. */
 :root {
     --desktop: #e3dccb;
+    /* Chart series, checked for colour blindness and contrast with the dataviz validator */
+    --series-1: #2a78d6;
+    --series-2: #1baf7a;
+    --series-3: #6250d6;
+    --series-4: #e87ba4;
     --bg: #f4efe3;
     --surface: #fbf8f0;
     --surface-sunk: #ede6d6;
@@ -27,6 +32,10 @@
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+        --series-1: #3987e5;
+        --series-2: #199e70;
+        --series-3: #9085e9;
+        --series-4: #d55181;
         --desktop: #101a17;
         --bg: #101a17;
         --surface: #1b2923;
@@ -51,6 +60,10 @@
 }
 
 :root[data-theme="dark"] {
+    --series-1: #3987e5;
+    --series-2: #199e70;
+    --series-3: #9085e9;
+    --series-4: #d55181;
     --desktop: #101a17;
     --bg: #101a17;
     --surface: #1b2923;
@@ -270,3 +283,26 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; 
 .tile .row { justify-content: space-between; }
 .problem { display: block; width: 100%; background: none; padding: 8px 10px; margin-top: 8px; }
 .problem p { margin: 4px 0 0; }
+
+/* Pool details: stat tiles, the usage chart and the space bar */
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.stat { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.stat strong { font-size: 1.35rem; font-weight: 600; }
+.chart { display: block; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .size { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .line { fill: none; stroke: var(--series-1); stroke-width: 2; }
+.chart .area { fill: var(--series-1); opacity: 0.15; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.chart .dot { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+.chart-tip { position: absolute; pointer-events: none; padding: 6px 8px; border-radius: 6px; font-size: 0.8rem;
+    background: var(--raised); border: 1px solid var(--border); white-space: nowrap; transform: translate(-50%, -110%); }
+.chart-wrap { position: relative; }
+.spacebar { display: flex; gap: 2px; height: 22px; border-radius: 6px; overflow: hidden; background: var(--surface-sunk); }
+.spacebar span { min-width: 2px; }
+.spacebar span:first-child { border-radius: 6px 0 0 6px; }
+.legend { display: grid; gap: 6px; }
+.legend-row { display: flex; align-items: center; gap: 8px; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.swatch.free { background: var(--surface-sunk); border: 1px solid var(--border); }

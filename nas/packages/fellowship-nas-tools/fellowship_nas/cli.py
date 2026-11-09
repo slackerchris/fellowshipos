@@ -7,13 +7,13 @@ import sys
 import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
-from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, system, users
+from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, ssh, system, usage, users
 from .engines import zfs
 
 
 # Actions that change nothing worth saving
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
-                     "layouts", "identify", "storage", "timezones", "services", "shares"}
+                     "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys"}
 ON_OFF = ("on", "off")
 
 
@@ -81,6 +81,19 @@ def print_engines(engines):
     for engine in engines:
         print(f"{engine['name']} ({engine['title']})  "
               + ("available" if engine["available"] else f"unavailable: {engine['reason']}"))
+
+
+def print_details(details):
+    space = details["space"]
+    print(f"{details['name']}: {human_size(space['used'])} used, {human_size(space['free'])} free")
+    for part, used in space["parts"].items():
+        print(f"    {part}: {human_size(used)}")
+    for share in space["shares"]:
+        print(f"    share {share['name']}: {human_size(share['files'])} files, "
+              f"{human_size(share['snapshots'])} in snapshots")
+    print(f"Compression {details['compression']:.2f}x, created {when(details['created'])}")
+    found = details["projection"]
+    print(f"Full in about {found['days']} days" if "days" in found else found["reason"])
 
 
 def print_layouts(options):
@@ -303,6 +316,7 @@ def build_parser():
     pool.add_parser("engines", help="list storage engines and whether each works here")
     status = pool.add_parser("status", help="show pool health in detail")
     status.add_argument("name", nargs="?")
+    pool.add_parser("details", help="what uses a pool's space, its history and when it fills").add_argument("name")
     layouts = pool.add_parser("layouts", help="list the layouts these disks fit")
     layouts.add_argument("disks", nargs="+", metavar="disk")
     create = pool.add_parser("create", help="create a pool, erasing its disks")
@@ -425,6 +439,17 @@ def build_parser():
     user_remove.add_argument("name")
     user_remove.add_argument("--keep-home", action="store_true", help="keep the home folder")
     user_remove.add_argument("--confirm", default="", help='type "remove NAME"')
+
+    user_keys = user.add_parser("keys", help="list an account's SSH keys, or replace them from stdin")
+    user_keys.add_argument("name")
+    user_keys.add_argument("--set-stdin", action="store_true", help="one public key per line; nothing removes them all")
+
+    ssh_ = area.add_parser("ssh", help="who may log in over SSH, and how").add_subparsers(dest="action", required=True)
+    ssh_.add_parser("show", help="show the SSH settings and who may log in")
+    ssh_set = ssh_.add_parser("set", help="change the SSH settings")
+    ssh_set.add_argument("--enabled", choices=ON_OFF, help="off: nobody can log in over SSH")
+    ssh_set.add_argument("--passwords", choices=ON_OFF, help="off: keys only, once an administrator has one")
+    ssh_.add_parser("refresh", help="rewrite sshd's settings and who is in nas-ssh")
 
     group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
     group.add_parser("list", help="list groups and their members")
@@ -556,6 +581,13 @@ def dispatch(args):
         dispatch_user(args, show)
     elif args.area == "group":
         dispatch_group(args, show)
+    elif args.area == "ssh":
+        if args.action == "show":
+            show(ssh.status(), print_ssh)
+        elif args.action == "set":
+            show(ssh.set_settings(switch(args.enabled), switch(args.passwords)), print_ssh)
+        else:
+            ssh.refresh()
     elif args.area == "sharing":
         dispatch_sharing(args, show)
     elif args.area == "lan":
@@ -614,6 +646,11 @@ def dispatch_pool(args, show):
         else:
             pools.check_pool_name(args.name)
             print(run("zpool", "status", "-P", args.name).stdout, end="")
+    elif args.action == "details":
+        details = pools.engine_for(args.name).pool_details(args.name)
+        found = usage.history(args.name)
+        details.update(history=found, projection=usage.projection(found["daily"] or found["hourly"]))
+        show(details, print_details)
     elif args.action == "layouts":
         found = disks.list_disks()
         sizes = [disks.find_disk(found, wanted)["size"] for wanted in args.disks]
@@ -656,6 +693,12 @@ def dispatch_job(args, show):
 
 
 def dispatch_user(args, show):
+    dispatch_user_action(args, show)
+    if args.action in ("create", "set", "remove"):
+        ssh.sync_members()
+
+
+def dispatch_user_action(args, show):
     if args.action == "list":
         show(users.list_users(), print_users)
     elif args.action == "shares":
@@ -672,12 +715,25 @@ def dispatch_user(args, show):
     elif args.action in ("password", "smb-password"):
         users.set_password(args.name, read_secret(True))
         print(f"Set the password for {args.name}")
+    elif args.action == "keys":
+        if args.set_stdin:
+            ssh.set_keys(args.name, sys.stdin.read())
+            print(f"Saved SSH keys for {args.name}")
+        else:
+            show(ssh.list_keys(args.name), lambda found: print("\n".join(
+                f"{key['type']} {key['fingerprint']} {key['comment']}" for key in found) or "No SSH keys"))
     elif args.action == "remove":
         users.find_user(args.name)
         lost = [s["name"] for s in shares.shares_of(args.name) if s["through"] == "own"]
         users.remove_user(args.name, args.keep_home, args.confirm, lost)
         shares.forget("users", args.name)
         print(f"Removed {args.name}" + (", keeping the home folder" if args.keep_home else ""))
+
+
+def print_ssh(status):
+    print("SSH is " + ("on" if status["enabled"] else "off") + (", running" if status["running"] else ", not running"))
+    print("Passwords: " + ("allowed" if status["passwords"] else "off, keys only"))
+    print("May log in: " + (", ".join(status["allowed"]) or "nobody"))
 
 
 def dispatch_group(args, show):

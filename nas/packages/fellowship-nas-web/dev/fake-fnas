@@ -223,6 +223,22 @@ def main(args):
         out = state["lan"]
     elif area == "user" and action == "list":
         out = state["users"]
+    elif area == "ssh":
+        out = {"enabled": True, "passwords": True, "running": True, "allowed": ["tester"], "admins_with_keys": []}
+    elif area == "user" and action == "keys":
+        out = []
+    elif area == "pool" and action == "details":
+        pool = next(p for p in state["pools"] if p["name"] == rest[0])
+        hours = [[NOW - 3600 * (168 - n), pool["allocated"] - (168 - n) * 2 * GB, pool["size"]] for n in range(169)]
+        out = {"name": pool["name"], "size": pool["size"], "allocated": pool["allocated"], "fragmentation": 3,
+               "compression": 1.18, "logical": int(pool["allocated"] * 1.18), "created": NOW - 86400 * 400,
+               "last_scrub": NOW - 86400 * 9, "errors": 0,
+               "space": {"used": pool["allocated"], "free": pool["free"],
+                         "shares": [{"name": "media", "files": 7 * 10 ** 12, "snapshots": 300 * GB},
+                                    {"name": "family", "files": 900 * GB, "snapshots": 80 * GB}],
+                         "parts": {"shares": 7900 * GB, "snapshots": 380 * GB, "backups": 600 * GB, "other": 120 * GB}},
+               "history": {"hourly": hours, "daily": hours[::24]},
+               "projection": {"days": 145, "per_day": 48 * GB}}
     elif area == "user" and action == "shares":
         out = [{"name": s["name"], "level": "write", "through": "everyone" if s["mode"] == "everyone" else "own"}
                for s in state["shares"]]

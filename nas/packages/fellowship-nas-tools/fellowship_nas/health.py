@@ -7,7 +7,7 @@ import re
 import time
 
 from .common import DAY, HOUR, STATE_DIR, read_json, run, when, write_json
-from . import alerts, backup, config, disks, pools, services, shares, snapshots
+from . import alerts, backup, config, disks, pools, services, shares, snapshots, usage
 from .engines import zfs
 
 
@@ -312,6 +312,7 @@ def run_checks():
     """Send an alert for each new problem, a reminder each day, and a note when one clears."""
     config.after_change()
     shares.empty_recycle_bins()
+    usage.record(pools.list_pools())
     now = time.time()
     found = find_problems(now)
     previous = read_json(CHECK_STATE, {})

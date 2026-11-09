@@ -1,6 +1,8 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
-import { Session, SessionInfo, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, sessions, when } from "./api";
+import {
+    Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, onOff, sessions, when,
+} from "./api";
 import { DesktopContext } from "./desktop/context";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
@@ -235,6 +237,43 @@ function Power() {
     );
 }
 
+function Ssh() {
+    const status = useLoad(() => fnasJson<SshStatus>(["ssh", "show"]));
+    const action = useAction(status.reload);
+    return (
+        <Card title="SSH">
+            <Loading loaded={status}>{() => {
+                const ssh = status.data!;
+                const noKey = !ssh.admins_with_keys.length;
+                return (
+                    <div class="stack">
+                        <p class="small">Only accounts set to <strong>Shares and SSH</strong> in Users can log in over SSH;
+                            shares-only accounts are refused before they get a shell or a tunnel. Root can never log in
+                            over SSH.</p>
+                        <p class="small">May log in now: {ssh.allowed.length ? <strong>{ssh.allowed.join(", ")}</strong>
+                            : "nobody"} · {ssh.running ? <Badge kind="good">running</Badge>
+                            : <Badge kind={ssh.enabled ? "bad" : "neutral"}>{ssh.enabled ? "not running" : "off"}</Badge>}</p>
+                        <label class="check">
+                            <input type="checkbox" checked={ssh.enabled} disabled={action.busy}
+                                   onChange={event => action.run(() => fnas(["ssh", "set", "--enabled", onOff(event.currentTarget.checked)]))} />
+                            <span>SSH on</span>
+                        </label>
+                        <label class={`check ${noKey && ssh.passwords ? "disabled" : ""}`}>
+                            <input type="checkbox" checked={ssh.passwords} disabled={action.busy || (noKey && ssh.passwords)}
+                                   onChange={event => action.run(() => fnas(["ssh", "set", "--passwords", onOff(event.currentTarget.checked)]))} />
+                            <span>Allow passwords over SSH{noKey && ssh.passwords
+                                ? <span class="muted small"> (can't be turned off until an administrator who may use SSH has a
+                                    key in Users, or nobody could get in)</span>
+                                : !ssh.passwords && <span class="muted small"> (off: keys only)</span>}</span>
+                        </label>
+                        <Result outcome={action.outcome} />
+                    </div>
+                );
+            }}</Loading>
+        </Card>
+    );
+}
+
 function SetupAgain() {
     const desktop = useContext(DesktopContext);
     return (
@@ -263,6 +302,7 @@ const SECTIONS = [
     { id: "certificate", label: "Certificate", admin: true },
     { id: "network", label: "Network", admin: true },
     { id: "updates", label: "Updates", admin: true },
+    { id: "ssh", label: "SSH", admin: true },
     { id: "power", label: "Power", admin: true },
     { id: "setup", label: "Setup", admin: true },
 ] as const;
@@ -292,6 +332,7 @@ export function Settings() {
                 {section === "updates" && <NotBuilt title="Updates" phase={15}>Seeing and installing updates comes here.
                     Debian security updates already install by themselves every day, without restarting; Health shows
                     how many updates are waiting and whether a restart is needed.</NotBuilt>}
+                {section === "ssh" && <Ssh />}
                 {section === "power" && <Power />}
                 {section === "setup" && <SetupAgain />}
             </Page>

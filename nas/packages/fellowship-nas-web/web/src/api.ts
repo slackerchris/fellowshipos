@@ -326,8 +326,25 @@ export interface UnitStatus {
     unit: string;
     title: string;
     does: string;
-    state: "running" | "stopped" | "failed" | "missing";
+    // off: turned off on purpose, as SSH can be in Settings
+    state: "running" | "stopped" | "failed" | "missing" | "off";
     detail: string;
+}
+
+export interface SshStatus {
+    enabled: boolean;
+    passwords: boolean;
+    running: boolean;
+    // Accounts set to Shares and SSH, which may log in
+    allowed: string[];
+    admins_with_keys: string[];
+}
+
+export interface SshKey {
+    type: string;
+    fingerprint: string;
+    comment: string;
+    line: string;
 }
 
 export interface Protocol {
@@ -370,6 +387,30 @@ export interface Health {
     pools: PoolDetail[];
     disks: DiskHealth[];
     alerts: { channels: Channels; last: Alert | null };
+}
+
+// [time, used, size]
+export type UsagePoint = [number, number, number];
+
+export interface PoolDetails {
+    name: string;
+    size: number;
+    allocated: number;
+    fragmentation: number | null;
+    compression: number;
+    // What the data would take without compression
+    logical: number;
+    created: number;
+    last_scrub: number | null;
+    errors: number;
+    space: {
+        used: number;
+        free: number;
+        shares: { name: string; files: number; snapshots: number }[];
+        parts: { shares: number; snapshots: number; backups: number; other: number };
+    };
+    history: { hourly: UsagePoint[]; daily: UsagePoint[] };
+    projection: { days?: number; per_day?: number; reason?: string };
 }
 
 export interface Engine {

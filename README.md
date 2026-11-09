@@ -169,7 +169,7 @@ FellowshipNAS has its own web server, `fellowship-nas-web`, which serves a deskt
 Apps open in windows that you can move, resize, minimise and maximise. The desktop remembers where they were in each browser. On a phone, windows open full screen. Every app shows all of its features, including those that can't be used yet, with the reason.
 
 - **Setup** opens by itself the first time an admin logs in. It walks through storage, the LAN subnet, people and shares, alerts and the nightly backup. Once finished or skipped it leaves the desktop; **Settings → Setup** runs it again, and `sudo fnas setup reset` makes it open at the next login.
-- **Storage:** pools and disks. Creating a pool starts with the kind of storage: ZFS, Unraid-style, traditional RAID or Btrfs. Only ZFS is built so far, and the others say so.
+- **Storage:** pools and disks. **Details and history** on a pool shows how full it has been over the past week and year, when it fills at that rate, what uses its space, and its compression. Creating a pool starts with the kind of storage: ZFS, Unraid-style, traditional RAID or Btrfs. Only ZFS is built so far, and the others say so.
 - **Users:** people, their one password, what they can do, and groups.
 - **Shares:**
   - Every way to share files (SMB, NFS, and those still to be built), with its state and how to connect.
@@ -252,6 +252,16 @@ sudo fnas group members family sam,kim,frodo
 - `user set NAME --enabled off` turns an account off without removing it.
 - Nobody can turn off or remove the only administrator.
 - Everyone can change their own password in **Settings → Your account**.
+
+Only accounts set to `--kind ssh` can log in over SSH: they join the `nas-ssh` group, and sshd allows nobody else. Root never logs in over SSH. Give someone keys, and turn passwords off once an administrator has one:
+
+```bash
+sudo fnas user keys sam --set-stdin < ~/.ssh/id_ed25519.pub
+sudo fnas ssh set --passwords off
+sudo fnas ssh show
+```
+
+An account added with `adduser` rather than fnas isn't in `nas-ssh` until `sudo fnas ssh refresh` runs, which adds every account with a login shell.
 
 ## NAS Shares
 

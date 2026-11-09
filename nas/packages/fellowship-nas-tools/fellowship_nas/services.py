@@ -1,7 +1,7 @@
 """Every way to share files and every service the NAS runs, with whether each
 is running, so the desktop can show them all, built or not."""
 from .common import run
-from . import shares
+from . import shares, ssh
 
 
 # Ways to share, in the order the desktop lists them: name, title, what it's
@@ -26,11 +26,12 @@ SYSTEM_SERVICES = [
     ("sanoid.timer", "Snapshot schedule", "Takes and prunes snapshots every 15 minutes"),
     ("zfs-zed.service", "ZFS events", "Alerts when a ZFS disk fails or a scrub finds errors"),
     ("smartmontools.service", "Disk health", "Watches each disk's SMART data"),
+    ("ssh.service", "SSH", "Logins over SSH, for accounts set to Shares and SSH"),
 ]
 
 
 def unit_state(unit):
-    """running, stopped, failed or missing, read from systemd."""
+    """running, stopped, failed or missing, read from systemd. A service turned off on purpose is "off"."""
     shown = run("systemctl", "show", "-p", "LoadState,ActiveState,Result", unit, check=False).stdout
     fields = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
     if fields.get("LoadState") != "loaded":
@@ -69,5 +70,7 @@ def system_services():
         # smartd stops by itself when no disk reports SMART data, as in most VMs
         if unit == "smartmontools.service" and state == "stopped":
             detail = "Not running. It stops by itself when no disk reports SMART data"
+        if unit == ssh.UNIT and not ssh.settings()["enabled"]:
+            state, detail = "off", "Turned off in Settings"
         shown.append({"unit": unit, "title": title, "does": does, "state": state, "detail": detail})
     return shown

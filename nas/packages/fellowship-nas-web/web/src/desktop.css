@@ -223,7 +223,7 @@
 .notification { display: block; }
 .launcher-app:hover, .notification:hover, .menu-item:hover { background: var(--raised); border-color: var(--border); }
 .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.segmented button { flex: 1; padding: 5px 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
+.segmented button { flex: 1; padding: 5px 14px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
 .segmented button.current { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 
 .login {

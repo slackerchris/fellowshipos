@@ -1,14 +1,14 @@
 // People's accounts and groups. One password per person, for the desktop and every way to share.
 import { Fragment } from "preact";
 import { useContext, useState } from "preact/hooks";
-import { FnasError, Group, User, UserShare, fnas, fnasJson, onOff } from "./api";
+import { FnasError, Group, SshKey, User, UserShare, fnas, fnasJson, onOff } from "./api";
 import { SessionContext } from "./settings";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const USER_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
 
 const KINDS = {
-    shares: { title: "Shares only", text: "Uses shares from other computers. Can't log in over SSH." },
+    shares: { title: "Shares only", text: "Uses shares from other computers. Refused by SSH, so no shell and no tunnels." },
     ssh: { title: "Shares and SSH", text: "Also logs in to the NAS over SSH." },
 } as const;
 
@@ -169,6 +169,7 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
                                          disabled={!!passwordProblem(password, again)}>Set password</Button></div>
                 <Result outcome={setPasswordAction.outcome} />
             </form>
+            <SshKeys user={user} />
             <div class="field">
                 <span class="field-label">Shares {user.name} can use</span>
                 <Loading loaded={shares}>{() => shares.data!.length
@@ -178,6 +179,35 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
                                 ? "the share is for everyone" : `through ${share.through}`})</span></li>))}</ul>
                     : <p class="muted small">None yet. Shares are given to people in Shares.</p>}</Loading>
             </div>
+        </div>
+    );
+}
+
+function SshKeys({ user }: { user: User }) {
+    const keys = useLoad(() => user.kind === "ssh" ? fnasJson<SshKey[]>(["user", "keys", user.name]) : Promise.resolve([]));
+    const [text, setText] = useState<string | null>(null);
+    const action = useAction(keys.reload);
+    if (user.kind !== "ssh") {
+        return <p class="muted small">SSH keys: {user.name} uses shares only, so SSH lets them nowhere.</p>;
+    }
+    return (
+        <div class="field">
+            <span class="field-label">SSH keys</span>
+            <Loading loaded={keys}>{() => <>
+                {!keys.data!.length && <p class="muted small">None: {user.name} logs in over SSH with their password, while
+                    passwords are allowed in Settings → SSH.</p>}
+                {keys.data!.map(key => <span key={key.line} class="small mono">{key.type} {key.fingerprint} {key.comment}</span>)}
+                <textarea rows={3} placeholder="ssh-ed25519 AAAA… name@computer, one key per line"
+                          value={text ?? keys.data!.map(key => key.line).join("\n")}
+                          onInput={event => setText(event.currentTarget.value)} />
+                <div class="row"><Button busy={action.busy} disabled={text === null}
+                                         onClick={() => action.run(async () => {
+                                             const output = await fnas(["user", "keys", user.name, "--set-stdin"], text!);
+                                             setText(null);
+                                             return output;
+                                         })}>Save keys</Button></div>
+                <Result outcome={action.outcome} />
+            </>}</Loading>
         </div>
     );
 }

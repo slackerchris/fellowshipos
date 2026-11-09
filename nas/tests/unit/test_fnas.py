@@ -1258,7 +1258,7 @@ class Protection(Base):
         paths = {"LAN_FILE": lan_file, "SANOID_FILE": self.path("sanoid", "sanoid.conf"),
                  "SMB_DIR": "/nonexistent", "MODULES_DIR": self.path("modules")}
         for name in ("BACKUP_FILE", "BACKUP_STATE", "BACKUP_LOCK", "ALERTS_FILE", "SECRETS_FILE",
-                     "MSMTP_FILE", "ALERT_LOG", "ALERT_LOCK", "CHECK_STATE", "INSTALL_ID_FILE"):
+                     "MSMTP_FILE", "ALERT_LOG", "ALERT_LOCK", "CHECK_STATE", "INSTALL_ID_FILE", "USAGE_FILE"):
             paths[name] = self.path(name)
         for name, value in paths.items():
             patcher = patch(name, value)
@@ -2104,3 +2104,94 @@ class Users(unittest.TestCase):
             fnas.set_members("family", ["nobody2"])
         fnas.rename_group("family", "household")
         self.assertIn(("groupmod", "--new-name", "household", "family"), self.commands())
+
+
+class Usage(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        patcher = patch("USAGE_FILE", os.path.join(directory.name, "usage.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_keeps_one_point_an_hour_and_one_a_day(self):
+        start = 1_800_000_000
+        for minute in range(0, 3 * 24 * 60, 20):
+            fnas.record([{"name": "tank", "allocated": minute, "size": 10 ** 6}], start + minute * 60)
+        found = fnas.history("tank")
+        self.assertTrue(70 <= len(found["hourly"]) <= 73)
+        self.assertIn(len(found["daily"]), (3, 4))
+
+    def test_projection(self):
+        day = fnas.DAY
+        growing = [[day * n, 100 * n, 1000] for n in range(5)]
+        self.assertEqual(fnas.projection(growing), {"days": 6, "per_day": 100})
+        self.assertIn("three days", fnas.projection(growing[:2])["reason"])
+        steady = [[day * n, 400, 1000] for n in range(5)]
+        self.assertIn("Not filling", fnas.projection(steady)["reason"])
+
+
+class Space(unittest.TestCase):
+    def test_parts_add_up_to_what_is_used(self):
+        lines = ("tank\t1000\t0\t100\t900\t5000\n"
+                 "tank/shares\t700\t0\t10\t690\t5000\n"
+                 "tank/shares/media\t500\t200\t300\t0\t5000\n"
+                 "tank/shares/docs\t190\t40\t150\t0\t5000\n"
+                 "tank/fellowship-backup\t150\t0\t0\t150\t5000\n"
+                 "tank/fellowship-backup/other/shares/x\t150\t50\t100\t0\t5000\n")
+        with patch("run", lambda *command, check=True: SimpleNamespace(stdout=lines, stderr="", returncode=0)):
+            found = fnas.space("tank")
+        self.assertEqual(found["parts"], {"shares": 450, "snapshots": 240, "backups": 150, "other": 160})
+        self.assertEqual(sum(found["parts"].values()), found["used"])
+        self.assertEqual([s["name"] for s in found["shares"]], ["media", "docs"])
+
+
+class Ssh(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.calls = []
+
+        def run(*command, check=True, stdin=None):
+            self.calls.append(command)
+            return SimpleNamespace(stdout="256 SHA256:abc kim@laptop (ED25519)\n", stderr="", returncode=0)
+        for patcher in (patch("run", run), patch("SETTINGS_FILE", os.path.join(self.dir, "ssh.json")),
+                        patch("DROP_IN", os.path.join(self.dir, "fellowship.conf"))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_only_nas_ssh_and_never_root(self):
+        text = fnas.drop_in({"enabled": True, "passwords": False})
+        self.assertIn("AllowGroups nas-ssh\n", text)
+        self.assertIn("PermitRootLogin no\n", text)
+        self.assertIn("PasswordAuthentication no\n", text)
+
+    def test_keys_can_carry_no_options(self):
+        for line in ('command="rm -rf /" ssh-ed25519 AAAA kim', "no-pty ssh-ed25519 AAAA", "hello", "ssh-dss AAAA x"):
+            with self.subTest(line), self.assertRaisesRegex(fnas.FnasError, "public key"):
+                fnas.check_key(line)
+        self.assertEqual(fnas.check_key("ssh-ed25519 AAAA kim@laptop extra"), "ssh-ed25519 AAAA kim@laptop")
+
+    def test_passwords_stay_on_until_an_administrator_has_a_key(self):
+        with patch("admins_with_keys", lambda: []):
+            with self.assertRaisesRegex(fnas.FnasError, "lock everyone out"):
+                fnas.set_settings(passwords=False)
+        self.assertTrue(fnas.settings()["passwords"])
+        with patch("admins_with_keys", lambda: ["tester"]), patch("refresh", lambda: None), \
+                patch("members", lambda: ["tester"]):
+            self.assertFalse(fnas.set_settings(passwords=False)["passwords"])
+
+    def test_a_setting_sshd_refuses_is_put_back(self):
+        with open(fnas.DROP_IN, "w") as file:
+            file.write("old\n")
+
+        def refuse(*command, check=True, stdin=None):
+            failed = command[:2] == ("sshd", "-t")
+            return SimpleNamespace(stdout="", stderr="bad" if failed else "", returncode=1 if failed else 0)
+        with patch("run", refuse), patch("list_users", lambda: []), \
+                mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            with self.assertRaisesRegex(fnas.FnasError, "refused"):
+                fnas.refresh()
+        with open(fnas.DROP_IN) as file:
+            self.assertEqual(file.read(), "old\n")

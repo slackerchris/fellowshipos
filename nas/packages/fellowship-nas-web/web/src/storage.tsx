@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { PoolDetailsView } from "./pooldetails";
 import {
     Disk, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fnas, fnasJson, humanSize, leaves,
 } from "./api";
@@ -243,7 +244,12 @@ function Member({ member, disks, readonly, replace }: {
     );
 }
 
-function PoolCard({ pool, disks, reload }: { pool: Pool; disks: Disk[]; reload: () => void }) {
+function PoolCard({ pool, disks, reload, details }: {
+    pool: Pool;
+    disks: Disk[];
+    reload: () => void;
+    details: () => void;
+}) {
     const status = useLoad(() => fnasJson<PoolStatus>(["pool", "status", pool.name]));
     const [replacing, setReplacing] = useState<Vdev | null>(null);
     const [growing, setGrowing] = useState(false);
@@ -261,6 +267,7 @@ function PoolCard({ pool, disks, reload }: { pool: Pool; disks: Disk[]; reload: 
         <Card title={pool.name} actions={<>
             {pool.readonly && <Badge kind="neutral">read-only</Badge>}
             {healthBadge(pool.health)}
+            <Button onClick={details}>Details and history</Button>
         </>}>
             <div class="stack">
                 <div>
@@ -388,9 +395,13 @@ export function Storage() {
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list", "--all"]));
     const [creating, setCreating] = useState(false);
     const [created, setCreated] = useState("");
+    const [viewing, setViewing] = useState<string | null>(null);
     const reload = () => { pools.reload(); disks.reload(); };
     const jobs = useJobsFinished(reload);
 
+    if (viewing) {
+        return <Page><PoolDetailsView name={viewing} back={() => setViewing(null)} /></Page>;
+    }
     return (
         <Page intro="Pools hold your shares. Each pool is made from one or more disks.">
             <RunningJobs jobs={jobs} />
@@ -399,7 +410,8 @@ export function Storage() {
                     {!pools.data!.length && (
                         <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from attached disks.</p></Card>
                     )}
-                    {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} disks={disks.data!} reload={reload} />)}
+                    {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} disks={disks.data!} reload={reload}
+                                                       details={() => setViewing(pool.name)} />)}
                 </div>
             )}</Loading>}</Loading>
             {created && <Result outcome={{ kind: "done", text: `Created pool ${created}` }} />}

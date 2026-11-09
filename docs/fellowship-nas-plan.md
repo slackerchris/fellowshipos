@@ -382,6 +382,18 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
   - Served at `https://ADDRESS/dav/` by our own server, through the file helper, so Linux permissions decide what each person sees, exactly as in the Files app.
   - It needs no extra package.
 
+## Pool details and SSH (Chris, Nov 9, built between Phases 9 and 10)
+
+- **Pool details:** Storage → a pool → **Details and history**.
+  - The hourly check records each pool's usage: one point an hour for a week, and one a day for a year.
+  - The view shows that history as a chart, a straight-line projection of when the pool fills (after three days of history), what uses the space (shares, snapshots, backups of other pools, the rest, and free) and compression.
+  - Charts are our own SVG, coloured from a palette checked for colour blindness.
+- **SSH:** per-person accounts, not one shared SSH login, which would mean a shared password and no record of who did what.
+  - Only `nas-ssh` members log in (`AllowGroups`), and "Shares and SSH" accounts join it automatically. Shares-only accounts are refused before they get a shell or a tunnel.
+  - Root never logs in over SSH.
+  - Keys per person in Users. Passwords over SSH can be turned off once an administrator who may use SSH has a key.
+  - SSH can be turned off in Settings, and shows in Health.
+
 ## Users and groups (Phase 9)
 
 - **The Users app** lists every person's account with its groups, whether it is an admin, whether it has a password for shares, and which shares it can reach and how.
