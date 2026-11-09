@@ -1,6 +1,6 @@
 // Snapshots of each share, the nightly backup to another pool, and restoring from it
 import { useState } from "preact/hooks";
-import { BackupCopy, BackupStatus, Policy, Pool, Share, Snapshot, fnas, fnasJson, plural, when } from "./api";
+import { BackupCopy, BackupStatus, Policy, Pool, Share, Snapshot, fnas, fnasJson, jobStarted, plural, when } from "./api";
 import { Badge, Button, Card, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const PERIODS: (keyof Policy)[] = ["hourly", "daily", "monthly"];
@@ -54,7 +54,8 @@ export function BackupJob({ onChange }: { onChange?: () => void }) {
                                 {error && <> · <Badge kind="bad">Last attempt failed</Badge> {error}</>}</p>
                             <div class="row">
                                 <Button kind="primary" busy={action.busy}
-                                        onClick={() => action.run(() => fnas(["backup", "run", "--background"]))}>Back up now</Button>
+                                        onClick={() => action.run(async () => jobStarted(await fnas(["backup", "run", "--background"]),
+                                                                                       "in Storage"))}>Back up now</Button>
                                 <Button busy={action.busy} onClick={() => action.run(() => fnas(["backup", "off"]))}>
                                     Stop backing up</Button>
                             </div>

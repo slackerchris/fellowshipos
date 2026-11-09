@@ -71,6 +71,42 @@ function Clock() {
     );
 }
 
+/** The checks at a glance: how many passed, and the worst problems, most severe first. */
+function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => void }) {
+    const health = status.health;
+    const checks = health?.checks || [];
+    const passed = checks.filter(check => check.state === "passed").length;
+    const waiting = checks.filter(check => check.state === "na").length;
+    const problems = health?.problems || [];
+    const critical = problems.filter(problem => problem.severity === "critical").length;
+    const warnings = problems.length - critical;
+    const time = (stamp: number) => new Date(stamp * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return (
+        <button type="button" class="widget" onClick={() => open("health")}>
+            <h2>Health</h2>
+            {!health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}
+            {health && (
+                <div class="stack">
+                    <div class="row">
+                        {critical > 0 && <Badge kind="bad">{critical} critical</Badge>}
+                        {warnings > 0 && <Badge kind="warning">{warnings} warning{warnings === 1 ? "" : "s"}</Badge>}
+                        {!problems.length && (waiting
+                            ? <Badge kind="neutral">nothing needs attention</Badge>
+                            : <Badge kind="good">all checks passed</Badge>)}
+                    </div>
+                    {problems.slice(0, 3).map(problem => (
+                        <span key={problem.key} class="small">{problem.title}</span>
+                    ))}
+                    <span class="small muted">{passed} of {checks.length} checks passed
+                        {waiting ? `, ${waiting} don't apply yet` : ""}</span>
+                    <span class="small muted">{health.hourly.last ? `Hourly check ran at ${time(health.hourly.last)}`
+                        : "The hourly check hasn't run yet"}</span>
+                </div>
+            )}
+        </button>
+    );
+}
+
 function Widgets({ status, open }: { status: Status; open: (app: AppId) => void }) {
     const disks = (status.health?.disks || []).filter(disk => disk.state !== "os");
     const hottest = disks.reduce<number | null>((max, disk) =>
@@ -96,6 +132,7 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                     </div>
                 ))}
             </button>
+            <HealthWidget status={status} open={open} />
             <button type="button" class="widget" onClick={() => open("health")}>
                 <h2>Disks</h2>
                 {!status.health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}

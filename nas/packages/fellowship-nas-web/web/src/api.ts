@@ -75,6 +75,12 @@ export async function fnas(args: string[], input?: string): Promise<string> {
     return (await request<{ output: string }>("POST", "/api/fnas", { args, input })).output;
 }
 
+/** fnas tells the command line how to follow a long job; the desktop shows its progress itself. */
+export function jobStarted(output: string, where = "at the top of Storage") {
+    return output.replace(/: follow it with fnas job show \S+/g,
+                          `. Its progress shows ${where} and in the taskbar, and it carries on if you close this window.`);
+}
+
 export async function fnasJson<T>(args: string[], background = false): Promise<T> {
     const { output } = await request<{ output: string }>("POST", "/api/fnas", { args: ["--json", ...args] }, background);
     return JSON.parse(output) as T;

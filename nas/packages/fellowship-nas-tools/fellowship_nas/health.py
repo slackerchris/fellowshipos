@@ -78,7 +78,7 @@ def scrub_findings(pools, now):
         if age > SCRUB_MAX_AGE:
             found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't been scrubbed",
                                  f"The last scrub was {age // DAY:.0f} days ago. "
-                                 f"Start one with: sudo zpool scrub {pool}"))
+                                 f"Start one with Check for damage in Storage, or sudo fnas pool scrub {pool}"))
     return found
 
 

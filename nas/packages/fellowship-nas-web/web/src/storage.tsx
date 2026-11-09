@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import {
-    Disk, Job, LAYOUT_NAMES, LayoutOption, Pool, PoolStatus, Vdev, diskName, fnas, fnasJson, humanSize, leaves,
+    Disk, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fnas, fnasJson, humanSize, leaves,
 } from "./api";
 import { useJobsFinished } from "./jobs";
 import { CreatePool, DiskPicker, ImportPools, erasePhrase, usableDisks } from "./pools";
@@ -92,8 +92,8 @@ function Replace({ pool, vdev, disks, done, cancel }: {
                      if (!disk) {
                          throw new Error("Choose the new disk first.");
                      }
-                     done(await fnas(["pool", "replace", pool, vdev.path || vdev.name, disk.by_id || disk.path,
-                                      "--confirm", typed, ...(wipe ? ["--wipe"] : [])]));
+                     done(jobStarted(await fnas(["pool", "replace", pool, vdev.path || vdev.name, disk.by_id || disk.path,
+                                                 "--confirm", typed, ...(wipe ? ["--wipe"] : [])])));
                  })}>
             <p>Replacing <strong>{vdevName(vdev, disks)}</strong> in {pool}. ZFS copies its data onto the new disk; the pool
                 stays in use meanwhile.</p>
@@ -193,9 +193,9 @@ function Grow({ pool, status, disks, done, cancel }: {
                 <Confirm title="Add disks" phrase={erasePhrase(selected.length)} busy={action.busy} outcome={action.outcome}
                          onCancel={() => { setConfirming(false); action.clear(); }}
                          onConfirm={typed => action.run(async () => {
-                             done(await fnas(["pool", "grow", pool, option.how, ...selected.map(disk => disk.by_id || disk.path),
+                             done(jobStarted(await fnas(["pool", "grow", pool, option.how, ...selected.map(disk => disk.by_id || disk.path),
                                               ...(option.target ? ["--target", option.target] : []),
-                                              "--confirm", typed, ...(wipe ? ["--wipe"] : [])]));
+                                              "--confirm", typed, ...(wipe ? ["--wipe"] : [])])));
                          })}>
                     <p>{option.text}. A disk added to {pool} can't be taken out again, except a spare. Everything on these disks
                         will be erased:</p>
@@ -326,10 +326,15 @@ function PoolCard({ pool, disks, reload }: { pool: Pool; disks: Disk[]; reload: 
                 <div class="row">
                     {!pool.readonly && !growing && <Button onClick={() => setGrowing(true)}>Add disks</Button>}
                     {!pool.readonly && (
-                        <Button busy={action.busy} onClick={() => action.run(() => fnas(["pool", "scrub", pool.name]))}>Check now</Button>
+                        <Button busy={action.busy} onClick={() => action.run(async () =>
+                            jobStarted(await fnas(["pool", "scrub", pool.name])))}>Check for damage</Button>
                     )}
                     <Button onClick={() => setExporting(true)}>Export</Button>
                 </div>
+                {!pool.readonly && <p class="muted small">Check for damage (a scrub) reads every block on {pool.name} and
+                    checks it against its checksum. Damaged blocks are repaired from another copy or parity where the pool
+                    has one, and reported where it doesn't. It runs by itself once a month; shares stay usable while it
+                    does.</p>}
                 <Result outcome={exportAction.outcome} />
             </div>
             {exporting && (
