@@ -186,6 +186,30 @@ func TestStatic(t *testing.T) {
 	}
 }
 
+func TestUpdatedFilesReachTheBrowser(t *testing.T) {
+	// Every packaged file has the same date, so only the contents can say a file changed
+	files := fstest.MapFS{"app.js": {Data: []byte("old"), ModTime: time.Unix(1, 0)}}
+	handler := (&Server{Static: files}).Handler()
+	first := send(handler, request{method: "GET", path: "/app.js"})
+	tag := first.Header().Get("ETag")
+	if tag == "" || first.Header().Get("Last-Modified") != "" {
+		t.Fatalf("want an ETag and no Last-Modified, got %v", first.Header())
+	}
+	again := httptest.NewRequest("GET", "https://nas.local/app.js", nil)
+	again.Header.Set("If-None-Match", tag)
+	unchanged := httptest.NewRecorder()
+	handler.ServeHTTP(unchanged, again)
+	if unchanged.Code != http.StatusNotModified {
+		t.Fatalf("an unchanged file should be 304, got %d", unchanged.Code)
+	}
+	files["app.js"] = &fstest.MapFile{Data: []byte("new"), ModTime: time.Unix(1, 0)}
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, again)
+	if updated.Code != http.StatusOK || updated.Body.String() != "new" {
+		t.Fatalf("an updated file should be sent again, got %d %q", updated.Code, updated.Body.String())
+	}
+}
+
 func TestJobEventsStreamChangesUntilSignedOut(t *testing.T) {
 	outputs := []string{`[{"id": "a", "progress": 0.5}]`, `[{"id": "a", "progress": 0.5}]`,
 		`[{"id": "a", "progress": 1}]`}

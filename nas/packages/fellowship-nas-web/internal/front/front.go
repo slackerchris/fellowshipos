@@ -6,7 +6,9 @@ package front
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -322,13 +324,16 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unreadable", http.StatusInternalServerError)
 		return
 	}
-	file, err := s.Static.Open(name)
+	content, err := fs.ReadFile(s.Static, name)
 	if err != nil {
 		http.Error(w, "unreadable", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
-	http.ServeContent(w, r, name, info.ModTime(), file.(io.ReadSeeker))
+	// The package pins every file's date to its changelog's, so the date can't
+	// tell browsers a file changed in an update. A tag from the contents can.
+	sum := sha256.Sum256(content)
+	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(content))
 }
 
 // jobEvents streams the list of long jobs as server-sent events, sending it

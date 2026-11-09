@@ -1,6 +1,7 @@
+import { useState } from "preact/hooks";
 import { Check, Health as HealthData, diskName, fnasJson, humanSize, plural, when } from "./api";
 import { STATE_BADGE } from "./sharing";
-import { Badge, Card, Loading, Notice, Page, Usage, useLoad } from "./ui";
+import { Badge, Button, Card, Loading, Notice, Page, Usage, useLoad } from "./ui";
 
 const VERDICT = {
     healthy: { kind: "good", text: "Healthy" },
@@ -29,12 +30,24 @@ function duration(seconds: number) {
         : hours ? plural(hours, "hour") : plural(Math.floor(seconds / 60), "minute");
 }
 
-function Problems({ health }: { health: HealthData }) {
+const RANK = { info: 0, low: 1, medium: 2, high: 3, warning: 2, critical: 4 } as const;
+
+const SECTION_VIEWS: Record<string, View> = {
+    Pools: "pools", Protection: "checks", System: "system", Services: "services", Disks: "disks",
+};
+
+/** The area a problem belongs to, from the check that found it. */
+function viewOf(health: HealthData, key: string): View {
+    const check = health.checks.find(item => item.problems.some(problem => problem.key === key));
+    return (check && SECTION_VIEWS[check.section]) || "checks";
+}
+
+function Problems({ health, open }: { health: HealthData; open: (view: View) => void }) {
     const waiting = health.checks.filter(item => item.state === "na").length;
     if (!health.problems.length) {
         return waiting
             ? <Notice>Nothing needs attention. {plural(waiting, "check")} {waiting === 1 ? "doesn't" : "don't"} apply
-                yet; each says why below.</Notice>
+                yet; Checks says why.</Notice>
             : <Notice kind="done">Every check passed.</Notice>;
     }
     return (
@@ -42,10 +55,10 @@ function Problems({ health }: { health: HealthData }) {
             <p class="muted small">Critical means something is broken. High, medium and low are warnings, by how soon
                 they need you.</p>
             {health.problems.map(problem => (
-                <div key={problem.key}>
+                <button type="button" class="problem" key={problem.key} onClick={() => open(viewOf(health, problem.key))}>
                     <Badge kind={SEVERITY[problem.severity]}>{problem.severity}</Badge> <strong>{problem.title}</strong>
                     <p class="small muted">{problem.message}</p>
-                </div>
+                </button>
             ))}
         </Card>
     );
@@ -210,19 +223,104 @@ function Alerting({ health }: { health: HealthData }) {
     );
 }
 
+type View = "checks" | "services" | "system" | "pools" | "disks" | "alerts";
+
+type Kind = "good" | "warning" | "bad" | "neutral";
+
+interface Tile {
+    view: View;
+    title: string;
+    badge: [Kind, string];
+    lines: string[];
+}
+
+/** One short summary per area, each opening its details. */
+function tiles(health: HealthData): Tile[] {
+    const checks = health.checks;
+    const passed = checks.filter(check => check.state === "passed").length;
+    const waiting = checks.filter(check => check.state === "na").length;
+    const worstCheck = checks.reduce((found, check) => check.state in RANK
+        && RANK[check.state as keyof typeof RANK] > RANK[found as keyof typeof RANK] ? check.state : found, "info");
+    const down = [...health.protocols.filter(p => (p.state === "stopped" || p.state === "failed") && p.shares.length),
+                  ...health.services.filter(s => s.state === "failed"
+                      || (s.state === "stopped" && s.unit !== "smartmontools.service"))];
+    const running = health.services.filter(s => s.state === "running").length
+        + health.protocols.filter(p => p.state === "running").length;
+    const system = health.system;
+    const diskUse = Math.round(system.disk.used * 100 / system.disk.size);
+    const sick = health.pools.filter(pool => pool.health !== "ONLINE");
+    const disks = health.disks;
+    const failing = disks.filter(disk => disk.verdict === "failing").length;
+    const watch = disks.filter(disk => disk.verdict === "watch").length;
+    const unknown = disks.filter(disk => disk.verdict === "unknown").length;
+    const { channels, last } = health.alerts;
+    const ways = ["this desktop", channels.email && "email", channels.ntfy && "ntfy"].filter(Boolean);
+    return [
+        { view: "checks", title: "Checks",
+          badge: worstCheck === "critical" ? ["bad", "critical"] : worstCheck !== "info" ? ["warning", worstCheck]
+              : waiting ? ["neutral", "nothing wrong"] : ["good", "all passed"],
+          lines: [`${passed} of ${checks.length} passed`, waiting ? `${waiting} don't apply yet` : ""] },
+        { view: "services", title: "Services",
+          badge: down.length ? ["bad", `${down.length} not running`] : ["good", "running"],
+          lines: [down.length ? down.map(item => item.title).join(", ") : `${running} running`] },
+        { view: "system", title: "System",
+          badge: diskUse >= 85 || system.reboot ? ["warning", system.reboot ? "restart needed" : "disk filling"]
+              : ["good", "fine"],
+          lines: [`System disk ${diskUse}% full`,
+                  system.updates ? `${plural(system.updates, "update")} waiting` : "Up to date"] },
+        { view: "pools", title: "Pools",
+          badge: !health.pools.length ? ["neutral", "none yet"] : sick.length ? ["bad", `${sick.length} not healthy`]
+              : ["good", "healthy"],
+          lines: [health.pools.length ? health.pools.map(pool => pool.name).join(", ") : "Create one in Storage"] },
+        { view: "disks", title: "Disks",
+          badge: failing ? ["bad", `${failing} failing`] : watch ? ["warning", `${watch} to watch`]
+              : unknown === disks.length ? ["neutral", "no health data"] : ["good", "healthy"],
+          lines: [plural(disks.length, "disk"), unknown && unknown < disks.length ? `${unknown} without health data` : ""] },
+        { view: "alerts", title: "Alerts",
+          badge: last?.undelivered.length ? ["warning", "not delivered"] : ["good", "set up"],
+          lines: [`Sent to ${ways.join(" and ")}`, last ? `Last: ${when(last.time)}` : "None sent yet"] },
+    ];
+}
+
+const DETAILS: Record<View, (props: { health: HealthData }) => preact.JSX.Element> = {
+    checks: Checks, services: Services, system: System, pools: Pools, disks: Disks, alerts: Alerting,
+};
+
 export function Health() {
     const health = useLoad(() => fnasJson<HealthData>(["health"]));
+    const [view, setView] = useState<View | null>(null);
     return (
-        <Page intro="Every check this NAS runs, with its result, and the services, pools and disks behind them.">
-            <Loading loaded={health}>{() => <>
-                <Problems health={health.data!} />
-                <Checks health={health.data!} />
-                <Services health={health.data!} />
-                <System health={health.data!} />
-                <Pools health={health.data!} />
-                <Disks health={health.data!} />
-                <Alerting health={health.data!} />
-            </>}</Loading>
+        <Page>
+            <Loading loaded={health}>{() => {
+                const data = health.data!;
+                if (view) {
+                    const Details = DETAILS[view];
+                    return <>
+                        <div class="row">
+                            <Button onClick={() => setView(null)}>← Health</Button>
+                            <Button onClick={health.reload}>Check again</Button>
+                        </div>
+                        <Details health={data} />
+                    </>;
+                }
+                const all = tiles(data);
+                return <>
+                    <div class="row">
+                        <p class="muted small">Checked {when(data.time)}. Click an area for its details.</p>
+                        <Button onClick={health.reload}>Check again</Button>
+                    </div>
+                    <Problems health={data} open={setView} />
+                    <div class="tiles">
+                        {all.map(tile => (
+                            <button type="button" key={tile.view} class="tile" onClick={() => setView(tile.view)}>
+                                <span class="row"><strong>{tile.title}</strong>
+                                    <Badge kind={tile.badge[0]}>{tile.badge[1]}</Badge></span>
+                                {tile.lines.filter(Boolean).map(line => <span key={line} class="small muted">{line}</span>)}
+                            </button>
+                        ))}
+                    </div>
+                </>;
+            }}</Loading>
         </Page>
     );
 }
