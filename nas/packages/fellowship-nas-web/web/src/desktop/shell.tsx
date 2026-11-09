@@ -1,11 +1,12 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
 import { useContext, useEffect, useState } from "preact/hooks";
-import { Alert, Health, Pool, fnasJson, humanSize, logout, when } from "../api";
+import { Alert, Health, Pool, SetupStatus, fnasJson, humanSize, logout, when } from "../api";
 import { SEVERITY } from "../health";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
-import { APPS, AppId, appsFor } from "./apps";
+import { APPS, AppId, appsFor, iconsFor } from "./apps";
+import { DesktopContext } from "./context";
 import { AppIcon, Glyph } from "./icons";
 import { Win, Window, useWindows } from "./windows";
 
@@ -47,17 +48,14 @@ function useStatus(admin: boolean) {
 
 interface Problem {
     key: string;
-    severity: "info" | "warning" | "critical";
+    severity: Alert["severity"];
     title: string;
     message: string;
 }
 
+// Health's own checks cover pools that lost a disk, so nothing is listed twice
 function problems(status: Status): Problem[] {
-    const pools = (status.pools || []).filter(pool => pool.health !== "ONLINE").map(pool => ({
-        key: `pool-${pool.name}`, severity: "critical" as const, title: `Pool ${pool.name} is ${pool.health.toLowerCase()}`,
-        message: "A disk is missing or failing. Storage shows which.",
-    }));
-    return [...pools, ...(status.health?.problems || [])];
+    return status.health?.problems || [];
 }
 
 function Clock() {
@@ -79,12 +77,13 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
         disk.temperature !== null && (max === null || disk.temperature > max) ? disk.temperature : max, null);
     const failing = disks.filter(disk => disk.verdict === "failing").length;
     const watch = disks.filter(disk => disk.verdict === "watch").length;
+    const unknown = disks.filter(disk => disk.verdict === "unknown").length;
     return (
         <aside class="widgets" aria-label="Status">
             <button type="button" class="widget" onClick={() => open("storage")}>
                 <h2>Storage</h2>
                 {!status.pools && <p class="muted small">{status.error || "Loading…"}</p>}
-                {status.pools && !status.pools.length && <p class="small">No pools yet. Open Setup to create one.</p>}
+                {status.pools && !status.pools.length && <p class="small">No pools yet. Open Storage to create one.</p>}
                 {status.pools?.map(pool => (
                     <div key={pool.name} class="widget-row">
                         <div class="row">
@@ -106,7 +105,8 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                             <span>{disks.length} data disk{disks.length === 1 ? "" : "s"}</span>
                             {failing > 0 && <Badge kind="bad">{failing} failing</Badge>}
                             {watch > 0 && <Badge kind="warning">{watch} to watch</Badge>}
-                            {!failing && !watch && disks.length > 0 && <Badge kind="good">all healthy</Badge>}
+                            {unknown > 0 && <Badge kind="neutral">{unknown === disks.length ? "no health data" : `${unknown} without health data`}</Badge>}
+                            {!failing && !watch && !unknown && disks.length > 0 && <Badge kind="good">all healthy</Badge>}
                         </div>
                         {hottest !== null && <span class="small muted">Warmest {hottest} °C</span>}
                     </div>
@@ -227,11 +227,26 @@ function Launcher({ apps, open }: { apps: AppId[]; open: (app: AppId) => void })
 
 export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
     const session = useContext(SessionContext);
-    const apps = appsFor(session.admin);
-    const windows = useWindows(session.user, apps);
+    const windows = useWindows(session.user, appsFor(session.admin));
     const status = useStatus(session.admin);
     const [panel, setPanel] = useState<Panel>(null);
+    // Until it is known, Setup's icon stays hidden rather than flashing up
+    const [setupDone, setSetupDone] = useState(true);
+    const apps = iconsFor(session.admin, setupDone);
     const found = problems(status);
+
+    // Setup opens by itself for an admin until it has been finished or skipped
+    useEffect(() => {
+        if (!session.admin) {
+            return;
+        }
+        fnasJson<SetupStatus>(["setup", "status"], true).then(setup => {
+            setSetupDone(setup.done);
+            if (!setup.done) {
+                windows.open("setup");
+            }
+        }, () => {});
+    }, [session.admin]);
 
     useEffect(() => {
         const escape = (event: KeyboardEvent) => event.key === "Escape" && setPanel(null);
@@ -255,14 +270,21 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
         }
     };
 
+    const actions = {
+        open,
+        close: (app: AppId) => windows.windows.filter(win => win.app === app).forEach(win => windows.close(win.id)),
+        setupFinished: () => setSetupDone(true),
+    };
+
     return (
+        <DesktopContext.Provider value={actions}>
         <div class="desktop">
             <main class="desktop-area" onPointerDown={event => event.target === event.currentTarget && setPanel(null)}>
                 <nav class="desktop-icons" aria-label="Apps">
                     {apps.map(app => (
                         <button type="button" key={app} class="desktop-icon" onClick={() => open(app)}>
                             <AppIcon name={app} size={52} />
-                            <span>{APPS[app].title}</span>
+                            <span>{APPS[app].label || APPS[app].title}</span>
                         </button>
                     ))}
                 </nav>
@@ -312,5 +334,6 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
                 </button>
             </footer>
         </div>
+        </DesktopContext.Provider>
     );
 }

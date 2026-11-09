@@ -7,13 +7,14 @@ import sys
 import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
-from . import alerts, backup, config, disks, health, jobs, pools, shares, snapshots, system
+from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, system, users
 from .engines import zfs
 
 
 # Actions that change nothing worth saving
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
-                     "layouts", "identify", "storage", "timezones"}
+                     "layouts", "identify", "storage", "timezones", "services", "shares"}
+ON_OFF = ("on", "off")
 
 
 def dispatch_system(args, show):
@@ -78,7 +79,8 @@ def print_pools(pools):
 
 def print_engines(engines):
     for engine in engines:
-        print(f"{engine['name']}  " + ("available" if engine["available"] else f"unavailable: {engine['reason']}"))
+        print(f"{engine['name']} ({engine['title']})  "
+              + ("available" if engine["available"] else f"unavailable: {engine['reason']}"))
 
 
 def print_layouts(options):
@@ -116,13 +118,43 @@ def print_scan(pools):
                 print(f"    {key}: {pool[key]}")
 
 
+def describe_access(share):
+    if share["mode"] == "everyone":
+        return "everyone"
+    listed = [f"{name} ({level})" for name, level in share["access"]["users"].items()]
+    listed += [f"group {name} ({level})" for name, level in share["access"]["groups"].items()]
+    return ", ".join(listed) or "nobody yet"
+
+
 def print_shares(shares):
     if not shares:
         print("No shares")
     for share in shares:
         protocols = [p for p in ("nfs", "smb") if share[p]]
-        print(f"{share['name']}  {share['mode']}  {' '.join(protocols).upper() or 'not shared'}  "
-              f"{share['path']}")
+        print(f"{share['name']}  {' '.join(protocols).upper() or 'not shared'}  {share['path']}")
+        print(f"    for {describe_access(share)}")
+
+
+def print_users(found):
+    for user in found:
+        extras = [user["kind"] == "ssh" and "SSH", user["admin"] and "administrator",
+                  not user["password"] and "no password yet",
+                  user["password"] and not user["smb_password"] and "no SMB password", not user["enabled"] and "turned off"]
+        print(f"{user['name']}  {user['full_name']}  " + ", ".join(e for e in extras if e))
+        if user["groups"]:
+            print(f"    groups: {', '.join(user['groups'])}")
+
+
+def print_groups(found):
+    if not found:
+        print("No groups")
+    for group in found:
+        print(f"{group['name']}: {', '.join(group['members']) or 'no members'}")
+
+
+def print_sharing(settings):
+    for protocol, values in settings.items():
+        print(f"{protocol.upper()}: " + ", ".join(f"{key} {value}" for key, value in values.items()))
 
 
 def print_snapshots(snapshots):
@@ -180,12 +212,38 @@ def print_findings(found):
         print(f"    {item['message']}")
 
 
-def print_health(health):
-    print_findings(health["problems"])
-    for disk in health["disks"]:
+CHECK_STATES = {"passed": "passed", "na": "doesn't apply", "low": "LOW", "medium": "MEDIUM", "high": "HIGH",
+                "critical": "CRITICAL"}
+
+
+def print_health(report):
+    hourly = report["hourly"]["last"]
+    print("Hourly check last ran " + (when(hourly) if hourly else "never"))
+    section = None
+    for item in report["checks"]:
+        if item["section"] != section:
+            section = item["section"]
+            print(f"{section}:")
+        print(f"    {CHECK_STATES[item['state']]}: {item['title']}: {item['detail']}")
+    print("Services:")
+    for service in report["services"]:
+        print(f"    {service['title']}: {service['detail']}")
+    for disk in report["disks"]:
         print(f"{disk['by_id'] or disk['path']}: {disk['verdict']}")
         for note in disk["notes"]:
             print(f"    {note}")
+
+
+def print_protocols(found):
+    for protocol in found:
+        print(f"{protocol['title']}  {protocol['detail']}  ({protocol['for']})")
+
+
+def print_setup(status):
+    if not status["done"]:
+        print("Setup hasn't been finished: it opens when an admin logs in to the desktop")
+    else:
+        print(("Skipped " if status["skipped"] else "Finished ") + when(status["finished"]))
 
 
 def print_config(saved):
@@ -196,6 +254,35 @@ def print_config(saved):
     print("Users: " + (", ".join(f"{u['name']} ({u['uid']})" for u in saved["users"]) or "none"))
     print("Alerts: " + (", ".join(saved["alerts"]) or "none"))
     print("Backup: " + (f"to {saved['backup']['target']}" if saved["backup"] else "none"))
+
+
+def add_access_arguments(parser):
+    parser.add_argument("--everyone", action="store_true", help="every user, writing as the share account")
+    parser.add_argument("--user", action="append", default=[], metavar="NAME=read|write")
+    parser.add_argument("--group", action="append", default=[], metavar="NAME=read|write")
+
+
+def pairs(values, allowed):
+    found = []
+    for value in values or []:
+        name, _, level = value.rpartition("=")
+        if not name or level not in allowed:
+            raise FnasError(f"expected NAME={'|'.join(allowed)}, not {value}")
+        found.append((name, level))
+    return found
+
+
+def access_from(args):
+    return {"users": dict(pairs(args.user, shares.ACCESS_LEVELS)),
+            "groups": dict(pairs(args.group, shares.ACCESS_LEVELS))}
+
+
+def switch(value):
+    return None if value is None else value == "on"
+
+
+def names(value):
+    return [name for name in (value or "").split(",") if name]
 
 
 def build_parser():
@@ -259,26 +346,98 @@ def build_parser():
     create = share.add_parser("create", help="create a share in POOL/shares")
     create.add_argument("name")
     create.add_argument("pool")
-    create.add_argument("--mode", required=True, choices=shares.SHARE_MODES,
-                        help="shared: everyone writes as one account; matched: user IDs must match")
-    create.add_argument("--owner", help="the user who owns a matched share")
+    add_access_arguments(create)
     create.add_argument("--nfs", action="store_true", help="share over NFS")
     create.add_argument("--smb", action="store_true", help="share over SMB")
+    access = share.add_parser("access", help="change who can use a share, for every file in it")
+    access.add_argument("name")
+    add_access_arguments(access)
+    smb = share.add_parser("smb", help="a share's SMB settings")
+    smb.add_argument("name")
+    for flag, text in (("readonly", "nobody can change files over SMB"), ("hidden", "not listed when browsing"),
+                       ("guest", "guests can read without a password (shares for everyone only)"),
+                       ("recycle", "deleted files go to .recycle"), ("timemachine", "Mac backups to this share"),
+                       ("previous-versions", "show snapshots in Windows")):
+        smb.add_argument(f"--{flag}", choices=ON_OFF, help=text)
+    smb.add_argument("--recycle-days", type=int, help="how long the recycle bin keeps files")
+    smb.add_argument("--timemachine-size", type=int, help="the most Time Machine may use, in GB; 0 for no limit")
+    nfs = share.add_parser("nfs", help="a share's NFS settings")
+    nfs.add_argument("name")
+    nfs.add_argument("--client", action="append", metavar="NETWORK=rw|ro",
+                     help="a network or address that may mount it; repeat for more")
+    nfs.add_argument("--home-network", action="store_true", help="only the LAN subnet, read-write (the default)")
+    nfs.add_argument("--readonly", choices=ON_OFF, help="read-only for every client")
+    nfs.add_argument("--mapping", choices=shares.NFS_MAPPINGS,
+                     help="all: everyone as the share account; root: real users, root squashed; "
+                          "none: real users including root; auto: follow the share's access")
+    nfs.add_argument("--async", dest="async_writes", choices=ON_OFF,
+                     help="faster writes that a power cut can lose")
     change = share.add_parser("set", help="turn a protocol on or off, keeping the data")
     change.add_argument("name")
     change.add_argument("--nfs", choices=("on", "off"))
     change.add_argument("--smb", choices=("on", "off"))
     share.add_parser("refresh", help="rewrite the NFS and Samba settings from each pool")
+    share.add_parser("services", help="list every way to share files and whether each is running")
     delete = share.add_parser("delete", help="destroy a share, its data and its snapshots")
     delete.add_argument("name")
     delete.add_argument("--confirm", default="", help='type "delete NAME and N snapshots"')
 
-    user = area.add_parser("user", help="accounts that use shares").add_subparsers(
+    sharing = area.add_parser("sharing", help="NAS-wide SMB and NFS settings").add_subparsers(
         dest="action", required=True)
-    smb_password = user.add_parser("smb-password", help="set the password a user types for SMB shares")
-    smb_password.add_argument("name")
-    smb_password.add_argument("--password-stdin", action="store_true", required=True,
-                              help="read the password from stdin")
+    sharing.add_parser("show", help="show the SMB and NFS settings")
+    sharing_smb = sharing.add_parser("smb", help="change the SMB settings")
+    sharing_smb.add_argument("--workgroup")
+    sharing_smb.add_argument("--description", help="what computers show when browsing")
+    sharing_smb.add_argument("--min-protocol", choices=tuple(shares.SMB_PROTOCOLS), help="the oldest protocol allowed")
+    sharing_smb.add_argument("--encryption", choices=shares.SMB_ENCRYPTION,
+                             help="desired: when the computer supports it; required: always")
+    sharing_smb.add_argument("--windows-discovery", choices=ON_OFF, help="show the NAS in Windows Network")
+    sharing_smb.add_argument("--mac-discovery", choices=ON_OFF, help="show the NAS in the macOS Finder")
+    sharing_nfs = sharing.add_parser("nfs", help="change the NFS settings")
+    sharing_nfs.add_argument("--v3", choices=ON_OFF, help="NFS version 3 for older clients")
+    sharing_nfs.add_argument("--threads", type=int)
+    sharing_nfs.add_argument("--fixed-ports", choices=ON_OFF, help="fixed ports for firewalls")
+
+    user = area.add_parser("user", help="people's accounts").add_subparsers(dest="action", required=True)
+    user.add_parser("list", help="list people's accounts")
+    user.add_parser("shares", help="the shares a user can use").add_argument("name")
+    user_create = user.add_parser("create", help="add an account; the password comes from stdin")
+    user_create.add_argument("name")
+    user_create.add_argument("--full-name", default="")
+    user_create.add_argument("--kind", choices=tuple(users.KINDS), default="shares",
+                             help="shares: shares only, no SSH; ssh: shares and SSH")
+    user_create.add_argument("--admin", action="store_true", help="can manage the NAS")
+    user_create.add_argument("--groups", default="", help="comma-separated")
+    user_create.add_argument("--password-stdin", action="store_true", required=True)
+    user_set = user.add_parser("set", help="change an account")
+    user_set.add_argument("name")
+    user_set.add_argument("--full-name")
+    user_set.add_argument("--kind", choices=tuple(users.KINDS))
+    user_set.add_argument("--admin", choices=ON_OFF)
+    user_set.add_argument("--enabled", choices=ON_OFF, help="off: can't log in or reach shares")
+    user_set.add_argument("--groups", help="comma-separated; replaces the account's groups")
+    for action, text in (("password", "set the one password for the desktop and every way to share"),
+                         ("smb-password", "the same as password, kept for older desktops")):
+        found = user.add_parser(action, help=text)
+        found.add_argument("name")
+        found.add_argument("--password-stdin", action="store_true", required=True, help="read the password from stdin")
+    user_remove = user.add_parser("remove", help="remove an account")
+    user_remove.add_argument("name")
+    user_remove.add_argument("--keep-home", action="store_true", help="keep the home folder")
+    user_remove.add_argument("--confirm", default="", help='type "remove NAME"')
+
+    group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
+    group.add_parser("list", help="list groups and their members")
+    group_create = group.add_parser("create", help="add a group")
+    group_create.add_argument("name")
+    group_create.add_argument("--members", default="", help="comma-separated")
+    group_members = group.add_parser("members", help="replace a group's members")
+    group_members.add_argument("name")
+    group_members.add_argument("members", help="comma-separated, or empty for none")
+    group_rename = group.add_parser("rename", help="rename a group")
+    group_rename.add_argument("name")
+    group_rename.add_argument("new")
+    group.add_parser("remove", help="remove a group; its members keep their accounts").add_argument("name")
 
     lan = area.add_parser("lan", help="the subnet shares are limited to").add_subparsers(
         dest="action", required=True)
@@ -317,7 +476,8 @@ def build_parser():
     alert_list.add_argument("--limit", type=int, default=20)
     alert.add_parser("show", help="show where alerts go")
     send = alert.add_parser("send", help="send an alert")
-    send.add_argument("--severity", choices=alerts.SEVERITIES, default="warning")
+    send.add_argument("--severity", choices=alerts.SEVERITIES + tuple(alerts.OLD_SEVERITIES), default="medium",
+                      help="critical: something is broken; high, medium or low: a warning; info: nothing wrong")
     send.add_argument("title")
     send.add_argument("message")
     alert.add_parser("test", help="send a test alert")
@@ -367,8 +527,15 @@ def build_parser():
     job.add_parser("show", help="show one job").add_argument("id")
     job.add_parser("run", help=argparse.SUPPRESS).add_argument("id")
 
+    setup = area.add_parser("setup", help="whether the desktop's first-run Setup is done").add_subparsers(
+        dest="action", required=True)
+    setup.add_parser("status", help="show whether Setup was finished or skipped")
+    setup_done = setup.add_parser("done", help="mark Setup finished, so it stops opening by itself")
+    setup_done.add_argument("--skipped", action="store_true", help="it was skipped rather than finished")
+    setup.add_parser("reset", help="open Setup again at the next admin login")
+
     area.add_parser("check", help="look for problems and send alerts")
-    area.add_parser("health", help="show problems and each disk's SMART health, sending nothing")
+    area.add_parser("health", help="show every check, service, pool and disk, sending nothing")
     return parser
 
 
@@ -386,8 +553,11 @@ def dispatch(args):
     elif args.area == "share":
         dispatch_share(args, show)
     elif args.area == "user":
-        shares.set_smb_password(args.name, read_secret(True))
-        print(f"{args.name} can log in to SMB shares")
+        dispatch_user(args, show)
+    elif args.area == "group":
+        dispatch_group(args, show)
+    elif args.area == "sharing":
+        dispatch_sharing(args, show)
     elif args.area == "lan":
         print(shares.set_lan(args.subnet) if args.action == "set" else shares.lan_subnet())
     elif args.area == "snapshot":
@@ -403,12 +573,25 @@ def dispatch(args):
     elif args.area == "check":
         show(health.run_checks(), print_findings)
     elif args.area == "health":
-        show({"problems": health.find_problems(time.time()),
-              "disks": [disks.disk_health(d) for d in disks.list_disks() if d["kind"] == "disk"]}, print_health)
+        show(health.health_report(time.time()), print_health)
+    elif args.area == "setup":
+        dispatch_setup(args, show)
     elif args.area == "job":
         dispatch_job(args, show)
     else:
         dispatch_pool(args, show)
+
+
+def dispatch_setup(args, show):
+    if args.action == "status":
+        show(system.setup_status(), print_setup)
+    elif args.action == "done":
+        system.finish_setup(args.skipped)
+        print("Setup skipped" if args.skipped else "Setup finished")
+    elif args.action == "reset":
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(system.SETUP_FILE)
+        print("Setup opens at the next admin login")
 
 
 def started(job):
@@ -472,18 +655,92 @@ def dispatch_job(args, show):
         jobs.run_job(args.id)
 
 
+def dispatch_user(args, show):
+    if args.action == "list":
+        show(users.list_users(), print_users)
+    elif args.action == "shares":
+        users.find_user(args.name)
+        show(shares.shares_of(args.name), lambda found: print("\n".join(
+            f"{s['name']}: {s['level']} ({s['through']})" for s in found) or "No shares"))
+    elif args.action == "create":
+        users.create_user(args.name, args.full_name, args.kind, args.admin, names(args.groups), read_secret(True))
+        print(f"Added {args.name}")
+    elif args.action == "set":
+        users.change_user(args.name, args.full_name, args.kind, switch(args.admin),
+                          None if args.groups is None else names(args.groups), switch(args.enabled))
+        print(f"Updated {args.name}")
+    elif args.action in ("password", "smb-password"):
+        users.set_password(args.name, read_secret(True))
+        print(f"Set the password for {args.name}")
+    elif args.action == "remove":
+        users.find_user(args.name)
+        lost = [s["name"] for s in shares.shares_of(args.name) if s["through"] == "own"]
+        users.remove_user(args.name, args.keep_home, args.confirm, lost)
+        shares.forget("users", args.name)
+        print(f"Removed {args.name}" + (", keeping the home folder" if args.keep_home else ""))
+
+
+def dispatch_group(args, show):
+    if args.action == "list":
+        show(users.list_groups(), print_groups)
+    elif args.action == "create":
+        users.create_group(args.name, names(args.members))
+        print(f"Added group {args.name}")
+    elif args.action == "members":
+        users.set_members(args.name, names(args.members))
+        print(f"Updated {args.name}")
+    elif args.action == "rename":
+        users.rename_group(args.name, args.new)
+        shares.rename("groups", args.name, args.new)
+        print(f"Renamed {args.name} to {args.new}")
+    elif args.action == "remove":
+        users.remove_group(args.name)
+        shares.forget("groups", args.name)
+        print(f"Removed group {args.name}")
+
+
+def dispatch_sharing(args, show):
+    if args.action == "show":
+        show(shares.sharing_settings(), print_sharing)
+    elif args.action == "smb":
+        show(shares.set_sharing("smb", {
+            "workgroup": args.workgroup, "description": args.description, "min_protocol": args.min_protocol,
+            "encryption": args.encryption, "windows_discovery": switch(args.windows_discovery),
+            "mac_discovery": switch(args.mac_discovery)}), print_sharing)
+    elif args.action == "nfs":
+        show(shares.set_sharing("nfs", {"v3": switch(args.v3), "threads": args.threads,
+                                        "fixed_ports": switch(args.fixed_ports)}), print_sharing)
+
+
 def dispatch_share(args, show):
     if args.action == "list":
         show(shares.list_shares(), print_shares)
     elif args.action == "create":
-        shares.create_share(args.name, args.pool, args.mode, args.owner, args.nfs, args.smb)
+        shares.create_share(args.name, args.pool, args.everyone, access_from(args), args.nfs, args.smb)
         print(f"Created share {args.name}")
+    elif args.action == "access":
+        shares.set_access(args.name, args.everyone, access_from(args))
+        print(f"{args.name} is now for {describe_access(shares.find_share(args.name))}")
+    elif args.action == "smb":
+        shares.set_smb_options(args.name, {
+            "readonly": switch(args.readonly), "hidden": switch(args.hidden), "guest": switch(args.guest),
+            "recycle": switch(args.recycle), "recycle_days": args.recycle_days,
+            "timemachine": switch(args.timemachine), "timemachine_size": args.timemachine_size,
+            "previous_versions": switch(args.previous_versions)})
+        print(f"Updated SMB settings for {args.name}")
+    elif args.action == "nfs":
+        clients = None if args.client is None else pairs(args.client, shares.NFS_ACCESS)
+        shares.set_nfs_options(args.name, clients, args.home_network, switch(args.readonly), args.mapping,
+                               switch(args.async_writes))
+        print(f"Updated NFS settings for {args.name}")
     elif args.action == "set":
         shares.set_share(args.name, args.nfs, args.smb)
         print(f"Updated share {args.name}")
     elif args.action == "refresh":
         shares.migrate()
         shares.write_config()
+    elif args.action == "services":
+        show(services.protocols(), print_protocols)
     elif args.action == "delete":
         shares.delete_share(args.name, args.confirm)
         print(f"Deleted share {args.name}")
@@ -572,7 +829,7 @@ def main():
         if os.geteuid() != 0:
             raise FnasError("run as root: sudo fnas ...")
         dispatch(args)
-        if args.area not in ("check", "health", "system", "job") and args.action not in READ_ONLY_ACTIONS:
+        if args.area not in ("check", "health", "system", "job", "setup") and args.action not in READ_ONLY_ACTIONS:
             config.after_change()
     except FnasError as error:
         print(f"fnas: {error}", file=sys.stderr)

@@ -123,7 +123,7 @@ def restore_backup(name, from_pool, to_pool):
     settings = shares.check_settings(name, (saved.get("shares") or {}).get(name, {}))
     if not settings and name not in [s["name"] for s in shares.list_shares()]:
         # Nothing says how it was shared, so it comes back private
-        settings = {"mode": "matched", "nfs": False, "smb": False, "policy": dict(snapshots.DEFAULT_POLICY)}
+        settings = shares.new_settings("chosen", {"users": {}, "groups": {}}, False, False)
     if settings:
         shares.save_settings(pool, {"name": name, **settings})
     shares.write_config()

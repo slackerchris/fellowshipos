@@ -19,8 +19,13 @@ ALERT_LOG = os.path.join(STATE_DIR, "alerts.json")
 ALERT_LOCK = os.path.join(STATE_DIR, "alerts.lock")
 MAX_ALERTS = 500
 RETRY_FOR = DAY
-SEVERITIES = ("info", "warning", "critical")
-NTFY_PRIORITY = {"info": "default", "warning": "high", "critical": "urgent"}
+# critical: something is broken now. high, medium and low: a warning, by how
+# soon it needs attention. info: nothing wrong, such as a resolved problem.
+SEVERITIES = ("info", "low", "medium", "high", "critical")
+RANK = {severity: rank for rank, severity in enumerate(SEVERITIES)}
+# What older versions sent, and what older hooks may still send
+OLD_SEVERITIES = {"warning": "medium"}
+NTFY_PRIORITY = {"info": "low", "low": "low", "medium": "default", "high": "high", "critical": "urgent"}
 MAIL_ADDRESS = re.compile(r"^[^@\s\"]+@[^@\s\"]+$")
 MAIL_HOST = re.compile(r"^[A-Za-z0-9.-]+$")
 MAIL_USER = re.compile(r"^[^\s\"]+$")
@@ -66,7 +71,8 @@ def send_ntfy(settings, severity, subject, body):
 
 def deliver(severity, title, body, channels=("email", "ntfy")):
     """Send to each channel in use, returning what couldn't be reached."""
-    subject = f"[{socket.gethostname()}] {title}"
+    severity = OLD_SEVERITIES.get(severity, severity)
+    subject = f"[{socket.gethostname()}] " + (f"{severity.capitalize()}: " if severity != "info" else "") + title
     settings = read_json(ALERTS_FILE, {})
     failures = []
     for channel, sender in (("email", send_email), ("ntfy", send_ntfy)):
@@ -81,6 +87,7 @@ def deliver(severity, title, body, channels=("email", "ntfy")):
 def send_alert(severity, title, body):
     """Store an alert and send it, returning what couldn't be reached."""
     title = " ".join(title.split())
+    severity = OLD_SEVERITIES.get(severity, severity)
     failures = deliver(severity, title, body)
     with locked(ALERT_LOCK):
         alerts = read_json(ALERT_LOG, [])

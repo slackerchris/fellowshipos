@@ -1,0 +1,2 @@
+# fnas now writes /etc/nfs.conf.d/fellowship.conf from the NFS settings in the desktop
+rm_conffile /etc/nfs.conf.d/nfs-v4-only.conf 0.1.1~

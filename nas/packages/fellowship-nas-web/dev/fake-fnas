@@ -51,6 +51,20 @@ def layouts(count, size):
     return found
 
 
+def protocols(state):
+    def entry(name, title, use, state_, detail):
+        return {"name": name, "title": title, "for": use, "state": state_, "detail": detail,
+                "shares": [s["name"] for s in state["shares"] if s.get(name)]}
+    count = lambda name: len([s for s in state["shares"] if s.get(name)])
+    return [entry("smb", "SMB", "Windows, Mac and phones", "running", f"Running, {count('smb')} shares"),
+            entry("nfs", "NFS", "Linux computers, Proxmox and other servers", "running", f"Running, {count('nfs')} shares"),
+            entry("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", "not-built", "Not built yet (Phase 12)"),
+            entry("ftp", "FTP", "Cameras, scanners and older devices", "not-built", "Not built yet (Phase 12)"),
+            entry("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", "not-built", "Not built yet (Phase 12)"),
+            entry("dlna", "DLNA", "TVs and consoles finding media by themselves", "later", "Planned for after the storage engines"),
+            entry("iscsi", "iSCSI", "Part of a pool as a disk on another machine", "later", "Planned for after the storage engines")]
+
+
 def start_job(state, kind, title, pool):
     job = {"id": f"{len(state.setdefault('jobs', [])):012x}", "kind": kind, "title": title, "pool": pool,
            "state": "running", "progress": 0.0, "started": int(time.time()), "ended": None, "error": None}
@@ -69,16 +83,30 @@ def jobs(state):
     return state.get("jobs", [])
 
 
+SMB = {"readonly": False, "hidden": False, "guest": False, "recycle": False, "recycle_days": 30,
+       "timemachine": False, "timemachine_size": 0, "previous_versions": True}
+NFS = {"clients": [], "readonly": False, "mapping": "auto", "async": False}
+
 DEFAULT = {
+    "users": [{"name": "tester", "uid": 1000, "full_name": "Tester", "kind": "ssh", "admin": True, "groups": ["family"],
+               "password": True, "smb_password": True, "enabled": True},
+              {"name": "kim", "uid": 1001, "full_name": "Kim", "kind": "shares", "admin": False, "groups": ["family"],
+               "password": True, "smb_password": True, "enabled": True}],
+    "groups": [{"name": "family", "gid": 1002, "members": ["kim", "tester"]}],
+    "sharing": {"smb": {"workgroup": "WORKGROUP", "description": "FellowshipNAS", "min_protocol": "SMB2",
+                        "encryption": "desired", "windows_discovery": True, "mac_discovery": True},
+                "nfs": {"v3": False, "threads": 8, "fixed_ports": False}},
     "pools": [{"name": "tank", "size": 16 * 10 ** 12, "allocated": 9 * 10 ** 12, "free": 7 * 10 ** 12,
                "health": "ONLINE", "readonly": False, "engine": "zfs"}],
     "shares": [
         {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/mnt/tank/shares/media",
-         "mode": "shared", "nfs": True, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
-         "readonly": False},
+         "mode": "everyone", "access": {"users": {}, "groups": {}}, "nfs": True, "smb": True,
+         "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
+         "engine": "zfs", "readonly": False},
         {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/mnt/tank/shares/family",
-         "mode": "matched", "nfs": False, "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6},
-         "readonly": False},
+         "mode": "chosen", "access": {"users": {"tester": "write"}, "groups": {"family": "read"}}, "nfs": False,
+         "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
+         "engine": "zfs", "readonly": False},
     ],
     "disks": [disk("a", 256 * GB, "Samsung SSD 870", "os", "holds the system"),
               disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36, bay="Bay 1"),
@@ -91,7 +119,7 @@ DEFAULT = {
     "lan": "192.168.1.0/24",
     "alerts": [{"time": NOW - 86400 * 2, "severity": "info", "title": "Test alert",
                 "message": "Alerts from this NAS are reaching you.", "undelivered": []},
-               {"time": NOW - 3600 * 5, "severity": "warning", "title": "Disk to watch",
+               {"time": NOW - 3600 * 5, "severity": "medium", "title": "Disk to watch",
                 "message": "ST8000VN004 SNDO042 has 8 reallocated sectors.", "undelivered": []}],
     "channels": {"ntfy": {"url": "https://ntfy.sh/example-private-topic", "token": False}},
     "backup": None,
@@ -124,7 +152,10 @@ def main(args):
     elif area == "pool" and action == "status":
         out = pool_status(state, rest[0]) if as_json else "  pool: tank\n state: ONLINE\nconfig:\n\ttank  ONLINE\n"
     elif area == "pool" and action == "engines":
-        out = [{"name": "zfs", "available": True, "reason": ""}]
+        out = [{"name": "zfs", "title": "ZFS", "available": True, "reason": ""},
+               {"name": "mergerfs", "title": "Unraid-style", "available": False, "reason": "Not built yet (Phase 11)"},
+               {"name": "mdadm", "title": "Traditional RAID", "available": False, "reason": "Not built yet (Phase 10)"},
+               {"name": "btrfs", "title": "Btrfs", "available": False, "reason": "Not built yet (Phase 14)"}]
     elif area == "pool" and action == "layouts":
         chosen = [d for d in state["disks"] if d["by_id"] in rest or d["path"] in rest]
         out = layouts(len(chosen), min(d["size"] for d in chosen))
@@ -164,8 +195,10 @@ def main(args):
     elif area == "share" and action == "create":
         name, pool = rest[0], rest[1]
         state["shares"].append({"name": name, "pool": pool, "dataset": f"{pool}/shares/{name}",
-                                "path": f"/{pool}/shares/{name}", "mode": rest[rest.index("--mode") + 1],
-                                "nfs": "--nfs" in rest, "smb": "--smb" in rest,
+                                "path": f"/mnt/{pool}/shares/{name}",
+                                "mode": "everyone" if "--everyone" in rest else "chosen",
+                                "access": {"users": {}, "groups": {}}, "engine": "zfs",
+                                "nfs": "--nfs" in rest, "smb": "--smb" in rest, "smb_options": SMB, "nfs_options": NFS,
                                 "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "readonly": False})
         out = f"Created share {name}"
     elif area == "share" and action == "set":
@@ -188,13 +221,66 @@ def main(args):
         if action == "set":
             state["lan"] = rest[0]
         out = state["lan"]
+    elif area == "user" and action == "list":
+        out = state["users"]
+    elif area == "user" and action == "shares":
+        out = [{"name": s["name"], "level": "write", "through": "everyone" if s["mode"] == "everyone" else "own"}
+               for s in state["shares"]]
     elif area == "user":
-        sys.stdin.read()
-        out = f"{rest[0]} can log in to SMB shares"
+        if "--password-stdin" in rest:
+            sys.stdin.read()
+        out = f"Done for {rest[0]}"
+    elif area == "group" and action == "list":
+        out = state["groups"]
+    elif area == "group":
+        out = "Done"
+    elif area == "sharing" and action == "show":
+        out = state["sharing"]
+    elif area == "sharing":
+        out = state["sharing"]
+    elif area == "share" and action in ("access", "smb", "nfs"):
+        out = f"Updated {rest[0]}"
+    elif area == "share" and action == "services":
+        out = protocols(state)
+    elif area == "setup" and action == "status":
+        out = {"done": "setup" in state, **state.get("setup", {})}
+    elif area == "setup" and action == "done":
+        state["setup"] = {"finished": int(time.time()), "skipped": "--skipped" in rest}
+        out = "Setup finished"
+    elif area == "setup" and action == "reset":
+        state.pop("setup", None)
+        out = "Setup opens at the next admin login"
+    elif area == "snapshot" and action == "list":
+        out = [{"name": f"autosnap_hourly_{n}", "created": NOW - 3600 * n, "used": 0} for n in range(3, 0, -1)]
     elif area == "health":
-        out = {"problems": [{"key": "disk-watch", "severity": "warning", "title": "A disk needs watching",
-                             "message": "ST8000VN004 SND0042 has 8 reallocated sectors."}],
-               "disks": state["disks"]}
+        watch = {"key": "disk-/dev/sdd", "severity": "medium", "title": "Keep an eye on Bay 3",
+                 "message": "8 reallocated sectors: keep a spare disk ready"}
+        def check(key, section, title, state_, detail, problems=(), alerting=True):
+            return {"key": key, "section": section, "title": title, "state": state_, "detail": detail,
+                    "problems": list(problems), "alerting": alerting}
+        out = {"time": int(time.time()), "hourly": {"last": NOW - 1200, "every": 3600},
+               "checks": [check("pool-state", "Pools", "Every pool has all its disks", "passed", "1 pool, every disk present"),
+                          check("pool-space", "Pools", "Pools have free space", "passed", "Every pool under 80% full"),
+                          check("scrub", "Pools", "Pools are scrubbed every month", "passed", "Each pool checked in the last 40 days"),
+                          check("snapshots", "Protection", "Snapshots are being taken", "passed", "Every share's newest snapshot is on time"),
+                          check("backup", "Protection", "Backups are up to date", "na",
+                                "No backup job. Set one up in Snapshots and backup"),
+                          check("settings", "Protection", "Settings are saved on every pool", "passed", "Saved after every change"),
+                          check("system-disk", "System", "The system disk has room", "passed", "Under 85% full"),
+                          check("zfs-module", "System", "ZFS works with the newest kernel", "passed", "Module built for 6.12.57"),
+                          check("services", "Services", "Services are running", "passed", "Every service the NAS needs is running"),
+                          check("disks", "Disks", "Disks report good health", "medium", watch["title"], [watch], False)],
+               "problems": [watch],
+               "services": [{"unit": "fellowship-nas-web.service", "title": "Web server", "does": "Serves this desktop",
+                             "state": "running", "detail": "Running"}],
+               "protocols": protocols(state),
+               "system": {"disk": {"size": 34 * GB, "used": 6 * GB}, "memory": {"total": 16 * GB, "available": 12 * GB},
+                          "load": [0.12, 0.2, 0.18], "cpus": 4, "uptime": 86400 * 12, "temperature": 41.0,
+                          "updates": 3, "reboot": False, "kernel": "6.12.57", "newest_kernel": "6.12.57"},
+               "pools": [{**p, "shares": len(state["shares"]), "last_scrub": NOW - 86400 * 9,
+                          "last_snapshot": NOW - 1800, "backup": None} for p in state["pools"]],
+               "disks": state["disks"],
+               "alerts": {"channels": state["channels"], "last": state["alerts"][-1]}}
     elif area == "alert" and action == "list":
         out = state["alerts"]
     elif area == "alert" and action == "show":
@@ -204,6 +290,8 @@ def main(args):
         out = "Done"
     elif area == "backup" and action == "show":
         out = {"job": state["backup"]}
+    elif area == "backup" and action == "list":
+        fail("no backup job, so name the backup pool with --from")
     elif area == "backup" and action == "set":
         state["backup"] = {"source": rest[0], "target": rest[1]}
         out = f"Backing up {rest[0]} to {rest[1]} every night"

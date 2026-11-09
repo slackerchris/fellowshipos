@@ -1,30 +1,31 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
 import { Session, SessionInfo, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, sessions, when } from "./api";
+import { DesktopContext } from "./desktop/context";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
 export const SessionContext = createContext<Session>({ id: "", user: "", admin: false, csrf: "" });
 
-function OwnSmbPassword() {
+function OwnPassword() {
     const { user } = useContext(SessionContext);
     const [password, setPassword] = useState("");
     const [again, setAgain] = useState("");
     const action = useAction();
     return (
-        <Card title="SMB password">
-            <p class="muted small">The password Windows, Mac and phones ask for when you open a share as <strong>{user}</strong>.
-                It can differ from the one you log in here with.</p>
+        <Card title="Your password">
+            <p class="muted small">One password for <strong>{user}</strong>: this desktop, and opening shares from Windows,
+                Mac, phones and other computers.</p>
             <form class="stack" onSubmit={event => {
                 event.preventDefault();
                 action.run(async () => {
-                    const output = await fnas(["user", "smb-password", user, "--password-stdin"], password);
+                    const output = await fnas(["user", "password", user, "--password-stdin"], password);
                     setPassword("");
                     setAgain("");
                     return output;
                 });
             }}>
                 <div class="grid-2">
-                    <Field label="New SMB password">
+                    <Field label="New password" hint="At least 8 characters">
                         <input type="password" autoComplete="new-password" value={password}
                                onInput={event => setPassword(event.currentTarget.value)} />
                     </Field>
@@ -35,7 +36,8 @@ function OwnSmbPassword() {
                 </div>
                 {again && password !== again && <p class="muted small">The passwords don't match.</p>}
                 <div class="row">
-                    <Button type="submit" busy={action.busy} disabled={!password || password !== again}>Set SMB password</Button>
+                    <Button type="submit" busy={action.busy} disabled={password.length < 8 || password !== again}>
+                        Change password</Button>
                 </div>
                 <Result outcome={action.outcome} />
             </form>
@@ -233,13 +235,36 @@ function Power() {
     );
 }
 
+function SetupAgain() {
+    const desktop = useContext(DesktopContext);
+    return (
+        <Card title="Setup">
+            <p class="small">The step-by-step setup opened by itself the first time you logged in. Each of its steps lives in
+                its own app too: Storage, Shares, Snapshots and backup, and Alerts.</p>
+            <div class="row"><Button onClick={() => desktop.open("setup")}>Run setup again</Button></div>
+        </Card>
+    );
+}
+
+function NotBuilt({ title, phase, children }: { title: string; phase: number; children: preact.ComponentChildren }) {
+    return (
+        <Card title={title}>
+            <Notice>Not built yet (Phase {phase}).</Notice>
+            <p class="small">{children}</p>
+        </Card>
+    );
+}
+
 const SECTIONS = [
     { id: "account", label: "Your account", admin: false },
     { id: "sessions", label: "Sessions", admin: false },
     { id: "nas", label: "Name and time", admin: true },
     { id: "space", label: "System space", admin: true },
     { id: "certificate", label: "Certificate", admin: true },
+    { id: "network", label: "Network", admin: true },
+    { id: "updates", label: "Updates", admin: true },
     { id: "power", label: "Power", admin: true },
+    { id: "setup", label: "Setup", admin: true },
 ] as const;
 
 export function Settings() {
@@ -256,12 +281,19 @@ export function Settings() {
                 ))}
             </nav>
             <Page>
-                {section === "account" && <OwnSmbPassword />}
+                {section === "account" && <OwnPassword />}
                 {section === "sessions" && <Sessions />}
                 {section === "nas" && <Loading loaded={info}>{() => <ThisNas info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "certificate" && <Loading loaded={info}>{() => <Certificate info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "space" && <SystemSpace />}
+                {section === "network" && <NotBuilt title="Network" phase={15}>Choosing between an automatic address (DHCP)
+                    and a fixed one, and setting DNS and the gateway, comes here. Until then the NAS takes its address
+                    automatically; to keep it from changing, reserve it in your router.</NotBuilt>}
+                {section === "updates" && <NotBuilt title="Updates" phase={15}>Seeing and installing updates comes here.
+                    Debian security updates already install by themselves every day, without restarting; Health shows
+                    how many updates are waiting and whether a restart is needed.</NotBuilt>}
                 {section === "power" && <Power />}
+                {section === "setup" && <SetupAgain />}
             </Page>
         </div>
     );

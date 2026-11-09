@@ -250,3 +250,12 @@ input[type="range"] { min-height: 0; padding: 0; border: 0; background: none; ac
     .split-nav { display: flex; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px; }
     .split-item { white-space: nowrap; }
 }
+
+fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 12px; }
+.check.disabled { opacity: 0.55; cursor: not-allowed; }
+.section-row { text-align: left; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 14px; }
+/* A name or value with its own control beside it, one per line */
+.pick-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.pick-row > :first-child { flex: 1 1 220px; }
+.pick-row select, .pick-row input { width: auto; min-width: 180px; }
+.pick-row input { flex: 1 1 220px; }

@@ -77,7 +77,7 @@ func authenticate(name, password string) error {
 }
 
 func alert(title, message string) {
-	if _, stderr, err := runFnas([]string{"alert", "send", "--severity", "warning", title, message}, ""); err != nil {
+	if _, stderr, err := runFnas([]string{"alert", "send", "--severity", "high", title, message}, ""); err != nil {
 		log.Printf("couldn't send an alert: %v %s", err, stderr)
 	}
 }

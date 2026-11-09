@@ -1,6 +1,5 @@
 zfs-kernel-check usr/lib/fellowship-nas
 grub-saved-default.cfg etc/default/grub.d
-nfs-v4-only.conf etc/nfs.conf.d
 smartd.conf usr/lib/fellowship-nas
 smartmontools.service.d usr/lib/systemd/system
 smart-alert usr/lib/fellowship-nas

@@ -47,8 +47,10 @@ var commands = map[string][]string{
 	"disk": {"list", "identify"},
 	"pool": {"list", "scan", "engines", "status", "layouts", "create", "grow", "replace", "remove-spare",
 		"import", "export", "scrub"},
-	"share":    {"list", "create", "set", "refresh", "delete"},
-	"user":     {"smb-password"},
+	"share":    {"list", "create", "set", "access", "smb", "nfs", "refresh", "services", "delete"},
+	"sharing":  {"show", "smb", "nfs"},
+	"user":     {"list", "shares", "create", "set", "password", "smb-password", "remove"},
+	"group":    {"list", "create", "members", "rename", "remove"},
 	"lan":      {"show", "set"},
 	"snapshot": {"list", "policy"},
 	"backup":   {"show", "set", "off", "run", "list", "restore"},
@@ -57,6 +59,7 @@ var commands = map[string][]string{
 	"system":   {"show", "timezones", "hostname", "timezone", "certificate", "storage", "grow", "restart", "shutdown"},
 	// Only fnas itself runs a job; people follow them
 	"job":    {"list", "show"},
+	"setup":  {"status", "done", "reset"},
 	"health": nil,
 	"check":  nil,
 }
@@ -258,8 +261,9 @@ func Allowed(args []string, user string, admin bool) bool {
 		}
 	}
 	if !admin {
-		// Everyone may set their own SMB password, and nothing else
-		return slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"})
+		// Everyone may set their own password, and nothing else
+		return slices.Equal(args, []string{"user", "password", user, "--password-stdin"}) ||
+			slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"})
 	}
 	rest := args
 	if len(rest) > 0 && rest[0] == "--json" {

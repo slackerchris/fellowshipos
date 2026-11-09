@@ -7,6 +7,8 @@ if [ "$1" = "configure" ]; then
     [ -e /etc/samba/fellowship/shares.conf ] || : > /etc/samba/fellowship/shares.conf
     grep -q '^include = /etc/samba/fellowship/shares.conf$' /etc/samba/smb.conf ||
         echo 'include = /etc/samba/fellowship/shares.conf' >> /etc/samba/smb.conf
+    # Adds the include for the NAS-wide SMB settings at the end of [global]
+    fnas share refresh || true
     systemctl try-reload-or-restart smbd.service
 fi
 

@@ -185,21 +185,109 @@ export interface ImportablePool {
 
 export type Policy = { hourly: number; daily: number; monthly: number };
 
+export type Level = "read" | "write";
+
+/** Who can use a share: users and groups, each with read or read and write. */
+export interface Access {
+    users: Record<string, Level>;
+    groups: Record<string, Level>;
+}
+
+export interface SmbOptions {
+    readonly: boolean;
+    hidden: boolean;
+    guest: boolean;
+    recycle: boolean;
+    recycle_days: number;
+    timemachine: boolean;
+    // In GB; 0 for no limit
+    timemachine_size: number;
+    previous_versions: boolean;
+}
+
+export interface NfsClient {
+    host: string;
+    access: "rw" | "ro";
+}
+
+export interface NfsOptions {
+    // Empty: the home network, read-write
+    clients: NfsClient[];
+    readonly: boolean;
+    mapping: "auto" | "all" | "root" | "none";
+    async: boolean;
+}
+
 export interface Share {
     name: string;
     pool: string;
+    engine: string;
     dataset: string;
     path: string;
-    mode: "shared" | "matched";
+    mode: "everyone" | "chosen";
+    access: Access;
     nfs: boolean;
     smb: boolean;
     policy: Policy;
+    smb_options: SmbOptions;
+    nfs_options: NfsOptions;
     readonly: boolean;
 }
 
+export interface User {
+    name: string;
+    uid: number;
+    full_name: string;
+    // shares: shares only, no SSH; ssh: shares and SSH
+    kind: "shares" | "ssh";
+    admin: boolean;
+    groups: string[];
+    // Whether the account has a password at all, and one for SMB
+    password: boolean;
+    smb_password: boolean;
+    enabled: boolean;
+}
+
+export interface Group {
+    name: string;
+    gid: number;
+    members: string[];
+}
+
+export interface UserShare {
+    name: string;
+    level: Level;
+    through: string;
+}
+
+export interface SharingSettings {
+    smb: {
+        workgroup: string;
+        description: string;
+        min_protocol: "SMB2" | "SMB3";
+        encryption: "desired" | "required";
+        windows_discovery: boolean;
+        mac_discovery: boolean;
+    };
+    nfs: { v3: boolean; threads: number; fixed_ports: boolean };
+}
+
+/** fnas arguments for a share's access: --everyone, or --user and --group pairs. */
+export function accessArgs(everyone: boolean, access: Access): string[] {
+    if (everyone) {
+        return ["--everyone"];
+    }
+    return [...Object.entries(access.users).flatMap(([name, level]) => ["--user", `${name}=${level}`]),
+            ...Object.entries(access.groups).flatMap(([name, level]) => ["--group", `${name}=${level}`])];
+}
+
+export const onOff = (value: boolean) => value ? "on" : "off";
+
 export interface Problem {
     key: string;
-    severity: "info" | "warning" | "critical";
+    // critical: something is broken. high, medium and low: a warning, by how soon it
+    // needs attention. warning: what older versions sent
+    severity: "info" | "low" | "medium" | "high" | "critical" | "warning";
     title: string;
     message: string;
 }
@@ -217,9 +305,98 @@ export interface DiskHealth {
     hours: number | null;
 }
 
-export interface Health {
+export interface Check {
+    key: string;
+    section: string;
+    title: string;
+    // The most severe problem found, or na: doesn't apply yet, and detail says why
+    state: "passed" | "na" | "low" | "medium" | "high" | "critical";
+    detail: string;
     problems: Problem[];
+    alerting: boolean;
+}
+
+export interface UnitStatus {
+    unit: string;
+    title: string;
+    does: string;
+    state: "running" | "stopped" | "failed" | "missing";
+    detail: string;
+}
+
+export interface Protocol {
+    name: string;
+    title: string;
+    for: string;
+    shares: string[];
+    state: "running" | "stopped" | "failed" | "missing" | "not-built" | "later";
+    detail: string;
+}
+
+export interface SystemStatus {
+    disk: { size: number; used: number };
+    memory: { total: number; available: number };
+    load: number[];
+    cpus: number;
+    uptime: number;
+    temperature: number | null;
+    updates: number | null;
+    reboot: boolean;
+    kernel: string;
+    newest_kernel: string | null;
+}
+
+export interface PoolDetail extends Pool {
+    shares: number;
+    last_scrub: number | null;
+    last_snapshot: number | null;
+    backup: { target: string; last: number | null; error: string | null } | null;
+}
+
+export interface Health {
+    time: number;
+    hourly: { last: number | null; every: number };
+    checks: Check[];
+    problems: Problem[];
+    services: UnitStatus[];
+    protocols: Protocol[];
+    system: SystemStatus;
+    pools: PoolDetail[];
     disks: DiskHealth[];
+    alerts: { channels: Channels; last: Alert | null };
+}
+
+export interface Engine {
+    name: "zfs" | "mergerfs" | "mdadm" | "btrfs";
+    title: string;
+    available: boolean;
+    reason: string;
+}
+
+export interface SetupStatus {
+    done: boolean;
+    finished?: number;
+    skipped?: boolean;
+}
+
+export interface BackupStatus {
+    job: { source: string; target: string; since: number } | null;
+    last_attempt?: number;
+    last_success?: number;
+    error?: string | null;
+}
+
+export interface BackupCopy {
+    name: string;
+    pool: string;
+    dataset: string;
+    snapshots: number;
+}
+
+export interface Snapshot {
+    name: string;
+    created: number;
+    used: number;
 }
 
 export interface Alert {
@@ -247,12 +424,16 @@ export interface SavedConfig {
 }
 
 export const LAYOUT_NAMES: Record<LayoutOption["layout"], string> = {
-    single: "One disk",
+    single: "Single disk",
     mirror: "Mirror",
     raidz1: "RAIDZ1",
     raidz2: "RAIDZ2",
     raidz3: "RAIDZ3",
 };
+
+export function plural(count: number, word: string) {
+    return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
 
 export function humanSize(bytes: number): string {
     const units = ["B", "KB", "MB", "GB", "TB", "PB"];

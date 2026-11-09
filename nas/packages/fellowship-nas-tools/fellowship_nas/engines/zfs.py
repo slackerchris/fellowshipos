@@ -148,7 +148,8 @@ def layouts(sizes):
                 continue
             lowest, highest = WIDTHS[layout]
             for width in range(lowest, highest + 1):
-                if (count - spares) % width:
+                # A third copy costs a whole disk for little; RAIDZ2 does better
+                if (count - spares) % width or (layout == "mirror" and width > 2):
                     continue
                 groups, spare = plan(layout, sizes, width, spares)
                 group_sizes = [[sizes[i] for i in group] for group in groups]
@@ -480,13 +481,18 @@ def created_at(dataset):
     return int(run("zfs", "get", "-Hp", "-o", "value", "creation", dataset).stdout)
 
 
-def last_scrub(pool):
-    """When a scrub last finished, or when the pool was made if it never has."""
+def scrub_finished(pool):
+    """When a scrub last finished, or None if none has."""
     match = SCRUB_DONE.search(run("zpool", "status", pool).stdout)
     if match:
         stamp = " ".join(match.group(1).split())
         return datetime.datetime.strptime(stamp, "%a %b %d %H:%M:%S %Y").timestamp()
-    return created_at(pool)
+    return None
+
+
+def last_scrub(pool):
+    """When a scrub last finished, or when the pool was made if it never has."""
+    return scrub_finished(pool) or created_at(pool)
 
 
 def scrub_pool(name):

@@ -8,7 +8,7 @@ import socket
 import tempfile
 import time
 
-from .common import FnasError, later, run, write_file
+from .common import FnasError, later, read_json, run, write_file, write_json
 
 
 WEB_DIR = "/etc/fellowship-nas/web"
@@ -20,6 +20,8 @@ WEB_ACCOUNT = "fnas-web"
 WEB_SERVICE = "fellowship-nas-web.service"
 HOSTNAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 PEM_BLOCK = re.compile(r"-----BEGIN ([A-Z ]+)-----\r?\n.*?-----END \1-----", re.S)
+# Present once Setup has been finished or skipped, so it opens only on first login
+SETUP_FILE = "/etc/fellowshipos/nas-setup.json"
 POWER = {"restart": ("reboot", "restart the NAS"), "shutdown": ("poweroff", "shut down the NAS")}
 
 
@@ -170,3 +172,11 @@ def grow_system(amount):
     run("lvextend", "-r", "-l", f"+{extents}", f"{storage['group']}/{storage['volume']}")
     return system_storage()
 
+
+def setup_status():
+    saved = read_json(SETUP_FILE)
+    return {"done": bool(saved), **(saved or {})}
+
+
+def finish_setup(skipped):
+    write_json(SETUP_FILE, {"finished": int(time.time()), "skipped": skipped})

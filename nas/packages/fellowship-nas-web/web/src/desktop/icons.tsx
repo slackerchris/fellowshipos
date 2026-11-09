@@ -11,6 +11,14 @@ const GLYPHS = {
         <path d="M11 17a2 2 0 0 1 2-2h7l3 3h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H13a2 2 0 0 1-2-2z" />
         <path d="M19 27h10M26 24l3 3-3 3" />
     </>,
+    users: <>
+        <circle cx="20" cy="18" r="5" />
+        <path d="M11 35c0-5 4-9 9-9s9 4 9 9M29 14a5 5 0 0 1 0 9M33 27c2.5 1.5 4 4.5 4 8" />
+    </>,
+    backups: <>
+        <path d="M14 24a10 10 0 1 0 3-7.1" />
+        <path d="M13 12v6h6M24 18v6l4 3" />
+    </>,
     health: <path d="M10 25h7l3-7 4 13 3-6h11" />,
     alerts: <path d="M16 30v-8a8 8 0 0 1 16 0v8l2.5 3h-21zM21.5 37h5" />,
     settings: <>

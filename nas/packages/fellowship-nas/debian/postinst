@@ -10,11 +10,9 @@ if [ "$1" = "configure" ]; then
     getent passwd nas-share > /dev/null || useradd --system --uid 3000 --gid 3000 \
         --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin nas-share
 
-    # Picks up the NFSv4-only setting
-    systemctl try-restart nfs-server.service
-
     # Moves share settings an older fnas kept on ZFS properties into each
-    # pool, and exports shares through /etc/exports.d
+    # pool, exports shares through /etc/exports.d, and writes the NFS server's
+    # settings (NFSv4 only unless changed), restarting it if they changed
     fnas share refresh || true
 
     # Picks up the alert hook

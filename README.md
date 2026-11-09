@@ -166,9 +166,22 @@ Notes:
 
 FellowshipNAS has its own web server, `fellowship-nas-web`, which serves a desktop in the browser. After the wizard, open `https://NAS-ADDRESS` (the wizard prints it) and log in with your account on the NAS, the same one you use for SSH. The browser warns about the self-signed certificate until you accept it. **Settings → Certificate** shows its fingerprint to check, and takes your own certificate instead.
 
-Apps open in windows that you can move, resize, minimise and maximise. The desktop remembers where they were in each browser. **Setup** walks through storage, the LAN subnet, shares and SMB passwords, alerts and the nightly backup. **Storage**, **Shares**, **Health**, **Alerts** and **Settings** sit on the desktop, with status widgets and a notification centre for problems. On a phone, windows open full screen.
+Apps open in windows that you can move, resize, minimise and maximise. The desktop remembers where they were in each browser. On a phone, windows open full screen. Every app shows all of its features, including those that can't be used yet, with the reason.
 
-Only members of `nas-admins` see the management apps; the wizard adds its user. Add someone else with `sudo usermod -aG nas-admins NAME`. Everyone else sees Settings, where they can set their own SMB password. Sessions end after 30 minutes idle or 12 hours, and repeated wrong passwords slow down and raise an alert.
+- **Setup** opens by itself the first time an admin logs in. It walks through storage, the LAN subnet, people and shares, alerts and the nightly backup. Once finished or skipped it leaves the desktop; **Settings → Setup** runs it again, and `sudo fnas setup reset` makes it open at the next login.
+- **Storage:** pools and disks. Creating a pool starts with the kind of storage: ZFS, Unraid-style, traditional RAID or Btrfs. Only ZFS is built so far, and the others say so.
+- **Users:** people, their one password, what they can do, and groups.
+- **Shares:**
+  - Every way to share files (SMB, NFS, and those still to be built), with its state and how to connect.
+  - The shares themselves, each with who can use it and its SMB, NFS and snapshot settings.
+  - The SMB and NFS settings for the whole NAS.
+- **Snapshots and backup:** snapshot schedules, the nightly backup, and restoring a share from it.
+- **Health:** every check with its result, plus the services, the system, pools, disks and where alerts go.
+- **Alerts** and **Settings**.
+
+The desktop also has status widgets and a notification centre for problems.
+
+Only members of `nas-admins` see the management apps; the wizard adds its user. Add someone else with `sudo usermod -aG nas-admins NAME`. Everyone else sees Settings, where they can change their own password. Sessions end after 30 minutes idle or 12 hours, and repeated wrong passwords slow down and raise an alert.
 
 The server runs as two processes:
 
@@ -199,7 +212,7 @@ sudo fnas pool create tank raidz2 SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5 --widt
 
 Every pool mounts at `/mnt/NAME`, and importing a pool made elsewhere moves it there. Disks can be given by serial, device path or `/dev/disk/by-id` path. A disk with old data also needs `--wipe`. Add `--json` before the command for machine-readable lists.
 
-`pool layouts` lists every layout the chosen disks fit (single, mirror, RAIDZ1, RAIDZ2 or RAIDZ3, in one or more groups, with up to two hot spares), with the usable space and how many failed disks each group survives. The first is the recommended one: RAIDZ2 in groups of 6 to 10 disks for larger sets. `--width` is the number of disks in each group, and `--spares` how many of the disks stand by to replace a failed one at once. Disks of similar size are grouped together and the largest become the spares; disks of different sizes in one group work, but the extra space on the larger ones goes unused, and the Storage app says how much.
+`pool engines` lists every kind of storage and whether it can be used here. `pool layouts` lists every layout the chosen disks fit (single, mirrored pairs, RAIDZ1, RAIDZ2 or RAIDZ3, in one or more groups, with up to two hot spares), with the usable space and how many failed disks each group survives. The first is the recommended one: RAIDZ2 in groups of 6 to 10 disks for larger sets. `--width` is the number of disks in each group, and `--spares` how many of the disks stand by to replace a failed one at once. Disks of similar size are grouped together and the largest become the spares; disks of different sizes in one group work, but the extra space on the larger ones goes unused, and the Storage app says how much.
 
 Pools grow, and failed disks are replaced, without losing what's on them:
 
@@ -219,22 +232,76 @@ On a machine installed with the NAS installer, `disk list` also offers the empty
 
 The installer also leaves room beside the system on its LVM volume group. Give the system more of it from Settings → System space, or with `sudo fnas system grow 8G` (or `all`); it needs no restart, but can't be undone.
 
-## NAS Shares
+## NAS Users
 
-Each share is a dataset in `POOL/shares`, mounted at `/mnt/POOL/shares/NAME`, offered over NFS (version 4 only), SMB or both, and only to the LAN subnet chosen in the wizard. Its settings live in the pool's `fellowship-config/shares.json`, so they move with the pool, and `fnas` writes `/etc/exports.d/fellowship.exports` and the Samba files from them:
+Each person has one account and one password, for the desktop and every way to share. Manage them in the **Users** app or with `fnas`:
 
 ```bash
-sudo fnas share create media tank --mode shared --nfs --smb
-sudo fnas share create chris tank --mode matched --owner chris --nfs
+sudo fnas user create sam --full-name "Samwise" --kind shares --groups family --password-stdin
+sudo fnas user list
+sudo fnas user set sam --kind ssh --admin on
+sudo fnas user password sam --password-stdin
+sudo fnas user remove sam --keep-home --confirm "remove sam"
+sudo fnas group create family --members sam,kim
+sudo fnas group members family sam,kim,frodo
+```
+
+- `--kind shares` (the default) uses shares only and can't log in over SSH; `--kind ssh` can.
+- `--admin` adds the account to `nas-admins`, so it manages the NAS from the desktop.
+- `--password-stdin` reads the password: type it, then Ctrl-D. It sets the Linux and Samba passwords together, at least 8 characters.
+- `user set NAME --enabled off` turns an account off without removing it.
+- Nobody can turn off or remove the only administrator.
+- Everyone can change their own password in **Settings → Your account**.
+
+## NAS Shares
+
+Each share is a dataset in `POOL/shares`, mounted at `/mnt/POOL/shares/NAME`, offered over NFS, SMB or both, and only to the LAN subnet chosen in the wizard unless you choose other private networks. Its settings live in the pool's `fellowship-config/shares.json`, so they move with the pool, and `fnas` writes `/etc/exports.d/fellowship.exports` and the Samba files from them:
+
+```bash
+sudo fnas share create media tank --everyone --nfs --smb
+sudo fnas share create docs tank --user sam=read --group family=write --smb
+sudo fnas share access docs --user sam=write
 sudo fnas share list
 sudo fnas share set media --smb off
 sudo fnas lan set 192.168.1.0/24
 ```
 
-- `shared`: everyone reads and writes as the `nas-share` account, so each protocol can edit the other's files. Use it for media and family folders.
-- `matched`: only the owner gets in, and NFS clients need the same numeric user ID as the NAS. Use it for personal folders.
+Who can use a share:
 
-Anyone connecting over SMB needs a Samba password, set on the Shares page or with `sudo fnas user smb-password USER --password-stdin` (type the password, then Ctrl-D). `share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
+- `--everyone`: every person, and every allowed NFS computer, reads and writes as the `nas-share` account, so each protocol can edit the other's files. Use it for media and family folders.
+- `--user NAME=read|write` and `--group NAME=read|write`: only those listed. Kept as ACLs on the folder, so new files inherit them. NFS computers need the same numeric user IDs as the NAS for this to work. `share access` rewrites the permissions of every file in the share.
+
+SMB settings for one share, and for the whole NAS:
+
+```bash
+sudo fnas share smb media --guest on --recycle on --recycle-days 14 --hidden off
+sudo fnas share smb backups --timemachine on --timemachine-size 500
+sudo fnas sharing smb --workgroup HOBBITON --min-protocol SMB3 --encryption required
+```
+
+- **Guests** read without a password, and only on shares for everyone.
+- **The recycle bin** keeps files deleted over SMB in `.recycle` for the chosen number of days.
+- **Time Machine** sizes are in GB, and 0 means no limit.
+- **SMB 1** is never offered.
+
+NFS settings for one share, and for the whole NAS:
+
+```bash
+sudo fnas share nfs media --client 192.168.1.0/24=ro --client 192.168.1.20=rw --mapping auto --async off
+sudo fnas share nfs media --home-network
+sudo fnas sharing nfs --v3 on --fixed-ports on --threads 16
+```
+
+- **Clients** are private networks or addresses, never `*`.
+- **`--mapping`:**
+  - `auto` follows who can use the share.
+  - `all` squashes everyone to the share account.
+  - `root` squashes root only.
+  - `none` trusts root on the client.
+- **NFS version 3** is off unless turned on.
+- **Fixed ports** put mountd on 20048, statd on 32765 and 32766, and lockd on 32768.
+
+`share set` keeps the data. `share delete` destroys it, and lists the snapshots that go with it before asking for a typed confirmation.
 
 ## NAS Protection
 
@@ -276,7 +343,7 @@ sudo fnas pool import tank --force
 sudo fnas config restore tank
 ```
 
-`--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the ones to set again, and SMB users need their password set again on the Shares page or with `fnas user smb-password`. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
+`--force` is needed when the old system never exported the pool, which is the usual case after a dead OS disk; make sure that system is switched off first. `fnas` still refuses a pool that another running system has imported. One restore takes over every pool the old install saved to. Passwords are never saved, so `config restore` lists the accounts that need one again; set it in Users or with `fnas user password`. Groups, memberships, administrators and the SMB and NFS settings come back with the accounts. Until you restore, this install won't overwrite what the pool holds, and an alert reminds you. To replace the saved settings instead, use `fnas config adopt`.
 
 To test: `python3 -m unittest nas/tests/unit/test_fnas.py` runs without touching any disks, and `nas/tests/vm/vm.sh` installs into a VM with data disks: four by default, or any number and sizes with `FELLOWSHIP_DATA_DISKS="8G 8G 16G"`.
 

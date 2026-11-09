@@ -10,6 +10,10 @@ from .engines import zfs
 POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 ENGINES = {"zfs": zfs}
+# Every engine in the plan, built or not, so the desktop can show them all:
+# name, title, and the plan phase that builds it
+CATALOGUE = [("zfs", "ZFS", None), ("mergerfs", "Unraid-style", 11), ("mdadm", "Traditional RAID", 10),
+             ("btrfs", "Btrfs", 14)]
 # Every pool is mounted at /mnt/NAME, on every engine, so no pool name can
 # collide with a folder the system uses
 ROOT = "/mnt"
@@ -24,11 +28,11 @@ def check_pool_name(name):
 
 
 def engines():
-    """Each engine, and why it can't be used here if it can't."""
+    """Every engine, and why it can't be used here if it can't."""
     shown = []
-    for name, engine in ENGINES.items():
-        reason = engine.unavailable()
-        shown.append({"name": name, "available": not reason, "reason": reason})
+    for name, title, phase in CATALOGUE:
+        reason = ENGINES[name].unavailable() if name in ENGINES else f"Not built yet (Phase {phase})"
+        shown.append({"name": name, "title": title, "available": not reason, "reason": reason})
     return shown
 
 
@@ -81,11 +85,11 @@ def check_new_name(name):
 
 
 def engine_named(name):
-    if name not in ENGINES:
+    found = next((engine for engine in engines() if engine["name"] == name), None)
+    if not found:
         raise FnasError(f"no such engine: {name}")
-    reason = ENGINES[name].unavailable()
-    if reason:
-        raise FnasError(f"{name} can't be used here: {reason}")
+    if not found["available"]:
+        raise FnasError(f"{found['title']} can't be used here: {found['reason']}")
     return ENGINES[name]
 
 
