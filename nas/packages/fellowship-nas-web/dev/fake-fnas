@@ -11,6 +11,11 @@ GB = 10 ** 9
 NOW = int(time.time())
 
 
+def over_time(now, count, step, value):
+    """Sample points ending now, for the history the Health charts draw."""
+    return [[now - (count - 1 - i) * step, *value(i)] for i in range(count)]
+
+
 def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=(), bay=None):
     return {"path": f"/dev/sd{n}", "by_id": f"/dev/disk/by-id/ata-{model.replace(' ', '_')}_SN{n.upper()}0042",
             "size": size, "model": model, "serial": f"SN{n.upper()}0042", "state": state, "reason": reason,
@@ -274,6 +279,14 @@ def main(args):
         def check(key, section, title, state_, detail, problems=(), alerting=True):
             return {"key": key, "section": section, "title": title, "state": state_, "detail": detail,
                     "problems": list(problems), "alerting": alerting}
+        def system_point(i):
+            return [int((9 + (i % 24) / 24 * 2) * GB), 16 * GB, round(0.12 + 0.3 * ((i % 5) / 5), 2),
+                    6 * GB, 34 * GB, round(40 + (i % 12) * 0.4, 1)]
+        def pool_history(pool):
+            def used(i):
+                # The pool has been filling steadily
+                return [max(int(pool["allocated"] - (167 - i) * 40 * 1024 * 1024), 0), pool["size"]]
+            return {"hourly": over_time(NOW, 168, 3600, used), "daily": over_time(NOW, 90, 86400, used)}
         out = {"time": int(time.time()), "hourly": {"last": NOW - 1200, "every": 3600},
                "checks": [check("pool-state", "Pools", "Every pool has all its disks", "passed", "1 pool, every disk present"),
                           check("pool-space", "Pools", "Pools have free space", "passed", "Every pool under 80% full"),
@@ -288,13 +301,20 @@ def main(args):
                           check("disks", "Disks", "Disks report good health", "medium", watch["title"], [watch], False)],
                "problems": [watch],
                "services": [{"unit": "fellowship-nas-web.service", "title": "Web server", "does": "Serves this desktop",
+                             "state": "running", "detail": "Running"},
+                            {"unit": "ssh.service", "title": "SSH", "does": "Logins over SSH",
                              "state": "running", "detail": "Running"}],
                "protocols": protocols(state),
                "system": {"disk": {"size": 34 * GB, "used": 6 * GB}, "memory": {"total": 16 * GB, "available": 12 * GB},
-                          "load": [0.12, 0.2, 0.18], "cpus": 4, "uptime": 86400 * 12, "temperature": 41.0,
+                          "load": [0.12, 0.2, 0.18], "cpu": 24, "cpus": 4, "uptime": 86400 * 12, "temperature": 41.0,
                           "updates": 3, "reboot": False, "kernel": "6.12.57", "newest_kernel": "6.12.57"},
+               "history": {"system": {"hourly": over_time(NOW, 168, 3600, system_point),
+                                      "daily": over_time(NOW, 90, 86400, system_point)}},
                "pools": [{**p, "shares": len(state["shares"]), "last_scrub": NOW - 86400 * 9,
-                          "last_snapshot": NOW - 1800, "backup": None} for p in state["pools"]],
+                          "last_snapshot": NOW - 1800, "backup": None,
+                          "history": pool_history(p),
+                          "projection": {"days": 180, "per_day": 40 * 1024 * 1024}}
+                         for p in state["pools"]],
                "disks": state["disks"],
                "alerts": {"channels": state["channels"], "last": state["alerts"][-1]}}
     elif area == "alert" and action == "list":

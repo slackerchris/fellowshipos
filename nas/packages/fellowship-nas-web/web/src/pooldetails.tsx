@@ -1,28 +1,11 @@
 // One pool in detail: what uses its space, how full it has been over time, and when it fills
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { PoolDetails, UsagePoint, fnasJson, humanSize, plural, when } from "./api";
 import { Button, Card, Loading, Notice, useLoad } from "./ui";
+import { chartDay as day, useWidth } from "./charts";
 
 const H = 240;
 const PAD = { left: 64, right: 12, top: 16, bottom: 26 };
-
-function day(stamp: number, hours: boolean) {
-    const date = new Date(stamp * 1000);
-    return hours ? date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-        : date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-/** The width an element is drawn at, so the chart's text stays its real size. */
-function useWidth() {
-    const ref = useRef<HTMLDivElement>(null);
-    const [width, setWidth] = useState(640);
-    useEffect(() => {
-        const observer = new ResizeObserver(([entry]) => setWidth(Math.max(320, Math.round(entry.contentRect.width))));
-        if (ref.current) observer.observe(ref.current);
-        return () => observer.disconnect();
-    }, []);
-    return [ref, width] as const;
-}
 
 /** Used space over time as one line, with the pool's size as a dashed reference and a hover readout. */
 function UsageChart({ points, hours }: { points: UsagePoint[]; hours: boolean }) {

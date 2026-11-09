@@ -1,7 +1,10 @@
-import { useState } from "preact/hooks";
-import { Check, Health as HealthData, diskName, fnasJson, humanSize, plural, when } from "./api";
+import { ComponentChildren } from "preact";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { Check, Health as HealthData, PoolDetail, Problem, Projection, diskName, fnasJson, humanSize, plural, when } from "./api";
 import { STATE_BADGE } from "./sharing";
-import { Badge, Button, Card, Loading, Notice, Page, Usage, useLoad } from "./ui";
+import { Badge, Button, Card, Loading, Page, Usage, useLoad } from "./ui";
+import { ArcGauge, Dial, DotChart, Gauge, Kind, MetricIcon, NotEnoughHistory, RangePicker, TrendChart } from "./charts";
+import { useDiskFocus } from "./desktop/focus";
 
 const VERDICT = {
     healthy: { kind: "good", text: "Healthy" },
@@ -14,6 +17,29 @@ export const SEVERITY = {
     info: "neutral", low: "neutral", medium: "warning", high: "warning", critical: "bad", warning: "warning",
 } as const;
 
+/** How a level reads when written out beside its colour. */
+export const SEVERITY_WORD: Record<string, string> = {
+    info: "Information", low: "Low warning", medium: "Medium warning", high: "High warning",
+    critical: "Critical", warning: "Medium warning",
+};
+
+/** The five-level scale the medallion and the banner share: green, yellow,
+    orange, red, purple, worst last. */
+export type Severity = "good" | "low" | "medium" | "high" | "critical";
+
+export function severityOf(problem?: Problem): Severity {
+    if (!problem || problem.severity === "info") {
+        return "good";
+    }
+    if (problem.severity === "low") {
+        return "low";
+    }
+    if (problem.severity === "medium" || problem.severity === "warning") {
+        return "medium";
+    }
+    return problem.severity === "high" ? "high" : "critical";
+}
+
 const CHECK_BADGE = {
     passed: { kind: "good", text: "Passed" },
     low: { kind: "neutral", text: "Low" },
@@ -23,6 +49,12 @@ const CHECK_BADGE = {
     na: { kind: "neutral", text: "Doesn't apply yet" },
 } as const;
 
+/** How a service's state reads on one line. */
+const STATE_TEXT: Record<string, string> = {
+    running: "Running", stopped: "Stopped", failed: "Failed", missing: "Not installed",
+    off: "Turned off", "not-built": "Not built yet", later: "Planned",
+};
+
 function duration(seconds: number) {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor(seconds % 86400 / 3600);
@@ -30,7 +62,23 @@ function duration(seconds: number) {
         : hours ? plural(hours, "hour") : plural(Math.floor(seconds / 60), "minute");
 }
 
-const RANK = { info: 0, low: 1, medium: 2, high: 3, warning: 2, critical: 4 } as const;
+/** A share of a whole, as a number a gauge can show. */
+function percent(used: number, total: number) {
+    return total ? Math.round((used * 100) / total) : 0;
+}
+
+/** Fine, worth watching, or past the point of ignoring. */
+export function level(value: number, warning = 80, bad = 90): Kind {
+    return value >= bad ? "bad" : value >= warning ? "warning" : "good";
+}
+
+/** When a pool fills, in words, or why nothing can be said yet. */
+function projectionText(projection: Projection) {
+    if (projection.days === undefined) {
+        return projection.reason || "No estimate yet";
+    }
+    return projection.days > 3650 ? "Full in over 10 years" : `Full in ${plural(projection.days, "day")}`;
+}
 
 const SECTION_VIEWS: Record<string, View> = {
     Pools: "pools", Protection: "checks", System: "system", Services: "services", Disks: "disks",
@@ -42,25 +90,44 @@ function viewOf(health: HealthData, key: string): View {
     return (check && SECTION_VIEWS[check.section]) || "checks";
 }
 
-function Problems({ health, open }: { health: HealthData; open: (view: View) => void }) {
+/** The one line at the top: either the problem that needs you, or the all-clear. */
+function Banner({ health, open }: { health: HealthData; open: (view: View) => void }) {
+    const [worst] = health.problems;
+    const passed = health.checks.filter(item => item.state === "passed").length;
     const waiting = health.checks.filter(item => item.state === "na").length;
-    if (!health.problems.length) {
-        return waiting
-            ? <Notice>Nothing needs attention. {plural(waiting, "check")} {waiting === 1 ? "doesn't" : "don't"} apply
-                yet; Checks says why.</Notice>
-            : <Notice kind="done">Every check passed.</Notice>;
-    }
+    const severity = severityOf(worst);
+    const checked = new Date(health.time * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const body = (
+        <>
+            <span class="banner-icon"><MetricIcon name={worst ? "bell" : "check"} size={26} /></span>
+            <span class="banner-text">
+                <strong>{worst ? worst.title : "Nothing needs attention"}</strong>
+                <span class="small">{worst ? worst.message
+                    : `${passed} of ${health.checks.length} checks passed · ${waiting} not applicable`}</span>
+            </span>
+            <span class="banner-when small">{worst
+                ? `${plural(health.problems.length, "problem")} to look at` : `Last checked ${checked}`}</span>
+        </>
+    );
+    return worst
+        ? <button type="button" class={`banner sev-${severity}`}
+                  onClick={() => open(viewOf(health, worst.key))}>{body}</button>
+        : <div class={`banner sev-${severity}`}>{body}</div>;
+}
+
+/** One card in a group: an icon and a name, the reading, and a way in. */
+function Metric({ icon, title, onOpen, children }: {
+    icon: "cpu" | "memory" | "load" | "pools" | "disk" | "services";
+    title: string;
+    onOpen: () => void;
+    children: ComponentChildren;
+}) {
     return (
-        <Card title="Needs attention">
-            <p class="muted small">Critical means something is broken. High, medium and low are warnings, by how soon
-                they need you.</p>
-            {health.problems.map(problem => (
-                <button type="button" class="problem" key={problem.key} onClick={() => open(viewOf(health, problem.key))}>
-                    <Badge kind={SEVERITY[problem.severity]}>{problem.severity}</Badge> <strong>{problem.title}</strong>
-                    <p class="small muted">{problem.message}</p>
-                </button>
-            ))}
-        </Card>
+        <section class="metric">
+            <header class="metric-head"><MetricIcon name={icon} /><h3>{title}</h3></header>
+            <div class="metric-body">{children}</div>
+            <button type="button" class="metric-more" onClick={onOpen}>View details →</button>
+        </section>
     );
 }
 
@@ -94,7 +161,18 @@ function Checks({ health }: { health: HealthData }) {
 }
 
 function Services({ health }: { health: HealthData }) {
-    return (
+    const down = (state: string) => health.services.filter(service => service.state === state).length;
+    const broken = down("failed") + health.services.filter(service => service.state === "stopped"
+        && service.unit !== "smartmontools.service").length;
+    const running = down("running");
+    return <>
+        <div class="gauges">
+            <Dial parts={[{ value: running, kind: "good" }, { value: broken, kind: "bad" },
+                          { value: down("off"), kind: "neutral" },
+                          { value: health.services.length - running - broken - down("off"), kind: "warning" }]}
+                  centre={`${running}/${health.services.length}`} label="Running"
+                  note={broken ? `${broken} not running` : "Everything the NAS needs"} />
+        </div>
         <Card title="Services">
             <div class="table-wrap">
                 <table>
@@ -118,14 +196,61 @@ function Services({ health }: { health: HealthData }) {
                 </table>
             </div>
         </Card>
-    );
+    </>;
 }
 
 function System({ health }: { health: HealthData }) {
     const system = health.system;
+    const [range, setRange] = useState<"hourly" | "daily">("hourly");
     const memoryUsed = system.memory.total - system.memory.available;
-    return (
-        <Card title="System">
+    const cores = system.cpus || 1;
+    const points = health.history.system[range];
+    // A chart of one number from each sample. Sensors that report nothing are left out.
+    const pick = (index: number) => points
+        .filter(point => point[index] !== null)
+        .map(point => [point[0], point[index] as number] as [number, number]);
+    const temperature = system.temperature;
+    return <>
+        <div class="gauges">
+            <Gauge percent={percent(system.disk.used, system.disk.size)} centre={`${percent(system.disk.used, system.disk.size)}%`}
+                   label="System disk" note={`${humanSize(system.disk.used)} of ${humanSize(system.disk.size)}`}
+                   kind={level(percent(system.disk.used, system.disk.size), 85, 95)} />
+            <Gauge percent={percent(memoryUsed, system.memory.total)} centre={`${percent(memoryUsed, system.memory.total)}%`}
+                   label="Memory" note={`${humanSize(memoryUsed)} of ${humanSize(system.memory.total)}`}
+                   kind={level(percent(memoryUsed, system.memory.total))} />
+            <Gauge percent={Math.min(100, Math.round(system.load[0] / cores * 100))} centre={system.load[0].toFixed(2)}
+                   label="Load" note={`${plural(cores, "processor")}, over 1 minute`}
+                   kind={level(Math.round(system.load[0] / cores * 100), 70, 100)} />
+            <Gauge percent={temperature === null ? 0 : Math.min(100, (temperature / 80) * 100)}
+                   centre={temperature === null ? "–" : `${Math.round(temperature)}°`} label="Temperature"
+                   note={temperature === null ? "No sensor reports it" : "Hottest sensor"}
+                   kind={temperature === null ? "neutral" : level(temperature, 65, 80)} />
+        </div>
+        <Card title="Over time" actions={<RangePicker range={range} setRange={setRange} />}>
+            {points.length < 2
+                ? <NotEnoughHistory what="memory, load, temperature and the system disk" unit="once an hour" />
+                : <div class="charts">
+                    <div class="chart-block">
+                        <h3>Memory in use</h3>
+                        <TrendChart points={pick(1)} hours={range === "hourly"} format={humanSize} label="Memory in use"
+                                    max={system.memory.total} guide={system.memory.total} />
+                    </div>
+                    <div class="chart-block">
+                        <h3>Load, over 1 minute</h3>
+                        <TrendChart points={pick(3)} hours={range === "hourly"} format={value => value.toFixed(2)} label="Load"
+                                    max={cores} guide={cores} kind="warning" />
+                        <p class="small muted">The dashed line is every processor busy.</p>
+                    </div>
+                    <div class="chart-block">
+                        <h3>Temperature</h3>
+                        {pick(6).length < 2
+                            ? <p class="muted small">No sensor reports a temperature here, as in most virtual machines.</p>
+                            : <TrendChart points={pick(6)} hours={range === "hourly"} format={value => `${Math.round(value)} °C`}
+                                          label="Temperature" max={100} guide={80} kind="bad" />}
+                    </div>
+                </div>}
+        </Card>
+        <Card title="Right now">
             <div class="table-wrap">
                 <table>
                     <tbody>
@@ -152,46 +277,84 @@ function System({ health }: { health: HealthData }) {
                 </table>
             </div>
         </Card>
-    );
+    </>;
 }
 
-function Pools({ health }: { health: HealthData }) {
+/** One pool: how full it is, how that has changed, and what protects it. */
+function PoolCard({ pool, range }: { pool: PoolDetail; range: "hourly" | "daily" }) {
+    const points = pool.history[range];
+    const fill = percent(pool.allocated, pool.size);
+    const protection = `Last scrub: ${pool.last_scrub ? when(pool.last_scrub) : "never"} · `
+        + `Last snapshot: ${pool.last_snapshot ? when(pool.last_snapshot) : "none yet"} · `
+        + "Backup: " + (!pool.backup ? "none"
+            : pool.backup.error ? `failed (${pool.backup.error})`
+            : `to ${pool.backup.target}, last ${pool.backup.last ? when(pool.backup.last) : "not run yet"}`);
     return (
-        <Card title="Pools">
-            {!health.pools.length && <p class="muted">No pool yet. Create or import one in Storage.</p>}
-            {health.pools.map(pool => (
-                <div key={pool.name} class="stack">
-                    <div class="row">
-                        <strong>{pool.name}</strong>
-                        <Badge kind={pool.health === "ONLINE" ? "good" : pool.health === "DEGRADED" ? "warning" : "bad"}>
-                            {pool.health === "ONLINE" ? "healthy" : pool.health.toLowerCase()}</Badge>
-                        <span class="small muted">{pool.engine.toUpperCase()}, {plural(pool.shares, "share")}
-                            {pool.readonly ? ", read-only" : ""}</span>
-                    </div>
-                    <Usage used={pool.allocated} total={pool.size} />
-                    <span class="small">{humanSize(pool.free)} free of {humanSize(pool.size)}</span>
-                    <span class="small">Last scrub: {pool.last_scrub ? when(pool.last_scrub) : "never"} ·
-                        Last snapshot: {pool.last_snapshot ? when(pool.last_snapshot) : "none yet"} ·
-                        Backup: {!pool.backup ? "none"
-                            : pool.backup.error ? `failed (${pool.backup.error})`
-                            : `to ${pool.backup.target}, last ${pool.backup.last ? when(pool.backup.last) : "not run yet"}`}</span>
-                </div>
-            ))}
+        <Card title={pool.name} actions={
+            <Badge kind={pool.health === "ONLINE" ? "good" : pool.health === "DEGRADED" ? "warning" : "bad"}>
+                {pool.health === "ONLINE" ? "healthy" : pool.health.toLowerCase()}</Badge>}>
+            <div class="stats">
+                <div class="stat"><span class="small muted">Full</span><strong>{fill}%</strong>
+                    <span class="small muted">{pool.engine.toUpperCase()}, {plural(pool.shares, "share")}
+                        {pool.readonly ? ", read-only" : ""}</span></div>
+                <div class="stat"><span class="small muted">Free</span><strong>{humanSize(pool.free)}</strong>
+                    <span class="small muted">of {humanSize(pool.size)}</span></div>
+                <div class="stat"><span class="small muted">{pool.projection.days === undefined ? "Fills up" : "Fills up in"}</span>
+                    <strong>{pool.projection.days === undefined ? "–"
+                        : pool.projection.days > 3650 ? "10+ years" : plural(pool.projection.days, "day")}</strong>
+                    <span class="small muted">{pool.projection.days === undefined ? pool.projection.reason
+                        : `at ${humanSize(pool.projection.per_day!)} a day`}</span></div>
+            </div>
+            {points.length < 2
+                ? <NotEnoughHistory what={`how full ${pool.name} is`} unit={range === "hourly" ? "once an hour" : "once a day"} />
+                : <TrendChart points={points.map(point => [point[0], point[1]] as [number, number])}
+                              hours={range === "hourly"} format={humanSize} label={`Space used in ${pool.name}`}
+                              max={pool.size} guide={pool.size} />}
+            <p class="small muted">{protection}</p>
         </Card>
     );
 }
 
+function Pools({ health }: { health: HealthData }) {
+    const [range, setRange] = useState<"hourly" | "daily">("hourly");
+    if (!health.pools.length) {
+        return <Card title="Pools"><p class="muted">No pool yet. Create or import one in Storage.</p></Card>;
+    }
+    return <>
+        <div class="row">
+            <p class="muted small">How full each pool has been, recorded by the hourly check.</p>
+            <RangePicker range={range} setRange={setRange} />
+        </div>
+        {health.pools.map(pool => <PoolCard key={pool.name} pool={pool} range={range} />)}
+    </>;
+}
+
 function Disks({ health }: { health: HealthData }) {
-    return (
+    const count = (verdict: string) => health.disks.filter(disk => disk.verdict === verdict).length;
+    const unknown = count("unknown");
+    // A widget can ask for one drive, so its row is marked and brought into view
+    const focused = useDiskFocus();
+    const focusedRow = useRef<HTMLTableRowElement>(null);
+    useEffect(() => { focusedRow.current?.scrollIntoView({ block: "nearest" }); }, [focused]);
+    return <>
+        <div class="gauges">
+            <Dial parts={[{ value: count("healthy"), kind: "good" }, { value: count("watch"), kind: "warning" },
+                          { value: count("failing"), kind: "bad" }, { value: unknown, kind: "neutral" }]}
+                  centre={`${count("healthy")}/${health.disks.length}`} label="Healthy"
+                  note={unknown === health.disks.length ? "No disk reports health"
+                      : unknown ? `${unknown} without health data` : "Every disk reports"} />
+        </div>
         <Card title="Disks">
             <div class="table-wrap">
                 <table>
                     <thead><tr><th>Disk</th><th>Health</th><th>Temperature</th><th>Powered on</th></tr></thead>
                     <tbody>
                         {health.disks.map(disk => (
-                            <tr key={disk.path}>
+                            <tr key={disk.path} class={disk.path === focused ? "row-focus" : undefined}
+                                ref={disk.path === focused ? focusedRow : undefined}>
                                 <td>
                                     {humanSize(disk.size)} {disk.model || "Disk"}{disk.state === "os" ? " (system)" : ""}
+                                    {disk.bay && <span class="muted small"> · {disk.bay}</span>}
                                     <br /><span class="mono small muted">{diskName(disk)}</span>
                                 </td>
                                 <td>
@@ -206,7 +369,7 @@ function Disks({ health }: { health: HealthData }) {
                 </table>
             </div>
         </Card>
-    );
+    </>;
 }
 
 function Alerting({ health }: { health: HealthData }) {
@@ -225,61 +388,105 @@ function Alerting({ health }: { health: HealthData }) {
 
 type View = "checks" | "services" | "system" | "pools" | "disks" | "alerts";
 
-type Kind = "good" | "warning" | "bad" | "neutral";
-
-interface Tile {
-    view: View;
-    title: string;
-    badge: [Kind, string];
-    lines: string[];
-}
-
-/** One short summary per area, each opening its details. */
-function tiles(health: HealthData): Tile[] {
-    const checks = health.checks;
-    const passed = checks.filter(check => check.state === "passed").length;
-    const waiting = checks.filter(check => check.state === "na").length;
-    const worstCheck = checks.reduce((found, check) => check.state in RANK
-        && RANK[check.state as keyof typeof RANK] > RANK[found as keyof typeof RANK] ? check.state : found, "info");
-    const down = [...health.protocols.filter(p => (p.state === "stopped" || p.state === "failed") && p.shares.length),
-                  ...health.services.filter(s => s.state === "failed"
-                      || (s.state === "stopped" && s.unit !== "smartmontools.service"))];
-    const running = health.services.filter(s => s.state === "running").length
-        + health.protocols.filter(p => p.state === "running").length;
+/** The whole NAS at a glance: the verdict, then the system, then storage and
+    the services that serve it. Each card opens its own details. */
+function Overview({ health, open }: { health: HealthData; open: (view: View) => void }) {
     const system = health.system;
-    const diskUse = Math.round(system.disk.used * 100 / system.disk.size);
-    const sick = health.pools.filter(pool => pool.health !== "ONLINE");
-    const disks = health.disks;
-    const failing = disks.filter(disk => disk.verdict === "failing").length;
-    const watch = disks.filter(disk => disk.verdict === "watch").length;
-    const unknown = disks.filter(disk => disk.verdict === "unknown").length;
-    const { channels, last } = health.alerts;
-    const ways = ["this desktop", channels.email && "email", channels.ntfy && "ntfy"].filter(Boolean);
-    return [
-        { view: "checks", title: "Checks",
-          badge: worstCheck === "critical" ? ["bad", "critical"] : worstCheck !== "info" ? ["warning", worstCheck]
-              : waiting ? ["neutral", "nothing wrong"] : ["good", "all passed"],
-          lines: [`${passed} of ${checks.length} passed`, waiting ? `${waiting} don't apply yet` : ""] },
-        { view: "services", title: "Services",
-          badge: down.length ? ["bad", `${down.length} not running`] : ["good", "running"],
-          lines: [down.length ? down.map(item => item.title).join(", ") : `${running} running`] },
-        { view: "system", title: "System",
-          badge: diskUse >= 85 || system.reboot ? ["warning", system.reboot ? "restart needed" : "disk filling"]
-              : ["good", "fine"],
-          lines: [`System disk ${diskUse}% full`,
-                  system.updates ? `${plural(system.updates, "update")} waiting` : "Up to date"] },
-        { view: "pools", title: "Pools",
-          badge: !health.pools.length ? ["neutral", "none yet"] : sick.length ? ["bad", `${sick.length} not healthy`]
-              : ["good", "healthy"],
-          lines: [health.pools.length ? health.pools.map(pool => pool.name).join(", ") : "Create one in Storage"] },
-        { view: "disks", title: "Disks",
-          badge: failing ? ["bad", `${failing} failing`] : watch ? ["warning", `${watch} to watch`]
-              : unknown === disks.length ? ["neutral", "no health data"] : ["good", "healthy"],
-          lines: [plural(disks.length, "disk"), unknown && unknown < disks.length ? `${unknown} without health data` : ""] },
-        { view: "alerts", title: "Alerts",
-          badge: last?.undelivered.length ? ["warning", "not delivered"] : ["good", "set up"],
-          lines: [`Sent to ${ways.join(" and ")}`, last ? `Last: ${when(last.time)}` : "None sent yet"] },
-    ];
+    const memoryUsed = system.memory.total - system.memory.available;
+    const memoryPercent = percent(memoryUsed, system.memory.total);
+    const cores = system.cpus || 1;
+    const load = system.load[0];
+    // The hourly check records load once an hour, so the chart shows a day of it
+    const loadPoints = health.history.system.hourly.slice(-24)
+        .map(point => [point[0], point[3]] as [number, number]);
+    const faulty = health.disks.filter(disk => disk.verdict === "failing").length;
+    const watching = health.disks.filter(disk => disk.verdict === "watch").length;
+    const unknown = health.disks.filter(disk => disk.verdict === "unknown").length;
+    const sharing = health.protocols
+        .filter(protocol => ["running", "stopped", "failed", "missing"].includes(protocol.state))
+        .map(protocol => ({ name: protocol.title, state: protocol.state }));
+    const ssh = health.services.find(service => service.unit === "ssh.service");
+    const services = ssh ? [...sharing, { name: "SSH", state: ssh.state }] : sharing;
+    const backup = health.pools.find(pool => pool.backup)?.backup ?? null;
+    const backupText = !backup ? "No backup job"
+        : backup.error ? "Last attempt failed"
+            : backup.last ? "Last run succeeded" : "Not run yet";
+    return (
+        <>
+            <Banner health={health} open={open} />
+            <h2 class="group-title">System</h2>
+            <div class="metrics">
+                <Metric icon="cpu" title="CPU usage" onOpen={() => open("system")}>
+                    <ArcGauge percent={system.cpu} centre={`${system.cpu}%`} kind={level(system.cpu, 80, 95)} />
+                </Metric>
+                <Metric icon="memory" title="Memory" onOpen={() => open("system")}>
+                    <Gauge percent={memoryPercent} centre={`${memoryPercent}%`} size={128} stroke={14}
+                           note={`${humanSize(memoryUsed)} of ${humanSize(system.memory.total)} used`}
+                           kind={level(memoryPercent, 85, 95)} />
+                </Metric>
+                <Metric icon="load" title="CPU load" onOpen={() => open("system")}>
+                    <div class="load-body">
+                        {loadPoints.length > 1
+                            ? <DotChart points={loadPoints} hours format={value => value.toFixed(1)} label="CPU load"
+                                        max={cores} guide={cores} guideLabel={plural(cores, "logical CPU")} />
+                            : <NotEnoughHistory what="the load" unit="once an hour" />}
+                        <div class="load-now"><strong>{load.toFixed(2)}</strong>
+                            <span class="small muted">Last 24 hours</span></div>
+                    </div>
+                </Metric>
+            </div>
+            <h2 class="group-title">Storage &amp; services</h2>
+            <div class="metrics">
+                <Metric icon="pools" title="Pools" onOpen={() => open("pools")}>
+                    {!health.pools.length && <p class="small muted">No pool yet. Create one in Storage.</p>}
+                    {health.pools.map(pool => {
+                        const fill = percent(pool.allocated, pool.size);
+                        return (
+                            <div class="pool-line" key={pool.name}>
+                                <span class="pool-name">{pool.name}</span>
+                                <span class="bar"><span class={`fill ${level(fill)}`}
+                                                        style={{ width: `${fill}%` }} /></span>
+                                <span class="small muted">{humanSize(pool.allocated)} / {humanSize(pool.size)}</span>
+                                <span class={`chip ${pool.health === "ONLINE" ? "good" : "bad"}`}>
+                                    {pool.health === "ONLINE" && <MetricIcon name="check" size={14} />}
+                                    {pool.health === "ONLINE" ? "Healthy" : pool.health.toLowerCase()}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </Metric>
+                <Metric icon="disk" title="Disks" onOpen={() => open("disks")}>
+                    <p class="small muted">{plural(health.disks.length, "drive")}</p>
+                    <div class="drives">
+                        {health.disks.slice(0, 6).map(disk => <MetricIcon key={disk.path} name="disk" size={30} />)}
+                        {health.disks.length > 6 && <span class="small muted">+{health.disks.length - 6}</span>}
+                    </div>
+                    <p class="small muted">{faulty ? `${plural(faulty, "drive")} failing`
+                        : unknown === health.disks.length ? "No SMART data"
+                            : watching ? `${watching} to watch` : "All healthy"}</p>
+                </Metric>
+                <Metric icon="services" title="Services" onOpen={() => open("services")}>
+                    {services.map(service => (
+                        <div class="service-line" key={service.name}>
+                            <span class={`state-dot ${service.state}`} />
+                            <span>{service.name}</span>
+                            <span class="state small">{STATE_TEXT[service.state] ?? service.state}</span>
+                        </div>
+                    ))}
+                </Metric>
+            </div>
+            <div class="status-strip">
+                <button type="button" onClick={() => open("pools")}>
+                    <MetricIcon name="backup" /><strong>Backup</strong><span>{backupText}</span>
+                </button>
+                <button type="button" onClick={() => open("alerts")}>
+                    <MetricIcon name="bell" /><strong>Alerts</strong>
+                    <span>{health.problems.length
+                        ? `${plural(health.problems.length, "alert")} needing attention` : "No active alerts"}</span>
+                </button>
+            </div>
+        </>
+    );
 }
 
 const DETAILS: Record<View, (props: { health: HealthData }) => preact.JSX.Element> = {
@@ -289,6 +496,9 @@ const DETAILS: Record<View, (props: { health: HealthData }) => preact.JSX.Elemen
 export function Health() {
     const health = useLoad(() => fnasJson<HealthData>(["health"]));
     const [view, setView] = useState<View | null>(null);
+    const focused = useDiskFocus();
+    // A widget naming a drive opens straight at the disks
+    useEffect(() => { if (focused) setView("disks"); }, [focused]);
     return (
         <Page>
             <Loading loaded={health}>{() => {
@@ -303,22 +513,11 @@ export function Health() {
                         <Details health={data} />
                     </>;
                 }
-                const all = tiles(data);
                 return <>
-                    <div class="row">
-                        <p class="muted small">Checked {when(data.time)}. Click an area for its details.</p>
+                    <div class="row row-end">
                         <Button onClick={health.reload}>Check again</Button>
                     </div>
-                    <Problems health={data} open={setView} />
-                    <div class="tiles">
-                        {all.map(tile => (
-                            <button type="button" key={tile.view} class="tile" onClick={() => setView(tile.view)}>
-                                <span class="row"><strong>{tile.title}</strong>
-                                    <Badge kind={tile.badge[0]}>{tile.badge[1]}</Badge></span>
-                                {tile.lines.filter(Boolean).map(line => <span key={line} class="small muted">{line}</span>)}
-                            </button>
-                        ))}
-                    </div>
+                    <Overview health={data} open={setView} />
                 </>;
             }}</Loading>
         </Page>

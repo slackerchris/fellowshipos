@@ -22,6 +22,8 @@ SYSTEM_WARNING = 85
 SYSTEM_HIGH = 95
 REBOOT_FLAG = "/run/reboot-required"
 THERMAL_GLOB = "/sys/class/thermal/thermal_zone*/temp"
+# Long enough for the kernel's counters to move, short enough not to be noticed
+CPU_SAMPLE = 0.12
 # Units that may be stopped without anything being wrong
 MAY_STOP = {"smartmontools.service"}
 
@@ -246,23 +248,63 @@ def updates_waiting():
     return sum(line.startswith("Inst ") for line in result.stdout.splitlines()) if result.returncode == 0 else None
 
 
-def system_status():
+def memory_status():
     memory = dict(line.split(":", 1) for line in read_lines("/proc/meminfo"))
     kilobytes = lambda key: int(memory[key].split()[0]) * 1024
+    return {"total": kilobytes("MemTotal"), "available": kilobytes("MemAvailable")}
+
+
+def load_status():
+    return [float(n) for n in read_lines("/proc/loadavg")[0].split()[:3]]
+
+
+def temperature_status():
     temperatures = []
     for path in glob.glob(THERMAL_GLOB):
         with contextlib.suppress(OSError, ValueError):
             temperatures.append(int(read_lines(path)[0]) / 1000)
+    return max(temperatures) if temperatures else None
+
+
+def cpu_usage():
+    """The share of the processors busy just now, as a percentage. The kernel's
+    counters only ever grow, so two reads a moment apart are what says
+    anything about now."""
+    def ticks():
+        values = [int(n) for n in read_lines("/proc/stat")[0].split()[1:]]
+        # user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice
+        return sum(values), sum(values[3:5])
+
+    total_before, idle_before = ticks()
+    time.sleep(CPU_SAMPLE)
+    total_after, idle_after = ticks()
+    elapsed = total_after - total_before
+    busy = elapsed - (idle_after - idle_before)
+    return round(busy * 100 / elapsed) if elapsed > 0 else 0
+
+
+def system_status():
     return {"disk": system_disk(),
-            "memory": {"total": kilobytes("MemTotal"), "available": kilobytes("MemAvailable")},
-            "load": [float(n) for n in read_lines("/proc/loadavg")[0].split()[:3]],
+            "memory": memory_status(),
+            "load": load_status(),
+            "cpu": cpu_usage(),
             "cpus": os.cpu_count(),
             "uptime": int(float(read_lines("/proc/uptime")[0].split()[0])),
-            "temperature": max(temperatures) if temperatures else None,
+            "temperature": temperature_status(),
             "updates": updates_waiting(),
             "reboot": os.path.exists(REBOOT_FLAG),
             "kernel": os.uname().release,
             "newest_kernel": newest_kernel()}
+
+
+def system_sample():
+    """The few numbers the hourly check records, so Health can draw them over
+    time. Deliberately cheap: no package check, no SMART."""
+    memory = memory_status()
+    disk = system_disk()
+    return {"memory_used": memory["total"] - memory["available"], "memory_total": memory["total"],
+            "load": load_status()[0], "disk_used": disk["used"], "disk_size": disk["size"],
+            "temperature": temperature_status()}
 
 
 def newest_snapshot(pool, found_shares):
@@ -272,18 +314,22 @@ def newest_snapshot(pool, found_shares):
     return max(taken, default=None)
 
 
-def pool_details(found):
+def pool_details(found, histories=None):
     settings = read_json(backup.BACKUP_FILE)
     state = read_json(backup.BACKUP_STATE, {})
     found_shares = shares.list_shares()
+    histories = histories or {}
     shown = []
     for pool in found:
         zfs_pool = pool["engine"] == "zfs"
         backed_up = settings and settings["source"] == pool["name"]
+        recorded = histories.get(pool["name"], {})
         shown.append({**pool,
                       "shares": len([s for s in found_shares if s["pool"] == pool["name"]]),
                       "last_scrub": zfs.scrub_finished(pool["name"]) if zfs_pool else None,
                       "last_snapshot": newest_snapshot(pool["name"], found_shares) if zfs_pool else None,
+                      "history": {"hourly": recorded.get("hourly", []), "daily": recorded.get("daily", [])},
+                      "projection": usage.projection(recorded.get("daily") or recorded.get("hourly") or []),
                       "backup": ({"target": settings["target"], "last": state.get("last_success"),
                                   "error": state.get("error")} if backed_up else None)})
     return shown
@@ -294,6 +340,7 @@ def health_report(now):
     found_disks = [disks.disk_health(d) for d in disks.list_disks() if d["kind"] == "disk"]
     checks = all_checks(now, found_disks)
     log = read_json(alerts.ALERT_LOG, [])
+    histories = usage.all_history()
     return {"time": int(now),
             "hourly": {"last": int(os.path.getmtime(CHECK_STATE)) if os.path.exists(CHECK_STATE) else None,
                        "every": HOUR},
@@ -303,7 +350,8 @@ def health_report(now):
             "services": services.system_services(),
             "protocols": services.protocols(),
             "system": system_status(),
-            "pools": pool_details(pools.list_pools()),
+            "history": {"system": histories.get(usage.SYSTEM_KEY, {"hourly": [], "daily": []})},
+            "pools": pool_details(pools.list_pools(), histories),
             "disks": found_disks,
             "alerts": {"channels": alerts.alert_channels(), "last": log[-1] if log else None}}
 
@@ -312,7 +360,7 @@ def run_checks():
     """Send an alert for each new problem, a reminder each day, and a note when one clears."""
     config.after_change()
     shares.empty_recycle_bins()
-    usage.record(pools.list_pools())
+    usage.record(pools.list_pools(), system=system_sample())
     now = time.time()
     found = find_problems(now)
     previous = read_json(CHECK_STATE, {})

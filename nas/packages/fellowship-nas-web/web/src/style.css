@@ -22,6 +22,11 @@
     --good: #3f7a46;
     --warning: #9a6316;
     --bad: #a8463a;
+    /* Severity reads green, yellow, orange, red, purple, worst last */
+    --sev-low: #9a7b10;
+    --sev-medium: #b05f14;
+    --sev-high: #a8463a;
+    --sev-critical: #6b4a9e;
     --wallpaper: url("wallpaper-light.jpg"), url("wallpaper-light.svg");
     --icon-label: #101a17;
     --icon-shadow: 0 1px 2px rgb(244 239 227 / 0.9);
@@ -50,6 +55,10 @@
         --good: #86b88a;
         --warning: #e0a452;
         --bad: #d87667;
+        --sev-low: #b8912a;
+        --sev-medium: #c8762b;
+        --sev-high: #b85144;
+        --sev-critical: #7b5ba6;
         --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
         --icon-label: #efe7d5;
         --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
@@ -78,6 +87,10 @@
     --good: #86b88a;
     --warning: #e0a452;
     --bad: #d87667;
+    --sev-low: #b8912a;
+    --sev-medium: #c8762b;
+    --sev-high: #b85144;
+    --sev-critical: #7b5ba6;
     --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
     --icon-label: #efe7d5;
     --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
@@ -273,15 +286,204 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; 
 .pick-row select, .pick-row input { width: auto; min-width: 180px; }
 .pick-row input { flex: 1 1 220px; }
 
-/* Health's overview: one tile per area, each opening its details */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.tile, .problem {
-    display: grid; gap: 6px; text-align: left; font: inherit; color: var(--text); cursor: pointer;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+/* Health's overview: a verdict banner, two groups of cards, a status strip */
+.banner {
+    display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+    padding: 14px 18px; font: inherit; color: var(--text); margin: 0;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.tile:hover, .problem:hover { border-color: var(--gold); }
-.tile .row { justify-content: space-between; }
-.problem { display: block; width: 100%; background: none; padding: 8px 10px; margin-top: 8px; }
+.banner.sev-good { border-color: var(--good); background: var(--good-soft); }
+.banner.sev-low { border-color: var(--sev-low); background: color-mix(in srgb, var(--sev-low) 14%, var(--surface)); }
+.banner.sev-medium { border-color: var(--sev-medium); background: color-mix(in srgb, var(--sev-medium) 14%, var(--surface)); }
+.banner.sev-high { border-color: var(--sev-high); background: color-mix(in srgb, var(--sev-high) 14%, var(--surface)); }
+.banner.sev-critical { border-color: var(--sev-critical); background: color-mix(in srgb, var(--sev-critical) 16%, var(--surface)); }
+button.banner { cursor: pointer; }
+.banner-icon {
+    display: grid; place-items: center; width: 40px; height: 40px; flex: none;
+    border-radius: 50%; background: var(--surface); color: var(--good);
+}
+.banner.sev-low .banner-icon { color: var(--sev-low); }
+.banner.sev-medium .banner-icon { color: var(--sev-medium); }
+.banner.sev-high .banner-icon { color: var(--sev-high); }
+.banner.sev-critical .banner-icon { color: var(--sev-critical); }
+.banner-text { display: grid; gap: 2px; }
+.banner-text strong { font-size: 1.15rem; }
+.banner-when { margin-left: auto; color: var(--muted); }
+
+.group-title { margin: 6px 0 0; font-size: 1.1rem; font-weight: 700; }
+.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.metric {
+    display: grid; grid-template-rows: auto 1fr auto; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.metric-head { display: flex; align-items: center; gap: 9px; padding: 12px 14px 0; color: var(--muted); }
+.metric-head h3 { margin: 0; font-size: 0.98rem; font-weight: 600; color: var(--text); }
+.metric-body { display: grid; align-content: center; gap: 6px; padding: 6px 14px 12px; }
+.metric .gauge-value { font-size: 1.55rem; }
+.metric-more {
+    border: 0; border-top: 1px solid var(--border); background: none; font: inherit;
+    font-size: 0.85rem; color: var(--gold); text-align: left; padding: 10px 14px; cursor: pointer;
+}
+.metric-more:hover { background: var(--raised); }
+
+/* The half ring with a needle. It keeps its own proportions, so a narrow
+   card shrinks it instead of squashing it. */
+.arc { display: block; width: 100%; height: auto; max-width: 260px; margin: 0 auto; }
+.arc-track { stroke: var(--surface-sunk); }
+.arc-value.kind-good { stroke: var(--good); }
+.arc-value.kind-warning { stroke: var(--warning); }
+.arc-value.kind-bad { stroke: var(--bad); }
+.arc-value.kind-accent { stroke: var(--gold); }
+.arc .tick { stroke: var(--muted); stroke-width: 2; stroke-linecap: round; opacity: 0.7; }
+.arc .needle { stroke: var(--text); stroke-width: 2.5; stroke-linecap: round; }
+.arc .needle-pivot { fill: var(--text); }
+.arc-readout { fill: var(--text); font-size: 30px; font-weight: 700; }
+
+/* Load as points over a day, with the level worth marking */
+.dot-chart { display: block; overflow: visible; }
+.dot-chart text { fill: var(--muted); font-size: 10px; }
+.dot-chart .grid { stroke: var(--border); stroke-width: 1; }
+.dot-chart .guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.8; }
+.dot-chart .dot { fill: var(--series-1); }
+.dot-chart .dot.current { fill: var(--gold); }
+.load-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.load-now { display: grid; text-align: right; }
+.load-now strong { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+
+/* Pool and service rows */
+.pool-line { display: grid; grid-template-columns: auto minmax(40px, 1fr) auto auto; align-items: center; gap: 8px; padding: 5px 0; }
+.pool-name { font-weight: 600; }
+.bar { display: block; height: 8px; border-radius: 999px; background: var(--surface-sunk); overflow: hidden; }
+.bar .fill { display: block; height: 100%; background: var(--good); }
+.bar .fill.warning { background: var(--warning); }
+.bar .fill.bad { background: var(--bad); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.chip.good { color: var(--good); }
+.chip.bad { color: var(--bad); }
+.service-line { display: flex; align-items: center; gap: 9px; padding: 6px 0; }
+.service-line .state { margin-left: auto; color: var(--muted); }
+.state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); flex: none; }
+.state-dot.stopped { background: var(--warning); }
+.state-dot.failed { background: var(--bad); }
+.state-dot.missing, .state-dot.off, .state-dot.not-built, .state-dot.later { background: var(--muted); }
+.drives { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); }
+
+/* The Health widget: the full panel in miniature, on the desktop */
+.health-widget { gap: 9px; border-color: color-mix(in srgb, var(--gold) 45%, var(--border)); }
+.widget-head { display: flex; align-items: center; justify-content: space-between; }
+.widget-head .chevron { color: var(--gold); font-size: 1.3rem; line-height: 1; }
+.medallion-row { display: flex; align-items: center; gap: 10px; }
+.medallion {
+    display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+    border-radius: 50%; color: #fff; font-weight: 700; font-size: 1.15rem;
+}
+.medallion.sev-good { background: var(--good); }
+.medallion.sev-low { background: var(--sev-low); }
+.medallion.sev-medium { background: var(--sev-medium); }
+.medallion.sev-high { background: var(--sev-high); }
+.medallion.sev-critical { background: var(--sev-critical); }
+.medallion-text { display: grid; gap: 1px; min-width: 0; text-align: left; }
+.medallion-text strong { font-size: 0.98rem; }
+.mini-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+.mini { display: grid; justify-items: center; gap: 2px; }
+.mini .arc { max-width: 124px; }
+.mini .gauge { max-width: 124px; padding: 0; }
+.mini .gauge-value { font-size: 1.05rem; }
+.mini-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+.mini-divider { display: block; height: 1px; background: var(--border); margin: 1px 0; }
+.mini-heading { color: var(--gold); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
+.mini-pool { display: grid; grid-template-columns: auto minmax(30px, 1fr) auto; align-items: center; gap: 8px; }
+.mini-pool-name { font-weight: 600; font-size: 0.95rem; }
+.mini-pool .chip { font-size: 0.78rem; }
+
+/* The Disks widget: a drive bay map, one slot per drive */
+.disks-widget { gap: 10px; }
+button.widget-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; padding: 0; background: none; border: 0; font: inherit; color: inherit;
+    text-align: left; cursor: pointer;
+}
+button.widget-head:hover h2 { color: var(--text); }
+.bays { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.bay-cell { display: grid; gap: 3px; justify-items: center; }
+.bay {
+    width: 100%; aspect-ratio: 34 / 50; display: grid; grid-template-rows: auto 1fr auto;
+    align-items: center; justify-items: center; gap: 3px; padding: 5px 4px;
+    background: none; border: 2px solid var(--border); border-radius: 7px;
+    color: var(--muted); cursor: pointer; font: inherit;
+}
+.bay:hover { border-color: var(--gold); }
+.bay.sev-good { border-color: var(--good); color: var(--good); }
+.bay.sev-low { border-color: var(--sev-low); color: var(--sev-low);
+    background: color-mix(in srgb, var(--sev-low) 14%, transparent); }
+.bay.sev-medium { border-color: var(--sev-medium); color: var(--sev-medium);
+    background: color-mix(in srgb, var(--sev-medium) 14%, transparent); }
+.bay.sev-high { border-color: var(--sev-high); color: var(--sev-high);
+    background: color-mix(in srgb, var(--sev-high) 14%, transparent); }
+.bay.sev-critical { border-color: var(--sev-critical); color: var(--sev-critical);
+    background: color-mix(in srgb, var(--sev-critical) 16%, transparent); }
+.bay.sev-unknown { border-color: var(--muted); color: var(--muted); }
+.bay-grille { display: grid; gap: 2px; width: 68%; }
+.bay-grille span { height: 2px; border-radius: 2px; background: currentColor; opacity: 0.45; }
+.bay-mark { display: grid; place-items: center; font-size: 1rem; font-weight: 700; line-height: 1; }
+.bay-mark svg { stroke-width: 2.6; }
+.bay-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.bay-number { font-size: 0.72rem; color: var(--muted); }
+.bay-legend { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.85rem; }
+.bay-legend .bay-dot.sev-low { background: var(--sev-low); }
+.bay-legend .bay-dot.sev-medium { background: var(--sev-medium); }
+.bay-legend .bay-dot.sev-high { background: var(--sev-high); }
+.bay-legend .bay-dot.sev-critical { background: var(--sev-critical); }
+.bay-legend .bay-dot.sev-unknown { background: var(--muted); }
+/* The drive a widget asked to see */
+tr.row-focus td { background: color-mix(in srgb, var(--gold) 16%, transparent); }
+
+/* Backup and alerts at a glance, along the bottom */
+.status-strip {
+    display: grid; grid-template-columns: 1fr 1fr; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius);
+}
+.status-strip > button {
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px; font: inherit; color: var(--text);
+    background: none; border: 0; border-right: 1px solid var(--border); text-align: left; cursor: pointer;
+}
+.status-strip > button:last-child { border-right: 0; }
+.status-strip > button:hover { background: var(--raised); }
+.status-strip svg { color: var(--muted); flex: none; }
+.status-strip span { color: var(--muted); }
+@media (max-width: 780px) {
+    .metrics { grid-template-columns: 1fr; }
+    .status-strip { grid-template-columns: 1fr; }
+    .status-strip > button { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+.gauges { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.gauge {
+    display: grid; justify-items: center; align-content: start; gap: 1px; text-align: center;
+    font: inherit; color: var(--text); background: none;
+    /* A cell with few neighbours grows wide; the gauge itself stays a sensible size */
+    width: 100%; max-width: 220px;
+    /* Transparent until hovered, so a gauge in a panel isn't a box inside a box */
+    border: 1px solid transparent; border-radius: var(--radius); padding: 8px;
+}
+button.gauge { cursor: pointer; }
+button.gauge:hover { background: var(--raised); border-color: var(--border); }
+.gauge-figure { position: relative; display: grid; place-items: center; }
+.gauge-dial { display: block; }
+.gauge-track { stroke: var(--surface-sunk); }
+.gauge-fill { transition: stroke-dasharray 0.3s ease; }
+.gauge-fill.kind-good { stroke: var(--good); }
+.gauge-fill.kind-warning { stroke: var(--warning); }
+.gauge-fill.kind-bad { stroke: var(--bad); }
+.gauge-fill.kind-neutral { stroke: var(--muted); }
+.gauge-value { position: absolute; font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; }
+.gauge-label { font-weight: 600; }
+
+.problem {
+    display: block; width: 100%; text-align: left; font: inherit; color: var(--text); cursor: pointer;
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 10px; margin-top: 8px;
+}
+.problem:hover { border-color: var(--gold); }
 .problem p { margin: 4px 0 0; }
 
 /* Pool details: stat tiles, the usage chart and the space bar */
@@ -299,6 +501,19 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; 
 .chart-tip { position: absolute; pointer-events: none; padding: 6px 8px; border-radius: 6px; font-size: 0.8rem;
     background: var(--raised); border: 1px solid var(--border); white-space: nowrap; transform: translate(-50%, -110%); }
 .chart-wrap { position: relative; }
+/* Several charts in one card, each with its own heading */
+.charts { display: grid; gap: 18px; }
+.chart-block { display: grid; gap: 6px; }
+.chart-block h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.chart .guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.7; }
+/* The shape of a measurement with no axes, inside a gauge */
+.sparkline { display: block; width: 100%; height: 22px; }
+.sparkline.kind-good { color: var(--good); }
+.sparkline.kind-warning { color: var(--warning); }
+.sparkline.kind-bad { color: var(--bad); }
+.sparkline.kind-neutral { color: var(--muted); }
+.sparkline .line { fill: none; stroke: currentColor; stroke-width: 2; }
+.sparkline .area { fill: currentColor; opacity: 0.18; stroke: none; }
 .spacebar { display: flex; gap: 2px; height: 22px; border-radius: 6px; overflow: hidden; background: var(--surface-sunk); }
 .spacebar span { min-width: 2px; }
 .spacebar span:first-child { border-radius: 6px 0 0 6px; }

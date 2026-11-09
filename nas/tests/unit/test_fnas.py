@@ -84,7 +84,7 @@ class Fake:
         self.mounted_by = mounted_by
         self.calls = []
 
-    def __call__(self, *command, check=True, stdin=None):
+    def __call__(self, *command, check=True, stdin=None, timeout=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[0] == "lsblk":
             ok.stdout = json.dumps({"blockdevices": self.devices})
@@ -258,6 +258,10 @@ class Create(Base):
 
     def test_refuses_unknown_disk(self):
         self.refused("no such disk", "tank", "single", ["/dev/nope"])
+
+    def test_refuses_a_name_zfs_reserves(self):
+        # "mirror" is a fine pool name on another engine; only ZFS can't have it
+        self.refused("word ZFS reserves", "mirror", "mirror", ["/dev/vdb", "/dev/vdc"])
         self.refused("no such disk", "tank", "single", [""])
 
     def test_refuses_disk_without_stable_name(self):
@@ -369,7 +373,7 @@ class PoolFake(Fake):
         super().__init__(devices)
         self.status, self.feature = status, feature
 
-    def __call__(self, *command, check=True, stdin=None):
+    def __call__(self, *command, check=True, stdin=None, timeout=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[:2] == ("zpool", "list") and "-Hp" in command:
             ok.stdout = "tank\t100\t1\t99\tONLINE\toff\n"
@@ -791,7 +795,7 @@ class ShareFake(Fake):
         self.datasets, self.snapshots, self.existing = datasets, snapshots, existing
         self.config_dir, self.pool_lines = config_dir, pools
 
-    def __call__(self, *command, check=True, stdin=None):
+    def __call__(self, *command, check=True, stdin=None, timeout=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[:2] == ("zpool", "list") and "-Hp" in command:
             ok.stdout = self.pool_lines
@@ -1220,7 +1224,7 @@ class ProtectionFake(ShareFake):
         self.syncoid_error = syncoid_error
         self.backups, self.mail = "", None
 
-    def __call__(self, *command, check=True, stdin=None):
+    def __call__(self, *command, check=True, stdin=None, timeout=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
         if command[:2] == ("zpool", "status"):
             ok.stdout = self.status
@@ -1402,11 +1406,11 @@ class Protection(Base):
         fake = self.backup_fake()
         real = fake.__class__.__call__
 
-        def restored(*command, check=True, stdin=None):
+        def restored(*command, check=True, stdin=None, timeout=None):
             if command[0] == "syncoid":
                 fake.datasets = volume_line("media")
                 fake.existing = False
-            return real(fake, *command, check=check, stdin=stdin)
+            return real(fake, *command, check=check, stdin=stdin, timeout=timeout)
 
         self.use(restored)
         fnas.restore_backup("media", "usb", None)
@@ -1521,6 +1525,27 @@ class Protection(Base):
         self.healthy()
         self.assertEqual(fnas.run_checks(), [])
         self.assertEqual(self.alerts(), [])
+
+    def test_the_hourly_check_records_the_system_for_the_health_charts(self):
+        self.healthy()
+        fnas.run_checks()
+        [point] = fnas.system_history()["hourly"]
+        self.assertEqual(len(point), 7)
+        # The system disk is the one the test gave it
+        self.assertEqual(point[4:6], [10, 100])
+
+    def test_health_report_carries_the_history(self):
+        self.healthy(pools="tank\t100\t10\t90\tONLINE\toff\n")
+        fnas.run_checks()
+        report = fnas.health_report(fnas.time.time())
+        self.assertEqual(len(report["history"]["system"]["hourly"]), 1)
+        self.assertIn("cpu", report["system"])
+        [pool] = report["pools"]
+        [recorded] = pool["history"]["hourly"]
+        self.assertEqual(recorded[1], pool["allocated"])
+        self.assertLess(abs(recorded[0] - report["time"]), 5)
+        # One point can't show a rate yet, and the report says so
+        self.assertIn("reason", pool["projection"])
 
     def test_a_full_pool_alerts_once_then_daily_then_clears(self):
         self.healthy(pools="tank\t100\t85\t15\tONLINE\toff\n")
@@ -1789,9 +1814,22 @@ class Protection(Base):
 
 
 class Parser(unittest.TestCase):
-    def test_rejects_unknown_layout(self):
-        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
-            fnas.build_parser().parse_args(["pool", "create", "tank", "stripe", "/dev/vdb"])
+    def test_takes_any_layout_name(self):
+        # The engine decides which layouts exist, so a new engine needs no
+        # change to the parser
+        args = fnas.build_parser().parse_args(["pool", "create", "tank", "raid5", "--engine", "mdadm", "/dev/vdb"])
+        self.assertEqual((args.layout, args.engine), ("raid5", "mdadm"))
+
+    def test_a_layout_the_engine_lacks_is_refused(self):
+        with self.assertRaisesRegex(fnas.FnasError, r"no such layout: stripe \(ZFS offers single, mirror"):
+            fnas.plan("stripe", [GB])
+
+
+class Command(unittest.TestCase):
+    def test_a_stuck_command_is_stopped(self):
+        # A hung tool would otherwise hold a root process and the browser's request
+        with self.assertRaisesRegex(fnas.FnasError, "still running after 0.1 seconds"):
+            fnas.run(sys.executable, "-c", "import time; time.sleep(5)", timeout=0.1)
 
 
 if __name__ == "__main__":
@@ -1802,10 +1840,10 @@ class DiskHealth(unittest.TestCase):
     DISK = {"path": "/dev/sda", "by_id": "/dev/disk/by-id/ata-X", "model": "X", "serial": "1",
             "size": 1, "state": "free"}
 
-    def health(self, data):
+    def health(self, data, disk=None):
         output = SimpleNamespace(stdout=json.dumps(data) if data is not None else "", returncode=0)
         with patch("run", return_value=output):
-            return fnas.disk_health(self.DISK)
+            return fnas.disk_health(disk or self.DISK)
 
     def ata(self, passed=True, reallocated=0, temperature=35):
         return {"smart_status": {"passed": passed}, "temperature": {"current": temperature},
@@ -1840,6 +1878,11 @@ class DiskHealth(unittest.TestCase):
         for data in (None, {"smartctl": {"exit_status": 4}}):
             with self.subTest(data):
                 self.assertEqual(self.health(data)["verdict"], "unknown")
+
+    def test_bay_number_is_carried(self):
+        # The desktop's drive bay map names each slot after the bay it is in
+        self.assertIsNone(self.health(self.ata())["bay"])
+        self.assertEqual(self.health(self.ata(), dict(self.DISK, bay="Bay 3"))["bay"], "Bay 3")
 
 
 class SmbPassword(unittest.TestCase):
@@ -1968,6 +2011,12 @@ class Engines(unittest.TestCase):
     def test_zfs_says_why_it_cant_be_used(self):
         with patch("unavailable", lambda: "Secure Boot is on"):
             self.assertEqual(fnas.engines()[0]["reason"], "Secure Boot is on")
+
+    def test_only_zfs_rejects_its_reserved_words(self):
+        # Other engines may happily have a pool called "mirror"
+        fnas.check_pool_name("mirror")
+        with self.assertRaisesRegex(fnas.FnasError, "starts with a word ZFS reserves"):
+            fnas.check_reserved_name("mirror")
 
 
 class Services(unittest.TestCase):
@@ -2129,6 +2178,38 @@ class Usage(unittest.TestCase):
         self.assertIn("three days", fnas.projection(growing[:2])["reason"])
         steady = [[day * n, 400, 1000] for n in range(5)]
         self.assertIn("Not filling", fnas.projection(steady)["reason"])
+
+    SAMPLE = {"memory_used": 2, "memory_total": 8, "load": 0.5, "disk_used": 3, "disk_size": 20,
+              "temperature": 41.0}
+
+    def test_records_the_system_beside_the_pools(self):
+        start = 1_800_000_000
+        fnas.record([{"name": "tank", "allocated": 10, "size": 100}], start, system=self.SAMPLE)
+        self.assertEqual(fnas.system_history()["hourly"][0], [start, 2, 8, 0.5, 3, 20, 41.0])
+        self.assertEqual(fnas.history("tank")["hourly"][0], [start, 10, 100])
+
+    def test_a_sensor_that_reports_nothing_is_recorded_as_nothing(self):
+        fnas.record([], 1_800_000_000, system={**self.SAMPLE, "temperature": None})
+        self.assertIsNone(fnas.system_history()["hourly"][0][6])
+
+    def test_a_pool_called_system_is_not_the_system(self):
+        # The system's history sits under a name no pool can have
+        fnas.record([{"name": "system", "allocated": 1, "size": 2}], 1_800_000_000, system=self.SAMPLE)
+        self.assertEqual(fnas.history("system")["hourly"][0], [1_800_000_000, 1, 2])
+        self.assertEqual(len(fnas.system_history()["hourly"][0]), 7)
+
+    def test_an_older_file_without_the_system_still_reads(self):
+        fnas.write_json(fnas.USAGE_FILE, {"tank": {"hourly": [], "daily": []}})
+        self.assertEqual(fnas.system_history(), {"hourly": [], "daily": []})
+        self.assertEqual(fnas.history("tank"), {"hourly": [], "daily": []})
+
+
+class Cpu(unittest.TestCase):
+    def test_usage_is_a_percentage(self):
+        # Sampled from this machine's own counters, so only the bounds are known
+        value = fnas.cpu_usage()
+        self.assertGreaterEqual(value, 0)
+        self.assertLessEqual(value, 100)
 
 
 class Space(unittest.TestCase):

@@ -248,5 +248,6 @@ def disk_health(disk):
         verdict = "watch" if notes else "healthy"
     return {"path": disk["path"], "by_id": disk["by_id"], "model": disk["model"],
             "serial": disk["serial"], "size": disk["size"], "state": disk["state"],
+            "bay": disk.get("bay"),
             "verdict": verdict, "notes": notes, "temperature": temperature,
             "hours": data.get("power_on_time", {}).get("hours")}

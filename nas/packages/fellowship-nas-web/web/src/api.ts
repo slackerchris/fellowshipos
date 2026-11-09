@@ -305,6 +305,8 @@ export interface DiskHealth {
     serial: string;
     size: number;
     state: Disk["state"];
+    // The enclosure slot, where the backplane reports one
+    bay: string | null;
     verdict: "healthy" | "watch" | "failing" | "unknown";
     notes: string[];
     temperature: number | null;
@@ -360,6 +362,8 @@ export interface SystemStatus {
     disk: { size: number; used: number };
     memory: { total: number; available: number };
     load: number[];
+    // Percent of the processors busy, sampled over a moment
+    cpu: number;
     cpus: number;
     uptime: number;
     temperature: number | null;
@@ -373,6 +377,8 @@ export interface PoolDetail extends Pool {
     shares: number;
     last_scrub: number | null;
     last_snapshot: number | null;
+    history: PoolHistory;
+    projection: Projection;
     backup: { target: string; last: number | null; error: string | null } | null;
 }
 
@@ -384,6 +390,8 @@ export interface Health {
     services: UnitStatus[];
     protocols: Protocol[];
     system: SystemStatus;
+    // Only the hourly check can add to these, so a new install starts empty
+    history: { system: SystemHistory };
     pools: PoolDetail[];
     disks: DiskHealth[];
     alerts: { channels: Channels; last: Alert | null };
@@ -391,6 +399,26 @@ export interface Health {
 
 // [time, used, size]
 export type UsagePoint = [number, number, number];
+
+// [time, memory used, memory total, 1-minute load, system disk used, system disk size, °C or null]
+export type SystemPoint = [number, number, number, number, number, number, number | null];
+
+export interface PoolHistory {
+    hourly: UsagePoint[];
+    daily: UsagePoint[];
+}
+
+export interface SystemHistory {
+    hourly: SystemPoint[];
+    daily: SystemPoint[];
+}
+
+// When a pool fills, at the rate of its history: days left, or why it can't say
+export interface Projection {
+    days?: number;
+    per_day?: number;
+    reason?: string;
+}
 
 export interface PoolDetails {
     name: string;

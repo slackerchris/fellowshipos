@@ -437,6 +437,18 @@ The Health app lists **every check, its result and when it last ran**. A check t
 | `mdadm --monitor` | Arrays degraded, failed disks, spares taking over, rebuilds finished |
 | Hourly check (`fnas check`) | Pools over 80% full, missing or failed disks on any engine, RAID check mismatches, Btrfs device errors, SnapRAID sync or scrub overdue or failed, snapshots stopped, scrub too old, backup overdue, services stopped, system disk nearly full, ZFS module missing for a kernel, unrestored settings |
 
+**As built after Phase 9**
+
+- **The overview leads with a verdict:** a banner says either what needs attention, or that nothing does, with how many checks passed and when the screen was last worked out.
+- **Two groups of cards follow:** System holds CPU usage, memory and CPU load; Storage & services holds the pools, the disks and the services. Each card carries a small icon, its reading, and a **View details** link into the full section.
+- **A strip along the bottom** repeats the backup's last result and whether any alert is active, each opening its section.
+- **The desktop's Health widget** is the same panel in miniature: the worst problem in a coloured medallion with its level written out, CPU and RAM, and a fill bar with a health label for each pool. Clicking anywhere on it opens Health.
+- **The desktop's Disks widget** is a drive bay map: one numbered slot per drive, coloured by its level, with a check, an exclamation mark or a question mark. A line beneath names the worst drive ("Bay 3 · Medium warning"), and clicking a slot opens Health at that drive's row.
+- **Severity has one scale everywhere:** green is good, yellow low, orange medium, red high and purple critical, shared by the medallion and the banner.
+- **The system is recorded too:** the hourly check adds memory, load, temperature and the system disk to the same history file as each pool's usage. The CPU load card therefore draws the last day of points against the number of processors, and System and Pools draw a Week or Year chart with a hover readout.
+- **An empty chart says why:** a new install shows that the chart fills in from the first checks, rather than looking broken. Two points are the minimum; the fill estimate still needs three days.
+- **Where it lives:** `/var/lib/fellowship-nas/usage.json`, an hour of points for a week and one a day for 400 days. The system's history sits under a key no pool can take, so a pool named `system` is unaffected.
+
 ## Alerts
 
 **Levels** (Chris, Nov 9): **critical** means something is broken now. **High**, **medium** and **low** are warnings, by how soon they need attention. **Info** means nothing is wrong, such as a resolved problem or a finished job.

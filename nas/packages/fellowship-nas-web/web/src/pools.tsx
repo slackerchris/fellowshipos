@@ -149,21 +149,23 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
 
     const usable = usableDisks(disks.data || []);
     const selected = usable.filter(disk => chosen.includes(disk.path));
+    // Each engine has its own layouts, so ask the chosen one
+    const chosenEngine = engine || engines.data?.find(found => found.available)?.name || "";
     const key = selected.map(disk => disk.path).join(" ");
     useEffect(() => {
         setOptions(null);
         setPicked(0);
-        if (!selected.length) {
+        if (!selected.length || !chosenEngine) {
             return;
         }
         let current = true;
-        fnasJson<LayoutOption[]>(["pool", "layouts", ...selected.map(disk => disk.by_id || disk.path)])
+        fnasJson<LayoutOption[]>(["pool", "layouts", "--engine", chosenEngine,
+                                   ...selected.map(disk => disk.by_id || disk.path)])
             .then(found => current && setOptions(found), () => current && setOptions([]));
         return () => { current = false; };
-    }, [key]);
+    }, [key, chosenEngine]);
 
     const option = options?.[picked];
-    const chosenEngine = engine || engines.data?.find(found => found.available)?.name || "";
     const needsWipe = selected.some(disk => disk.state === "has-data");
     const problem = !chosenEngine ? "None of the kinds of storage can be used on this machine yet."
         : !POOL_NAME.test(name) ? "Use lowercase letters, numbers, - and _, starting with a letter."

@@ -1,13 +1,15 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
 import { useContext, useEffect, useState } from "preact/hooks";
-import { Alert, Health, Pool, SetupStatus, fnasJson, humanSize, logout, when } from "../api";
-import { SEVERITY } from "../health";
+import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
+import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
+import { ArcGauge, Gauge, MetricIcon } from "../charts";
 import { APPS, AppId, appsFor, iconsFor } from "./apps";
 import { DesktopContext } from "./context";
 import { AppIcon, Glyph } from "./icons";
+import { focusDisk } from "./focus";
 import { Win, Window, useWindows } from "./windows";
 
 const POLL = 120_000;
@@ -71,49 +73,135 @@ function Clock() {
     );
 }
 
-/** The checks at a glance: how many passed, and the worst problems, most severe first. */
+/** The checks at a glance: the worst problem, CPU and RAM, and each pool's fill.
+    The whole card opens Health. */
 function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => void }) {
     const health = status.health;
     const checks = health?.checks || [];
     const passed = checks.filter(check => check.state === "passed").length;
-    const waiting = checks.filter(check => check.state === "na").length;
-    const problems = health?.problems || [];
-    const critical = problems.filter(problem => problem.severity === "critical").length;
-    const warnings = problems.length - critical;
-    const time = (stamp: number) => new Date(stamp * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const [worst] = health?.problems || [];
+    const severity = severityOf(worst);
+    const system = health?.system;
+    const memoryUsed = system ? system.memory.total - system.memory.available : 0;
+    const memoryPercent = system?.memory.total ? Math.round((memoryUsed * 100) / system.memory.total) : 0;
+    const pools = status.pools || [];
     return (
-        <button type="button" class="widget" onClick={() => open("health")}>
-            <h2>Health</h2>
+        <button type="button" class="widget health-widget" onClick={() => open("health")}>
+            <span class="widget-head"><h2>Health</h2><span class="chevron" aria-hidden="true">›</span></span>
             {!health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}
-            {health && (
-                <div class="stack">
-                    <div class="row">
-                        {critical > 0 && <Badge kind="bad">{critical} critical</Badge>}
-                        {warnings > 0 && <Badge kind="warning">{warnings} warning{warnings === 1 ? "" : "s"}</Badge>}
-                        {!problems.length && (waiting
-                            ? <Badge kind="neutral">nothing needs attention</Badge>
-                            : <Badge kind="good">all checks passed</Badge>)}
-                    </div>
-                    {problems.slice(0, 3).map(problem => (
-                        <span key={problem.key} class="small">{problem.title}</span>
-                    ))}
-                    <span class="small muted">{passed} of {checks.length} checks passed
-                        {waiting ? `, ${waiting} don't apply yet` : ""}</span>
-                    <span class="small muted">{health.hourly.last ? `Hourly check ran at ${time(health.hourly.last)}`
-                        : "The hourly check hasn't run yet"}</span>
-                </div>
-            )}
+            {health && system && <>
+                <span class="medallion-row">
+                    <span class={`medallion sev-${severity}`} aria-hidden="true">
+                        {worst ? "!" : <MetricIcon name="check" size={20} />}
+                    </span>
+                    <span class="medallion-text">
+                        <strong>{worst ? worst.title : "Nothing needs attention"}</strong>
+                        <span class="small muted">{worst ? SEVERITY_WORD[worst.severity]
+                            : `${passed} of ${checks.length} checks passed`}</span>
+                    </span>
+                </span>
+                <span class="mini-gauges">
+                    <span class="mini">
+                        <ArcGauge percent={system.cpu} centre={`${system.cpu}%`} kind="accent" thin ticks />
+                        <span class="mini-label">CPU</span>
+                    </span>
+                    <span class="mini">
+                        <Gauge percent={memoryPercent} centre={`${memoryPercent}%`} size={96} stroke={11} />
+                        <span class="mini-label">RAM</span>
+                    </span>
+                </span>
+                <span class="mini-divider" />
+                <span class="mini-heading">Pools</span>
+                {!pools.length && <span class="small muted">No pool yet. Open Storage to create one.</span>}
+                {pools.map(pool => {
+                    const fill = pool.size ? Math.round((pool.allocated * 100) / pool.size) : 0;
+                    const healthy = pool.health === "ONLINE";
+                    return (
+                        <span class="mini-pool" key={pool.name}>
+                            <span class="mini-pool-name">{pool.name}</span>
+                            <span class="bar"><span class={`fill ${level(fill)}`} style={{ width: `${fill}%` }} /></span>
+                            <span class={`chip ${healthy ? "good" : "bad"}`}>
+                                {healthy && <MetricIcon name="check" size={13} />}
+                                {healthy ? "Healthy" : pool.health.toLowerCase()}
+                            </span>
+                        </span>
+                    );
+                })}
+            </>}
         </button>
     );
 }
 
+type BayState = Severity | "unknown";
+
+// Worst last, so the legend can name the drive that needs attention
+const BAY_RANK: Record<BayState, number> = { good: 0, unknown: 1, low: 2, medium: 3, high: 4, critical: 5 };
+
+/** A drive's level: whatever the checks said about it, or its SMART verdict. */
+function bayState(disk: DiskHealth, problems: Problem[]): BayState {
+    const problem = problems.find(item => item.key === `disk-${disk.path}`);
+    if (problem) {
+        return severityOf(problem);
+    }
+    if (disk.verdict === "unknown") {
+        return "unknown";
+    }
+    return disk.verdict === "failing" ? "critical" : disk.verdict === "watch" ? "medium" : "good";
+}
+
+function bayWord(state: BayState) {
+    return state === "unknown" ? "No health data" : state === "good" ? "Healthy" : SEVERITY_WORD[state];
+}
+
+/** The drive bays, one slot each, coloured by the drive's own level. */
+function DisksWidget({ status, open }: { status: Status; open: (app: AppId) => void }) {
+    const health = status.health;
+    const problems = health?.problems || [];
+    const disks = (health?.disks || []).filter(disk => disk.state !== "os");
+    const states = disks.map(disk => bayState(disk, problems));
+    const name = (disk: DiskHealth, index: number) => disk.bay || `Disk ${index + 1}`;
+    const worst = disks.reduce<{ state: BayState; index: number } | null>((found, _, index) =>
+        !found || BAY_RANK[states[index]] > BAY_RANK[found.state] ? { state: states[index], index } : found, null);
+    return (
+        <section class="widget disks-widget" aria-label="Disks">
+            <button type="button" class="widget-head" onClick={() => open("health")}>
+                <h2>Disks</h2>
+                <span class="small muted">{plural(disks.length, "drive")}</span>
+            </button>
+            {!health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}
+            {health && !disks.length && <p class="small muted">No drive reports itself yet.</p>}
+            {health && disks.length > 0 && <>
+                <div class="bays">
+                    {disks.map((disk, index) => (
+                        <div class="bay-cell" key={disk.path}>
+                            <button type="button" class={`bay sev-${states[index]}`}
+                                    title={`${name(disk, index)}: ${bayWord(states[index])}`}
+                                    onClick={() => { focusDisk(disk.path); open("health"); }}>
+                                <span class="bay-grille" aria-hidden="true"><span /><span /></span>
+                                <span class="bay-mark" aria-hidden="true">
+                                    {states[index] === "good" ? <MetricIcon name="check" size={18} />
+                                        : states[index] === "unknown" ? "?" : "!"}
+                                </span>
+                                <span class="bay-dot" aria-hidden="true" />
+                            </button>
+                            <span class="bay-number">{disk.bay ? disk.bay.replace(/\D+/, "") : index + 1}</span>
+                        </div>
+                    ))}
+                </div>
+                <p class="bay-legend">
+                    {worst && worst.state !== "good"
+                        ? <>
+                            <span class={`bay-dot sev-${worst.state}`} aria-hidden="true" />
+                            <span>{name(disks[worst.index], worst.index)} · {bayWord(worst.state)}</span>
+                        </>
+                        : <span class="muted">All drives healthy</span>}
+                </p>
+            </>}
+        </section>
+    );
+}
+
 function Widgets({ status, open }: { status: Status; open: (app: AppId) => void }) {
-    const disks = (status.health?.disks || []).filter(disk => disk.state !== "os");
-    const hottest = disks.reduce<number | null>((max, disk) =>
-        disk.temperature !== null && (max === null || disk.temperature > max) ? disk.temperature : max, null);
-    const failing = disks.filter(disk => disk.verdict === "failing").length;
-    const watch = disks.filter(disk => disk.verdict === "watch").length;
-    const unknown = disks.filter(disk => disk.verdict === "unknown").length;
     return (
         <aside class="widgets" aria-label="Status">
             <button type="button" class="widget" onClick={() => open("storage")}>
@@ -133,22 +221,7 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                 ))}
             </button>
             <HealthWidget status={status} open={open} />
-            <button type="button" class="widget" onClick={() => open("health")}>
-                <h2>Disks</h2>
-                {!status.health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}
-                {status.health && (
-                    <div class="stack">
-                        <div class="row">
-                            <span>{disks.length} data disk{disks.length === 1 ? "" : "s"}</span>
-                            {failing > 0 && <Badge kind="bad">{failing} failing</Badge>}
-                            {watch > 0 && <Badge kind="warning">{watch} to watch</Badge>}
-                            {unknown > 0 && <Badge kind="neutral">{unknown === disks.length ? "no health data" : `${unknown} without health data`}</Badge>}
-                            {!failing && !watch && !unknown && disks.length > 0 && <Badge kind="good">all healthy</Badge>}
-                        </div>
-                        {hottest !== null && <span class="small muted">Warmest {hottest} °C</span>}
-                    </div>
-                )}
-            </button>
+            <DisksWidget status={status} open={open} />
             <button type="button" class="widget" onClick={() => open("alerts")}>
                 <h2>Recent alerts</h2>
                 {status.alerts && !status.alerts.length && <p class="small muted">None yet.</p>}
