@@ -28,6 +28,7 @@ class Package:
 
 
 fnas = Package()
+zfs = importlib.import_module("fellowship_nas.engines.zfs")
 
 
 class patch:
@@ -294,7 +295,7 @@ class Create(Base):
 
 class Layouts(unittest.TestCase):
     def options(self, count, size=4 * GB):
-        return fnas.layouts([size] * count)
+        return zfs.layouts([size] * count)
 
     def best(self, count):
         option = self.options(count)[0]
@@ -316,7 +317,7 @@ class Layouts(unittest.TestCase):
             for option in self.options(count):
                 with self.subTest(count=count, option=option):
                     self.assertEqual(option["width"] * option["groups"] + option["spares"], count)
-                    low, high = fnas.WIDTHS[option["layout"]]
+                    low, high = zfs.WIDTHS[option["layout"]]
                     self.assertTrue(low <= option["width"] <= high)
         self.assertEqual({o["layout"] for o in self.options(1)}, {"single"})
         self.assertNotIn("raidz2", {o["layout"] for o in self.options(3)})
@@ -336,10 +337,10 @@ class Layouts(unittest.TestCase):
 
     def test_mixed_sizes_group_alike_and_spare_the_largest(self):
         sizes = [4 * GB, 8 * GB, 4 * GB, 8 * GB, 8 * GB]
-        groups, spares = fnas.plan("mirror", sizes, 2, 1)
+        groups, spares = zfs.plan("mirror", sizes, 2, 1)
         self.assertEqual([[sizes[i] for i in g] for g in groups], [[4 * GB, 4 * GB], [8 * GB, 8 * GB]])
         self.assertEqual(sizes[spares[0]], 8 * GB)
-        option = next(o for o in fnas.layouts(sizes[:4]) if o["layout"] == "raidz1" and o["width"] == 4)
+        option = next(o for o in zfs.layouts(sizes[:4]) if o["layout"] == "raidz1" and o["width"] == 4)
         self.assertEqual(option["unused"], 2 * 4 * GB)
 
 def vdev(name, kind="disk", state="ONLINE", children=(), size=4 * GB, **extra):
@@ -686,14 +687,14 @@ class Scan(Base):
 
     def test_parses_pools_and_folds_long_lines(self):
         self.use(Fake([], imports=self.OUTPUT, import_rc=0))
-        tank, old = fnas.scan_pools()
+        tank, old = zfs.scan_pools()
         self.assertEqual((tank["pool"], tank["id"], tank["state"]), ("tank", "123", "ONLINE"))
         self.assertIn("read-only mode on this system. It cannot be accessed", tank["status"])
         self.assertEqual((old["pool"], old["state"]), ("old", "UNAVAIL"))
 
     def test_nothing_to_import_is_not_an_error(self):
         self.use(Fake([]))
-        self.assertEqual(fnas.scan_pools(), [])
+        self.assertEqual(zfs.scan_pools(), [])
 
     def test_real_failure_is_reported(self):
         fake = self.use(Fake([]))
@@ -705,7 +706,7 @@ class Scan(Base):
             return result
         with patch("run", broken):
             with self.assertRaisesRegex(fnas.FnasError, "permission denied"):
-                fnas.scan_pools()
+                zfs.scan_pools()
 
 
 class Import(Base):
@@ -1822,7 +1823,7 @@ class Parser(unittest.TestCase):
 
     def test_a_layout_the_engine_lacks_is_refused(self):
         with self.assertRaisesRegex(fnas.FnasError, r"no such layout: stripe \(ZFS offers single, mirror"):
-            fnas.plan("stripe", [GB])
+            zfs.plan("stripe", [GB])
 
 
 class Command(unittest.TestCase):
@@ -2017,6 +2018,129 @@ class Engines(unittest.TestCase):
         fnas.check_pool_name("mirror")
         with self.assertRaisesRegex(fnas.FnasError, "starts with a word ZFS reserves"):
             fnas.check_reserved_name("mirror")
+
+
+class Mdadm(unittest.TestCase):
+    """Traditional RAID: the layout maths, and reading what the kernel says."""
+
+    engine = importlib.import_module("fellowship_nas.engines.mdadm")
+
+    MDSTAT = """Personalities : [raid1] [raid5] [raid6]
+md127 : active raid5 sdd1[3] sdc1[1] sdb1[0]
+      7813772288 blocks super 1.2 level 5, 512k chunk, algorithm 2 [3/2] [UU_]
+      [=>...................]  recovery = 8.3% (652144896/7813772288) finish=120.4min
+
+md0 : inactive sda1[0](F)
+      1953382464 blocks super 1.2
+
+unused devices: <none>
+"""
+
+    SCAN = """ARRAY /dev/md/tank metadata=1.2 name=gandolf:tank UUID=1a2b:3c4d
+ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
+"""
+
+    def options(self, count, size=4 * GB):
+        return self.engine.layouts([size] * count)
+
+    def best(self, count):
+        option = self.options(count)[0]
+        self.assertTrue(option["recommended"])
+        return option["layout"], option["width"], option["groups"], option["spares"]
+
+    def test_recommendations_for_any_number_of_disks(self):
+        self.assertEqual(self.best(2), ("mirror", 2, 1, 0))
+        self.assertEqual(self.best(3), ("raid5", 3, 1, 0))
+        self.assertEqual(self.best(6), ("raid5", 6, 1, 0))
+        self.assertEqual(self.best(8), ("raid6", 8, 1, 0))
+        self.assertEqual(self.best(16), ("raid6", 8, 2, 0))
+        self.assertIsNone(self.engine.recommended(1))
+        self.assertEqual(self.options(1), [])
+
+    def test_only_layouts_that_fit_are_offered(self):
+        for count in range(2, 17):
+            for option in self.options(count):
+                with self.subTest(count=count, option=option):
+                    self.assertEqual(option["width"] * option["groups"] + option["spares"], count)
+                    low, high = self.engine.WIDTHS[option["layout"]]
+                    self.assertTrue(low <= option["width"] <= high)
+        self.assertNotIn("raid6", {o["layout"] for o in self.options(3)})
+        self.assertNotIn("raid10", {o["layout"] for o in self.options(2)})
+
+    def test_usable_space_and_survival(self):
+        four = self.options(4)
+        for layout, usable, survives in (("raid5", 3 * 4 * GB, 1), ("raid6", 2 * 4 * GB, 2),
+                                         ("raid10", 2 * 4 * GB, 1), ("mirror", 2 * 4 * GB, 1)):
+            option = next(o for o in four if o["layout"] == layout)
+            with self.subTest(layout=layout):
+                self.assertEqual((option["usable"], option["survives"]), (usable, survives))
+        self.assertEqual(next(o for o in four if o["layout"] == "mirror")["groups"], 2)
+
+    def test_mixed_sizes_group_alike_and_spare_the_largest(self):
+        sizes = [4 * GB, 8 * GB, 4 * GB, 8 * GB, 8 * GB]
+        groups, spares = self.engine.plan("mirror", sizes, 2, 1)
+        self.assertEqual([[sizes[i] for i in g] for g in groups], [[4 * GB, 4 * GB], [8 * GB, 8 * GB]])
+        self.assertEqual(sizes[spares[0]], 8 * GB)
+        option = next(o for o in self.engine.layouts(sizes[:4]) if o["layout"] == "raid5" and o["width"] == 4)
+        self.assertEqual(option["unused"], 2 * 4 * GB)
+
+    def test_a_layout_that_does_not_fit_says_so(self):
+        with self.assertRaisesRegex(fnas.FnasError, "mdadm offers"):
+            self.engine.plan("raidz2", [4 * GB] * 4)
+        with self.assertRaisesRegex(fnas.FnasError, "raid6 groups take 4 to 12"):
+            self.engine.plan("raid6", [4 * GB] * 3)
+        with self.assertRaisesRegex(fnas.FnasError, r"5 disks don't divide"):
+            self.engine.plan("mirror", [4 * GB] * 5, 2)
+
+    def test_reading_the_kernel_arrays(self):
+        with mock.patch.object(self.engine, "read", lambda path: self.MDSTAT):
+            found = self.engine.arrays()
+        self.assertEqual(sorted(found), ["/dev/md0", "/dev/md127"])
+        raid = found["/dev/md127"]
+        self.assertEqual((raid["state"], raid["members"][0]["device"]), ("active", "/dev/sdd1"))
+        self.assertEqual([m["slot"] for m in raid["members"]], [3, 1, 0])
+        self.assertEqual(raid["sync"]["function"], "recovery")
+        self.assertAlmostEqual(raid["sync"]["progress"], 0.083)
+        # A recovery is a degraded array, and a failed disk certainly is
+        self.assertEqual(self.engine.health(raid), "DEGRADED")
+        self.assertEqual(found["/dev/md0"]["members"][0]["state"], "failed")
+        self.assertIsNone(found["/dev/md0"]["sync"])
+        self.assertEqual(self.engine.health(found["/dev/md0"]), "DEGRADED")
+
+    def test_a_healthy_array(self):
+        mdstat = "md0 : active raid1 sdb1[1] sda1[0]\n  1953382464 blocks super 1.2 [2/2] [UU]\n"
+        with mock.patch.object(self.engine, "read", lambda path: mdstat):
+            raid = self.engine.arrays()["/dev/md0"]
+        self.assertEqual(self.engine.health(raid), "ONLINE")
+
+    def test_reading_what_mdadm_can_assemble(self):
+        output = SimpleNamespace(stdout=self.SCAN, stderr="", returncode=0)
+        with mock.patch.object(self.engine, "run", lambda *command, check=True: output):
+            found = self.engine.scan_arrays()
+        self.assertEqual([(a["name"], a["device"], a["uuid"]) for a in found],
+                         [("tank", "/dev/md/tank", "1a2b:3c4d"), ("old", "/dev/md/old", "5e6f:7a8b")])
+
+    def test_each_disk_is_mapped_to_its_array(self):
+        links = {"/dev/sdb1": "/dev/disk/by-id/ata-B_1-part1"}
+        with mock.patch.object(self.engine, "read", lambda path: self.MDSTAT), \
+                mock.patch.object(self.engine, "scan_arrays", lambda: [{"device": "/dev/md127", "name": "tank"},
+                                                                  {"device": "/dev/md0", "name": "old"}]), \
+                mock.patch.object(self.engine.disks, "by_id_links", lambda partitions=False: links):
+            devices = self.engine.pool_devices()
+        self.assertEqual(devices["/dev/sdb1"], "tank")
+        self.assertEqual(devices["/dev/disk/by-id/ata-B_1-part1"], "tank")
+        self.assertEqual(devices["/dev/sda1"], "old")
+
+    def test_says_why_it_cant_be_used(self):
+        with mock.patch.object(self.engine, "mdadm_installed", lambda: False), \
+                mock.patch.object(self.engine, "md_driver", lambda: True):
+            self.assertEqual(self.engine.unavailable(), "mdadm isn't installed")
+        with mock.patch.object(self.engine, "mdadm_installed", lambda: True), \
+                mock.patch.object(self.engine, "md_driver", lambda: False):
+            self.assertEqual(self.engine.unavailable(), "this kernel has no md driver")
+        with mock.patch.object(self.engine, "mdadm_installed", lambda: True), \
+                mock.patch.object(self.engine, "md_driver", lambda: True):
+            self.assertEqual(self.engine.unavailable(), "")
 
 
 class Services(unittest.TestCase):
