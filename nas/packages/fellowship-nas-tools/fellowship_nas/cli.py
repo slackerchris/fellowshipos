@@ -8,13 +8,15 @@ import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, ssh, system, usage, users
+from . import storage_checks
 from .engines import mdadm
 
 
 # Actions that change nothing worth saving
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
                      "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys",
-                     "array-checks", "watch-events"}
+                     "array-checks", "watch-events", "schedules",
+                     "apply-schedules", "scrub-all"}
 ON_OFF = ("on", "off")
 
 
@@ -76,6 +78,17 @@ def print_pools(pools):
         mode = "  read-only" if pool["readonly"] else ""
         print(f"{pool['name']}  {pool['health']}  {human_size(pool['allocated'])} used "
               f"of {human_size(pool['size'])}{mode}")
+
+
+def print_schedules(rows):
+    for row in rows:
+        if not row["available"]:
+            state = row["reason"]
+        elif not row.get("enabled"):
+            state = "automatic checks off"
+        else:
+            state = f"checks {row['description']}" + (f", next {when(row['next'])}" if row.get("next") else "")
+        print(f"{row['title']}: {state}" + (f" ({', '.join(row['pools'])})" if row["pools"] else ""))
 
 
 def print_engines(engines):
@@ -367,6 +380,16 @@ def build_parser():
     array_checks = pool.add_parser("array-checks", help="note the array checks Debian's mdcheck runs")
     array_checks.add_argument("when", choices=("starting", "resuming", "stopped"))
     pool.add_parser("watch-events", help="send mdadm's array events to alerts")
+    pool.add_parser("schedules", help="when each engine checks its pools by itself")
+    schedule = pool.add_parser("schedule", help="set when an engine checks its pools by itself")
+    schedule.add_argument("engine")
+    schedule.add_argument("--checks", choices=ON_OFF, help="check automatically")
+    schedule.add_argument("--every", choices=("monthly", "quarterly"))
+    schedule.add_argument("--week", type=int, choices=range(1, 5), help="the first to fourth of that day in the month")
+    schedule.add_argument("--day", choices=("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
+    schedule.add_argument("--hour", type=int, choices=range(24))
+    pool.add_parser("apply-schedules", help="bring the check timers in line with the saved schedules")
+    pool.add_parser("scrub-all", help="check every healthy pool on one engine now").add_argument("engine")
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
@@ -709,6 +732,25 @@ def dispatch_pool(args, show):
             mdadm.mdcheck_starting(resuming=args.when == "resuming")
     elif args.action == "watch-events":
         mdadm.watch_events()
+    elif args.action == "schedules":
+        show(storage_checks.status(), print_schedules)
+    elif args.action == "schedule":
+        storage_checks.set_schedule(args.engine, None if args.checks is None else args.checks == "on",
+                                    args.every, args.week, args.day, args.hour)
+        print(f"{pools.engine_title(args.engine)}: " + (
+            f"checks run by themselves {storage_checks.describe(args.engine)}"
+            if storage_checks.describe(args.engine) else "automatic checks are off"))
+    elif args.action == "apply-schedules":
+        for problem in storage_checks.apply():
+            print(f"fnas: {problem}", file=sys.stderr)
+    elif args.action == "scrub-all":
+        jobs_started, skipped = storage_checks.scrub_all(args.engine)
+        for job in jobs_started:
+            started(job)
+        for reason in skipped:
+            print(f"Skipped {reason}")
+        if not jobs_started and not skipped:
+            print(f"No {pools.engine_title(args.engine)} pools to check")
 
 
 def dispatch_job(args, show):

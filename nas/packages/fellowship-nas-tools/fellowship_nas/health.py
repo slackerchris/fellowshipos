@@ -7,7 +7,7 @@ import re
 import time
 
 from .common import DAY, HOUR, STATE_DIR, read_json, run, when, write_json
-from . import alerts, backup, config, disks, pools, services, shares, snapshots, usage
+from . import alerts, backup, config, disks, pools, services, shares, snapshots, storage_checks, usage
 from .engines import zfs
 
 
@@ -15,8 +15,6 @@ CHECK_STATE = os.path.join(STATE_DIR, "check.json")
 REMIND_AFTER = DAY
 FULL_WARNING = 80
 FULL_HIGH = 90
-# Debian scrubs on the second Sunday of each month, so up to 35 days apart
-SCRUB_MAX_AGE = 40 * DAY
 MODULES_DIR = "/lib/modules"
 SYSTEM_WARNING = 85
 SYSTEM_HIGH = 95
@@ -83,20 +81,44 @@ def scrub_findings(names, now):
     found = []
     for pool in names:
         engine = engine_of(pool)
+        kind = pools.find_pool(pool)["engine"]
+        damaged = engine.damage(pool)
+        if damaged:
+            found.append(finding(f"damage-{pool}", "medium", *damaged))
+        # With automatic checks turned off in Settings, an old check is a choice
+        allowed = storage_checks.max_age(kind)
+        if allowed is None:
+            continue
         last = engine.last_scrub(pool)
         # A pool never checked falls due a check's interval after it was made
         age = now - (last or engine.created(pool))
-        if age > SCRUB_MAX_AGE:
+        if age > allowed:
             word = "been checked" if engine.CHECK_WORD == "check" else "been scrubbed"
             since = (f"The last {engine.CHECK_WORD} was {age // DAY:.0f} days ago" if last
                      else f"It hasn't had a {engine.CHECK_WORD} since it was made, {age // DAY:.0f} days ago")
             found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't {word}",
-                                 f"{since}. One runs by itself {engine.CHECK_SCHEDULE}. "
+                                 f"{since}. {storage_checks.sentence(kind)} "
                                  f"Start one now from Storage, or sudo fnas pool scrub {pool}"))
-        damaged = engine.damage(pool)
-        if damaged:
-            found.append(finding(f"damage-{pool}", "medium", *damaged))
     return found
+
+
+def checks_off(found_pools):
+    """The engines, among these pools', whose automatic checks are turned off."""
+    return sorted({pools.engine_title(p["engine"]) for p in found_pools
+                   if storage_checks.max_age(p["engine"]) is None})
+
+
+def checks_passed(found_pools):
+    off = checks_off(found_pools)
+    return "Every pool checked on schedule" + (
+        f"; automatic checks turned off in Settings for {' and '.join(off)}" if off else "")
+
+
+def checks_not_applicable(found_pools):
+    """With every engine's automatic checks turned off, there is no schedule to be late for."""
+    if found_pools and len(checks_off(found_pools)) == len({p["engine"] for p in found_pools}):
+        return "Automatic checks are turned off in Settings → Storage checks"
+    return ""
 
 
 def snapshot_findings(shares, now):
@@ -220,9 +242,8 @@ def all_checks(now, found_disks=None):
               f"{count}, every disk present", no_pool),
         check("pool-space", "Pools", "Pools have free space", pool_findings(found),
               f"Every pool under {FULL_WARNING}% full", no_pool),
-        check("scrub", "Storage", "Monthly storage checks", scrub_findings(writable, now),
-              f"Every pool checked in the last {SCRUB_MAX_AGE // DAY:.0f} days",
-              "" if checkable else no_pool or "No writable pool to check"),
+        check("scrub", "Storage", "Storage checks", scrub_findings(writable, now), checks_passed(checkable),
+              checks_not_applicable(checkable) or ("" if checkable else no_pool or "No writable pool to check")),
         check("snapshots", "Protection", "Snapshots are being taken", snapshot_findings(zfs_shares, now),
               "Every share's newest snapshot is on time", "" if zfs_shares else "No shares yet"),
         check("backup", "Protection", "Backups are up to date", backup_findings(now),

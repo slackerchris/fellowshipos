@@ -4,3 +4,5 @@ fellowship_nas usr/lib/python3/dist-packages
 md-alert usr/lib/fellowship-nas
 systemd/mdcheck_start.service.d usr/lib/systemd/system
 systemd/mdcheck_continue.service.d usr/lib/systemd/system
+systemd/fellowship-nas-scrub@.service usr/lib/systemd/system
+systemd/fellowship-nas-scrub@.timer usr/lib/systemd/system

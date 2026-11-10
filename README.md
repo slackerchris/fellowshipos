@@ -38,7 +38,7 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 | **Shares** | Share over SMB, NFS, or both. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
 | **Snapshots & backup** | Set snapshot retention and schedule a backup to a second ZFS pool. Restore a missing share from that backup. Array shares show these controls disabled, with the reason. |
 | **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
-| **Settings** | Manage your password, sessions, certificates, system disk space, SSH, and power controls. |
+| **Settings** | Manage your password, sessions, certificates, system disk space, storage check schedules, SSH, and power controls. |
 
 **Available today.** ZFS pools and traditional RAID arrays are the implemented storage engines. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. Unraid-style storage is the next planned storage phase, followed by more share protocols, the Files app, and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
 

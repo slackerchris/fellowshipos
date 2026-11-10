@@ -149,6 +149,7 @@ a { color: var(--accent); }
 .row-end { justify-content: flex-end; }
 .stack { display: grid; gap: 12px; }
 .grid-2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.schedule-row + .schedule-row { border-top: 1px solid var(--border); padding-top: 12px; }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

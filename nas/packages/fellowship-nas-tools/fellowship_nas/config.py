@@ -7,7 +7,7 @@ import time
 import uuid
 
 from .common import ACCOUNT_NAME, FnasError, read_json, run, write_file, write_json
-from . import alerts, backup, pools, shares, snapshots, ssh, users
+from . import alerts, backup, pools, shares, snapshots, ssh, storage_checks, users
 
 
 INSTALL_ID_FILE = "/etc/fellowshipos/nas-install-id"
@@ -67,7 +67,7 @@ def current_config():
             "lan": lan, "backup": read_json(backup.BACKUP_FILE), "alerts": read_json(alerts.ALERTS_FILE, {}),
             "shares": shares.list_shares(), "users": local_users(),
             "groups": [{"name": g["name"], "gid": g["gid"]} for g in users.list_groups()],
-            "sharing": shares.sharing_settings(), "ssh": ssh.settings()}
+            "sharing": shares.sharing_settings(), "ssh": ssh.settings(), "checks": storage_checks.settings()}
 
 
 def save_config(claim=()):
@@ -189,6 +189,8 @@ def restore_config(pool):
                              saved_ssh.get("passwords") if isinstance(saved_ssh.get("passwords"), bool) else None)
     except FnasError as error:
         notes.append(f"the SSH settings weren't restored: {error}")
+    if "checks" in saved:
+        notes += [f"storage checks: {problem}" for problem in storage_checks.restore(saved["checks"])]
     sharing = saved.get("sharing")
     if isinstance(sharing, dict):
         for protocol in ("smb", "nfs"):

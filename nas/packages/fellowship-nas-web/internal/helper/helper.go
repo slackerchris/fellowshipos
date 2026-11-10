@@ -46,7 +46,7 @@ var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 var commands = map[string][]string{
 	"disk": {"list", "identify"},
 	"pool": {"list", "scan", "engines", "status", "details", "layouts", "create", "grow", "replace", "remove-spare",
-		"import", "export", "scrub", "repair"},
+		"import", "export", "scrub", "repair", "schedules", "schedule", "scrub-all"},
 	"share":    {"list", "create", "set", "access", "smb", "nfs", "refresh", "services", "delete"},
 	"sharing":  {"show", "smb", "nfs"},
 	"user":     {"list", "shares", "create", "set", "password", "smb-password", "keys", "remove"},

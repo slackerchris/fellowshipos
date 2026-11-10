@@ -156,6 +156,28 @@ def main(args):
         out = []
     elif area == "pool" and action == "status":
         out = pool_status(state, rest[0]) if as_json else "  pool: tank\n state: ONLINE\nconfig:\n\ttank  ONLINE\n"
+    elif area == "pool" and action == "schedules":
+        zfs = state.setdefault("schedule", {"enabled": True, "every": "monthly", "week": 2, "day": "sun", "hour": 0})
+        out = [{"engine": "zfs", "title": "ZFS", "available": True, "reason": "", "timed": True,
+                "pools": [p["name"] for p in state["pools"]], **zfs,
+                "description": "on the second Sunday of each month, at 00:00", "next": NOW + 9 * 86400},
+               {"engine": "mergerfs", "title": "Unraid-style", "available": False, "reason": "Not built yet (Phase 11)",
+                "timed": True, "pools": []},
+               {"engine": "mdadm", "title": "Traditional RAID", "available": False, "reason": "mdadm isn't installed",
+                "timed": False, "pools": []},
+               {"engine": "btrfs", "title": "Btrfs", "available": False, "reason": "Not built yet (Phase 14)",
+                "timed": True, "pools": []}]
+    elif area == "pool" and action == "schedule":
+        zfs = state.setdefault("schedule", {"enabled": True, "every": "monthly", "week": 2, "day": "sun", "hour": 0})
+        for flag, key in (("--checks", "enabled"), ("--every", "every"), ("--week", "week"), ("--day", "day"),
+                          ("--hour", "hour")):
+            if flag in rest:
+                value = rest[rest.index(flag) + 1]
+                zfs[key] = value == "on" if key == "enabled" else int(value) if key in ("week", "hour") else value
+        out = "ZFS: schedule saved"
+    elif area == "pool" and action == "scrub-all":
+        out = "\n".join(start_job(state, "scrub", f"Checking every block on {p['name']}", p["name"])
+                        for p in state["pools"])
     elif area == "pool" and action == "engines":
         # Only ZFS works here; the real list carries each engine's presentation from its module
         out = [{"name": "zfs", "title": "ZFS", "available": True, "reason": "",

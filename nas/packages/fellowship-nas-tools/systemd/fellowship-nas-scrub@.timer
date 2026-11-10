@@ -1,0 +1,11 @@
+# fnas writes each engine's schedule from Settings → Storage checks into
+# fellowship-nas-scrub@ENGINE.timer.d/schedule.conf, which replaces this one
+[Unit]
+Description=Check every %i pool for damage on a schedule
+
+[Timer]
+OnCalendar=Sun *-*-08..14 00:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

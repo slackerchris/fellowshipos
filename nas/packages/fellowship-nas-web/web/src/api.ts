@@ -479,6 +479,24 @@ export interface Engine {
     filesystems?: EngineFilesystem[];
 }
 
+/** One engine's row in Settings → Storage checks. An engine not built yet has only the first six. */
+export interface CheckSchedule {
+    engine: Engine["name"];
+    title: string;
+    available: boolean;
+    reason: string;
+    // Whether fnas sets the timing; Debian's own array check only turns on and off
+    timed: boolean;
+    pools: string[];
+    enabled?: boolean;
+    every?: "monthly" | "quarterly";
+    week?: number;
+    day?: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+    hour?: number;
+    description?: string;
+    next?: number | null;
+}
+
 let engineList: Promise<Record<string, Engine>> | null = null;
 
 /** Every engine by name. They change only with a new fnas, so this asks once per page load. */

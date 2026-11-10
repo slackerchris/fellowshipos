@@ -42,7 +42,7 @@ PRESENTATION = {
     "check_name": "array check",
     "check_text": ("Check array reads every block on {pool} and compares it with the parity or the other copy. "
                    "It changes nothing: blocks that don't match are counted, and a repair, which you start "
-                   f"yourself, rewrites them. It runs by itself {CHECK_SCHEDULE}; shares stay usable while it does."),
+                   "yourself, rewrites them. Shares stay usable while it runs."),
     "errors_label": "Blocks that didn't match at the last check",
     "replace_text": ("The array rebuilds that disk's data onto the new one from the other disks; it stays in "
                      "use meanwhile."),

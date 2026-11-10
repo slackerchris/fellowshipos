@@ -14,11 +14,16 @@ bump.
 
 ### Added
 
+- **Settings → Storage checks**: one row per engine, with whether its pools are checked
+  by themselves, when, the next run, and Check now. ZFS pools are scrubbed by fnas's own
+  `fellowship-nas-scrub@zfs.timer`, monthly or every three months, on a chosen week,
+  day and hour; the default is Debian's second Sunday at midnight, so an upgrade changes
+  nothing. Arrays keep Debian's mdcheck, which the row turns on or off.
+- `fnas pool schedules`, `fnas pool schedule ENGINE`, `fnas pool scrub-all ENGINE` and
+  `fnas pool apply-schedules`. The schedules are saved with the settings on every pool.
 - Health reports read, write and checksum errors ZFS counted on disks still in a pool.
   Before, a pool with errors and every disk online raised nothing until a disk dropped
   out.
-- The role's postinst turns Debian's monthly array check on if mdadm's preset left it
-  off, and says so when it can't.
 - mdadm's array events reach alerts the moment `mdmonitor` sees them, rather than at
   the next hourly check: a failed disk, a degraded or vanished array and a missing spare
   are alerts, and a finished rebuild is a note. `fnas` points mdadm at
@@ -72,6 +77,14 @@ bump.
 
 ### Changed
 
+- fnas scrubs ZFS pools instead of Debian's `zfsutils-linux` cron job: each pool gets
+  `org.debian:periodic-scrub=disable`, which that job honours, so only one runs. Its
+  monthly TRIM still does.
+- Health's **Storage checks** judges each pool by its engine's schedule (40 days on a
+  monthly one, 100 on a quarterly one), and shows automatic checks turned off as a
+  choice rather than a late check.
+- The role's postinst applies the saved schedules instead of always turning Debian's
+  array check on, so turning it off in Settings stays off across upgrades.
 - Each engine describes how the desktop presents its pools: the check button and its
   wording, the ways it grows, its formats, and whether it has snapshots, backup,
   compression and a separate repair. `fnas pool engines` sends that, shares carry a

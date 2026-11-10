@@ -210,7 +210,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - Layouts: single, mirror, RAIDZ1, RAIDZ2, RAIDZ3, and pools of several groups ("two 6-disk RAIDZ2 groups"). Hot spares. Growing a pool by adding a group or expanding a RAIDZ group by one disk.
 - Defaults: `ashift=12`, `compression=lz4`, `atime=off`, `xattr=sa`, `acltype=posixacl`, `dnodesize=auto`.
 - Shares are datasets in `POOL/shares`; settings are saved in `POOL/fellowship-config`.
-- Snapshots by Sanoid, monthly scrub from Debian's `zfsutils-linux` cron job (every healthy pool, on the second Sunday; the role depends on `cron` so the job runs), events from `zed`.
+- Snapshots by Sanoid, events from `zed`, and scrubs from `fnas`'s own timer (see Storage checks below). Every ZFS pool fnas creates, imports or sees on upgrade gets `org.debian:periodic-scrub=disable`, which Debian's `zfsutils-linux` cron job honours, so only fnas scrubs; the cron job's monthly TRIM still runs. The role depends on `cron` for that TRIM.
 - **Kernel and ZFS updates:** there's no version pin.
   - `zfs-kernel-check` runs after kernel and header installs. With no module for the new kernel, it keeps GRUB on the running kernel, and `fnas check` raises an alert.
   - `unattended-upgrades` never reboots by itself.
@@ -256,7 +256,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - the filesystem aligned to the array's stripe
 - **Boot:** the array is recorded in `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID (from `/etc/fstab`; see the open question on a systemd mount unit).
 - **Alerts:** `fnas` adds a `PROGRAM` line to `mdadm.conf`, so Debian's `mdmonitor` service runs `/usr/lib/fellowship-nas/md-alert` for each event, within its one-minute poll. A failed disk, a degraded or vanished array and a missing spare are alerts; a finished rebuild is a note.
-- **Checks:** Debian's `mdcheck` timers check every array from the first Sunday of each month, six hours a night until done. mdadm's preset turns them on, and the role's postinst turns them on if not, saying so when it can't. A drop-in on those services tells `fnas` which arrays they started and finished, so Health records them beside the checks `fnas` starts, and a check's mismatch count is a Health finding. On ZFS the same finding reports read, write and checksum errors on disks still in the pool.
+- **Checks:** Debian's `mdcheck` timers check every array from the first Sunday of each month, six hours a night until done. Settings → Storage checks turns them on or off (off masks both timers, so mdadm's preset can't undo it); the timing stays Debian's until fnas has a check that spans nights. A drop-in on those services tells `fnas` which arrays they started and finished, so Health records them beside the checks `fnas` starts, and a check's mismatch count is a Health finding. On ZFS the same finding reports read, write and checksum errors on disks still in the pool.
 - **Shares and settings:** shares are folders in `/mnt/NAME/shares`; settings in `/mnt/NAME/fellowship-config`.
 - **No snapshots:** shares show "No snapshots on this engine".
 - **Growing:** one disk at a time. The reshape runs as a job; the filesystem is grown when it finishes.
@@ -281,9 +281,9 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   as a job, and reports the blocks that do not match. Repair is a separate command with
   its own typed confirmation, because it can keep the wrong copy. When each check
   finished is kept in `/var/lib/fellowship-nas/checks.json`.
-- **Health:** the monthly check is now **Monthly storage checks**. It covers every
-  writable pool, not only ZFS ones, and each engine names the action in its own words:
-  Scrub for a ZFS pool, Array check for an array.
+- **Health:** the storage check is now **Storage checks**. It covers every writable pool,
+  not only ZFS ones, each engine names the action in its own words (Scrub for a ZFS pool,
+  Array check for an array), and a pool is overdue by its engine's schedule in Settings.
 - **No snapshots:** a share on an array keeps no history, so Previous Versions has
   nothing to offer, and the backup engine still covers ZFS pools only. Both stay visible
   in the desktop with that reason rather than disappearing.
@@ -302,6 +302,14 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   importing an array made on another machine are still only written from mdadm's
   documented behaviour.
 
+**Storage checks** (Chris, Nov 10)
+
+- **Settings → Storage checks** has one row per engine, built or not: whether its pools are checked by themselves, when, the next run, its pools, and **Check now** (the same check as Storage's button, on every healthy pool of that engine).
+- **Engines fnas schedules** (ZFS now, SnapRAID in Phase 11) run from `fellowship-nas-scrub@ENGINE.timer`, which calls `fnas pool scrub-all ENGINE`. The row sets how often (every month, or every three months), the week (first to fourth), the day and the hour; fnas writes them as the timer's `OnCalendar` in a drop-in. The defaults reproduce Debian's: the second Sunday of each month, at midnight, so an upgrade changes nothing.
+- **Arrays** keep Debian's `mdcheck`, which pauses each morning and carries on the next night, so their row only turns it on or off. Timing moves into fnas when, and if, fnas grows a check that spans nights.
+- **Health** reads each engine's schedule: a pool is overdue after 40 days on a monthly schedule and 100 on a quarterly one. Automatic checks turned off are a choice, shown as such, not a late check.
+- **Saved with the settings** on every pool, and brought back by a restore.
+
 **Unraid-style (mergerfs + SnapRAID)** (absorbs the old storage node)
 
 - **Disks:** each data disk gets its own XFS filesystem, mounted at `/srv/disks/SERIAL`, and mergerfs joins them at `/mnt/NAME`.
@@ -310,7 +318,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **Shares and settings:** shares are folders in `/mnt/NAME/shares`, as on every engine, so the settings folder beside them isn't taken for a share; settings are in `/mnt/NAME/fellowship-config`, copied to every data disk so the pool can be rebuilt after a reinstall.
 - **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, which `jobs.KINDS` doesn't have yet; it goes through `jobs.work` like the others, with an alert when a sync finishes or fails.
 - **Packages:** `mergerfs` and `snapraid` are dependencies of `fellowship-nas-tools`, added in the same commit as the engine, as `mdadm` and `xfsprogs` are.
-- **Schedules:** `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` runs, then a weekly partial `snapraid scrub`. The sync is skipped with an alert if too many files were deleted, a sign of a missing disk.
+- **Schedules:** `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` runs, then a weekly partial `snapraid scrub`, both from `fnas`'s own timers and set in the same Settings → Storage checks rows as ZFS, from the first day. The sync is skipped with an alert if too many files were deleted, a sign of a missing disk.
 - **Repairs:** a failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
 - **Protection is visible:** the Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.
 
@@ -500,7 +508,7 @@ The Health app lists **every check, its result and when it last ran**. A check t
 | Critical | A pool failed or lost a disk; a disk failing; SMB or NFS down while shares use it; a NAS service stopped; snapshots failing or stopped; a backup failed; a long job failed |
 | High | A pool 90% full; the system disk 95% full; no ZFS module for the next kernel (a restart would leave ZFS pools unmounted); repeated wrong passwords |
 | Medium | A pool 80% full; the system disk 85% full; a backup overdue; a disk to keep an eye on |
-| Low | A pool not scrubbed in 40 days; settings from another install not restored |
+| Low | A pool not checked on its schedule (40 days for monthly, 100 for every three months; never, with automatic checks turned off); settings from another install not restored |
 
 On ntfy, critical is sent as urgent, high as high, medium as default, and low and info as low. Email subjects start with the level.
 
@@ -617,7 +625,7 @@ The desktop is the interface from the start. Every app opens in a window; there 
 | Health | Every check with its result and time; services; system; pools; disks; alerts (see Health) |
 | Alerts | The notification history, and email and ntfy with test buttons |
 | Files | The file manager (below) |
-| Settings | Hostname and time zone; network (DHCP or a static address, DNS, gateway); certificate; updates; system space; restart and shut down; active sessions; Run setup again |
+| Settings | Hostname and time zone; network (DHCP or a static address, DNS, gateway); certificate; updates; system space; storage checks; restart and shut down; active sessions; Run setup again |
 
 **Files app**
 

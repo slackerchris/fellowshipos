@@ -37,12 +37,16 @@ def check_pool_name(name):
 
 def engines():
     """Every engine, and why it can't be used here if it can't."""
+    from . import storage_checks
     shown = []
     for name, title, phase, summary in CATALOGUE:
         reason = ENGINES[name].unavailable() if name in ENGINES else f"Not built yet (Phase {phase})"
-        shown.append({"name": name, "title": title, "available": not reason, "reason": reason, "summary": summary,
-                      # An engine not built yet has nothing to present
-                      **(ENGINES[name].PRESENTATION if name in ENGINES else {})})
+        engine = {"name": name, "title": title, "available": not reason, "reason": reason, "summary": summary}
+        if name in ENGINES:
+            presentation = ENGINES[name].PRESENTATION
+            # When it checks by itself is set in Settings, so it joins the engine's own words here
+            engine.update(presentation, check_text=presentation["check_text"] + " " + storage_checks.sentence(name))
+        shown.append(engine)
     return shown
 
 

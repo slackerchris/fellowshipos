@@ -1,7 +1,8 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
 import {
-    Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, onOff, sessions, when,
+    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, jobStarted,
+    onOff, sessions, when,
 } from "./api";
 import { DesktopContext } from "./desktop/context";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
@@ -274,6 +275,113 @@ function Ssh() {
     );
 }
 
+const DAYS = { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" };
+const WEEKS = ["first", "second", "third", "fourth"];
+
+/** Change when an engine fnas schedules checks its pools: how often, which day of the month, and the hour. */
+function ScheduleForm({ row, done }: { row: CheckSchedule; done: () => void }) {
+    const [every, setEvery] = useState(row.every!);
+    const [week, setWeek] = useState(row.week!);
+    const [day, setDay] = useState(row.day!);
+    const [hour, setHour] = useState(row.hour!);
+    const action = useAction();
+    return (
+        <form class="stack" onSubmit={event => {
+            event.preventDefault();
+            action.run(async () => {
+                await fnas(["pool", "schedule", row.engine, "--every", every, "--week", String(week), "--day", day,
+                            "--hour", String(hour)]);
+                done();
+            });
+        }}>
+            <div class="grid-2">
+                <Field label="How often">
+                    <select value={every} onChange={event => setEvery(event.currentTarget.value as typeof every)}>
+                        <option value="monthly">Every month</option>
+                        <option value="quarterly">Every three months (January, April, July, October)</option>
+                    </select>
+                </Field>
+                <Field label="Which week">
+                    <select value={week} onChange={event => setWeek(Number(event.currentTarget.value))}>
+                        {WEEKS.map((name, index) => <option key={name} value={index + 1}>The {name}</option>)}
+                    </select>
+                </Field>
+                <Field label="Day">
+                    <select value={day} onChange={event => setDay(event.currentTarget.value as typeof day)}>
+                        {Object.entries(DAYS).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+                    </select>
+                </Field>
+                <Field label="Starting at" hint="A check takes hours on large pools; shares stay usable meanwhile">
+                    <select value={hour} onChange={event => setHour(Number(event.currentTarget.value))}>
+                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+                    </select>
+                </Field>
+            </div>
+            <div class="row">
+                <Button type="button" onClick={done}>Cancel</Button>
+                <Button kind="primary" type="submit" busy={action.busy}>Save</Button>
+            </div>
+            <Result outcome={action.outcome} />
+        </form>
+    );
+}
+
+/** One engine: whether its pools are checked by themselves, when, and a way to check them now. */
+function ScheduleRow({ row, reload }: { row: CheckSchedule; reload: () => void }) {
+    const [changing, setChanging] = useState(false);
+    const action = useAction(reload);
+    if (!row.available) {
+        return (
+            <div class="stack schedule-row">
+                <div class="row"><strong>{row.title}</strong> <Badge kind="neutral">{row.reason}</Badge></div>
+            </div>
+        );
+    }
+    return (
+        <div class="stack schedule-row">
+            <div class="row">
+                <strong>{row.title}</strong>{" "}
+                {row.enabled ? <Badge kind="good">on</Badge> : <Badge kind="neutral">off</Badge>}
+            </div>
+            <p class="small">{row.enabled
+                ? <>Checks every {row.title} pool by itself {row.description}.{row.next ? ` Next: ${when(row.next)}.` : ""}</>
+                : <>Automatic checks are off. Health won't count a pool as overdue; start a check here or in Storage
+                    whenever you like.</>}
+                {!row.timed && <span class="muted"> This is Debian's own array check, which pauses each morning and carries
+                    on the next night, so here it only turns on or off.</span>}</p>
+            <p class="small muted">{row.pools.length ? `Pools: ${row.pools.join(", ")}` : `No ${row.title} pools yet.`}</p>
+            <label class="check">
+                <input type="checkbox" checked={row.enabled} disabled={action.busy}
+                       onChange={event => action.run(() => fnas(["pool", "schedule", row.engine, "--checks",
+                                                                 onOff(event.currentTarget.checked)]))} />
+                <span>Check automatically</span>
+            </label>
+            {changing
+                ? <ScheduleForm row={row} done={() => { setChanging(false); reload(); }} />
+                : <div class="row">
+                    {row.timed && <Button disabled={!row.enabled} onClick={() => setChanging(true)}>Change schedule</Button>}
+                    <Button busy={action.busy} disabled={!row.pools.length}
+                            onClick={() => action.run(async () => jobStarted(await fnas(["pool", "scrub-all", row.engine]),
+                                                                             "in Storage"))}>Check now</Button>
+                </div>}
+            <Result outcome={action.outcome} />
+        </div>
+    );
+}
+
+function StorageChecks() {
+    const rows = useLoad(() => fnasJson<CheckSchedule[]>(["pool", "schedules"]));
+    return (
+        <Card title="Storage checks" actions={<Button onClick={rows.reload}>Refresh</Button>}>
+            <div class="stack">
+                <p class="small">A check reads every block on a pool and compares it with its checksum, parity or other copy,
+                    so damage is found while it can still be put right. Each kind of storage has its own schedule.</p>
+                <Loading loaded={rows}>{() => <>{rows.data!.map(row => <ScheduleRow key={row.engine} row={row} reload={rows.reload} />)}</>}</Loading>
+            </div>
+        </Card>
+    );
+}
+
 function SetupAgain() {
     const desktop = useContext(DesktopContext);
     return (
@@ -302,6 +410,7 @@ const SECTIONS = [
     { id: "certificate", label: "Certificate", admin: true },
     { id: "network", label: "Network", admin: true },
     { id: "updates", label: "Updates", admin: true },
+    { id: "checks", label: "Storage checks", admin: true },
     { id: "ssh", label: "SSH", admin: true },
     { id: "power", label: "Power", admin: true },
     { id: "setup", label: "Setup", admin: true },
@@ -332,6 +441,7 @@ export function Settings() {
                 {section === "updates" && <NotBuilt title="Updates" phase={15}>Seeing and installing updates comes here.
                     Debian security updates already install by themselves every day, without restarting; Health shows
                     how many updates are waiting and whether a restart is needed.</NotBuilt>}
+                {section === "checks" && <StorageChecks />}
                 {section === "ssh" && <Ssh />}
                 {section === "power" && <Power />}
                 {section === "setup" && <SetupAgain />}

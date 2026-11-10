@@ -23,12 +23,10 @@ if [ "$1" = "configure" ]; then
     # they happen, rather than at the next hourly check
     fnas pool watch-events || true
 
-    # Debian's monthly array check, which Health records through fnas's drop-ins.
-    # mdadm's preset turns it on; this makes sure, and says so when it can't
-    if ! systemctl is-enabled --quiet mdcheck_start.timer 2> /dev/null; then
-        systemctl enable mdcheck_start.timer mdcheck_continue.timer ||
-            echo "fellowship-nas: couldn't turn on mdcheck_start.timer, so arrays won't be checked each month" >&2
-    fi
+    # Storage checks run on the schedules in Settings: fnas's timer scrubs ZFS
+    # pools in place of Debian's cron job, and Debian's mdcheck checks arrays
+    # unless turned off. Says so when a timer can't be set
+    fnas pool apply-schedules || true
 
     # Picks up the alert hook
     systemctl try-restart zfs-zed.service

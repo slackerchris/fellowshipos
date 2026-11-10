@@ -13,6 +13,9 @@ POOL_PROPERTIES = ["ashift=12"]
 DATASET_PROPERTIES = ["compression=lz4", "atime=off", "xattr=sa",
                       "acltype=posixacl", "dnodesize=auto"]
 DEFAULT_DATASETS = ["shares", "home", "backups", "fellowship-config"]
+# Debian's monthly cron job scrubs every pool unless this says not to. fnas
+# scrubs on the schedule in Settings instead, so only one of them runs.
+DEBIAN_SCRUB = "org.debian:periodic-scrub"
 LAYOUTS = ("single", "mirror", "raidz1", "raidz2", "raidz3")
 # Disks per group that make sense for each layout; wider RAIDZ groups take
 # days to resilver
@@ -25,8 +28,6 @@ RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 SCRUB_DONE = re.compile(r"scrub (?:repaired|canceled).* on (\w{3} \w{3} +\d+ [\d:]+ \d{4})")
 # What this engine calls its monthly check, for Health's wording
 CHECK_WORD = "scrub"
-# When Debian's zfsutils-linux cron job scrubs every healthy pool by itself
-CHECK_SCHEDULE = "on the second Sunday of each month"
 # How the desktop presents a pool on this engine, so it never asks which engine
 # it is. {pool} and {group} are filled in where they're shown.
 PRESENTATION = {
@@ -41,7 +42,7 @@ PRESENTATION = {
     "check_name": "check for damage",
     "check_text": ("Check for damage (a scrub) reads every block on {pool} and checks it against its checksum. "
                    "Damaged blocks are repaired from another copy or parity where the pool has one, and reported "
-                   f"where it doesn't. It runs by itself {CHECK_SCHEDULE}; shares stay usable while it does."),
+                   "where it doesn't. Shares stay usable while it runs."),
     "errors_label": "Read, write and checksum errors",
     "replace_text": "ZFS copies its data onto the new disk; the pool stays in use meanwhile.",
     "filesystems": [],
@@ -235,7 +236,7 @@ def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0,
     command = ["zpool", "create", "-m", pools.mountpoint(name)]
     for prop in POOL_PROPERTIES:
         command += ["-o", prop]
-    for prop in DATASET_PROPERTIES:
+    for prop in DATASET_PROPERTIES + [f"{DEBIAN_SCRUB}=disable"]:
         command += ["-O", prop]
     paths = [d["by_id"] for d in chosen]
     run_accepting_sizes(*command, name, *vdev_args(layout, [[paths[i] for i in g] for g in groups],
@@ -516,8 +517,16 @@ def import_pool(pool, readonly, force=False):
         else:
             run("zfs", "set", f"mountpoint={pools.mountpoint(name)}", name)
     run("zfs", "mount", "-a")
+    if not readonly:
+        take_over_scrubs(name)
     shares.migrate()
     shares.write_config()
+
+
+def take_over_scrubs(name):
+    """Stop Debian's cron job scrubbing this pool, since fnas does it on its own
+    schedule. The setting travels with the pool, which only Debian reads."""
+    run("zfs", "set", f"{DEBIAN_SCRUB}=disable", name, check=False)
 
 
 def export_pool(name):

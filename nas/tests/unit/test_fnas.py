@@ -217,7 +217,8 @@ class Create(Base):
             calls = self.create(Fake(EMPTY), "tank", "raidz1", ["/dev/vdb", "/dev/vdc", "/dev/vdd"])
         self.assertEqual(calls[0], (
             "zpool", "create", "-m", "/mnt/tank", "-o", "ashift=12", "-O", "compression=lz4", "-O", "atime=off",
-            "-O", "xattr=sa", "-O", "acltype=posixacl", "-O", "dnodesize=auto", "tank", "raidz1",
+            "-O", "xattr=sa", "-O", "acltype=posixacl", "-O", "dnodesize=auto",
+            "-O", "org.debian:periodic-scrub=disable", "tank", "raidz1",
             "/dev/disk/by-id/virtio-VDB", "/dev/disk/by-id/virtio-VDC", "/dev/disk/by-id/virtio-VDD"))
         self.assertEqual(calls[1:], [("zfs", "create", f"tank/{d}") for d in fnas.DEFAULT_DATASETS])
 
@@ -737,12 +738,14 @@ class Import(Base):
         fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
         fnas.import_pool("tank", False)
         self.assertEqual(fake.calls, [(*self.IMPORT, "-N", "tank"), ("zfs", "set", "mountpoint=/mnt/tank", "tank"),
-                                      ("zfs", "mount", "-a")])
+                                      ("zfs", "mount", "-a"), ("zfs", "set", "org.debian:periodic-scrub=disable", "tank")])
 
     def test_a_pool_made_here_keeps_its_place(self):
         fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0, mounted_by="local"))
         fnas.import_pool("tank", False)
-        self.assertEqual(fake.calls, [(*self.IMPORT, "-N", "tank"), ("zfs", "mount", "-a")])
+        # fnas scrubs it on its own schedule from now on, rather than Debian's cron job
+        self.assertEqual(fake.calls, [(*self.IMPORT, "-N", "tank"), ("zfs", "mount", "-a"),
+                                      ("zfs", "set", "org.debian:periodic-scrub=disable", "tank")])
 
     def test_read_only_goes_under_mnt_without_writing(self):
         fake = self.use(Fake([], imports=self.IMPORTS, import_rc=0))
@@ -1651,15 +1654,15 @@ class Protection(Base):
         self.healthy(status=status)
         expected = fnas.datetime.datetime(2026, 11, 8, 0, 24, 1).timestamp()
         self.assertEqual(fnas.last_scrub("tank"), expected)
-        self.assertEqual(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE - 1), [])
-        self.assertEqual(len(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE + 1)), 1)
+        self.assertEqual(fnas.scrub_findings(["tank"], expected + fnas.MAX_AGE["monthly"] - 1), [])
+        self.assertEqual(len(fnas.scrub_findings(["tank"], expected + fnas.MAX_AGE["monthly"] + 1)), 1)
 
     def test_a_pool_never_checked_falls_due_after_it_was_made(self):
-        engine = SimpleNamespace(CHECK_WORD="check", CHECK_SCHEDULE="monthly", last_scrub=lambda pool: 0,
+        engine = SimpleNamespace(CHECK_WORD="check", last_scrub=lambda pool: 0,
                                  created=lambda pool: 1000, damage=lambda pool: None)
-        with patch("engine_of", lambda pool: engine):
-            self.assertEqual(fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE - 1), [])
-            found = fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE + 1)
+        with patch("engine_of", lambda pool: engine), patch("find_pool", lambda pool: {"engine": "mdadm"}):
+            self.assertEqual(fnas.scrub_findings(["vault"], 1000 + fnas.MAX_AGE["monthly"] - 1), [])
+            found = fnas.scrub_findings(["vault"], 1000 + fnas.MAX_AGE["monthly"] + 1)
         self.assertEqual(len(found), 1)
         self.assertIn("since it was made", found[0]["message"])
 
@@ -1875,6 +1878,74 @@ class Command(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StorageChecks(unittest.TestCase):
+    """When each engine checks its pools by itself, from Settings → Storage checks."""
+
+    checks = importlib.import_module("fellowship_nas.storage_checks")
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.ran = []
+        for name, value in (("SETTINGS_FILE", os.path.join(self.dir, "checks.json")),
+                            ("DROP_IN_DIR", os.path.join(self.dir, "{engine}.d"))):
+            patcher = mock.patch.object(self.checks, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(self.checks, "run", lambda *command, check=True: self.ran.append(command)
+                                          or SimpleNamespace(stdout="", stderr="", returncode=0)),
+                        mock.patch.object(self.checks.pools, "usable_engines", lambda: {"mdadm": None}),
+                        mock.patch.object(self.checks.pools, "list_pools", lambda: [])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_the_defaults_keep_debians_schedule(self):
+        current = self.checks.settings()
+        self.assertEqual(self.checks.calendar(current["zfs"]), "Sun *-*-08..14 00:00:00")
+        self.assertEqual(self.checks.describe("zfs"), "on the second Sunday of each month, at 00:00")
+        self.assertEqual(self.checks.max_age("zfs"), 40 * fnas.DAY)
+        self.assertEqual(self.checks.max_age("mdadm"), 40 * fnas.DAY)
+
+    def test_a_quarterly_schedule(self):
+        self.checks.set_schedule("zfs", every="quarterly", week=1, day="sat", hour=3)
+        current = self.checks.settings()["zfs"]
+        self.assertEqual(self.checks.calendar(current), "Sat *-01,04,07,10-01..07 03:00:00")
+        with open(os.path.join(self.dir, "zfs.d", "schedule.conf")) as file:
+            self.assertIn("OnCalendar=\nOnCalendar=Sat *-01,04,07,10-01..07 03:00:00\n", file.read())
+        self.assertIn(("systemctl", "enable", "--now", "fellowship-nas-scrub@zfs.timer"), self.ran)
+        self.assertEqual(self.checks.max_age("zfs"), 100 * fnas.DAY)
+
+    def test_turned_off_is_a_choice_not_a_late_check(self):
+        self.checks.set_schedule("zfs", enabled=False)
+        self.checks.set_schedule("mdadm", enabled=False)
+        self.assertIsNone(self.checks.max_age("zfs"))
+        self.assertIn("turned off", self.checks.sentence("mdadm"))
+        self.assertIn(("systemctl", "disable", "--now", "fellowship-nas-scrub@zfs.timer"), self.ran)
+        # Masked, so mdadm's own preset can't turn the check back on
+        self.assertIn(("systemctl", "mask", "--now", *self.checks.MDCHECK_TIMERS), self.ran)
+
+    def test_health_shows_turned_off_checks_as_a_choice(self):
+        found = [{"engine": "zfs"}, {"engine": "mdadm"}]
+        self.checks.set_schedule("mdadm", enabled=False)
+        self.assertEqual(fnas.checks_not_applicable(found), "")
+        self.assertEqual(fnas.checks_passed(found),
+                         "Every pool checked on schedule; automatic checks turned off in Settings for Traditional RAID")
+        self.checks.set_schedule("zfs", enabled=False)
+        self.assertEqual(fnas.checks_not_applicable(found), "Automatic checks are turned off in Settings → Storage checks")
+
+    def test_debians_array_check_only_turns_on_or_off(self):
+        with self.assertRaisesRegex(fnas.FnasError, "only be turned on or off"):
+            self.checks.set_schedule("mdadm", every="quarterly")
+        for wrong in ({"week": 5}, {"day": "funday"}, {"hour": 24}, {"every": "weekly"}):
+            with self.subTest(wrong=wrong), self.assertRaises(fnas.FnasError):
+                self.checks.set_schedule("zfs", **wrong)
+
+    def test_a_broken_settings_file_falls_back_to_the_defaults(self):
+        fnas.write_json(self.checks.SETTINGS_FILE, {"zfs": {"every": "weekly", "hour": 3}, "mdadm": "yes"})
+        self.assertEqual(self.checks.settings(), self.checks.DEFAULTS)
 
 
 class DiskHealth(unittest.TestCase):

@@ -1,0 +1,7 @@
+[Unit]
+Description=Check every %i pool for damage
+After=zfs.target local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fnas pool scrub-all %i
