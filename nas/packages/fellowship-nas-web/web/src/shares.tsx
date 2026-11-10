@@ -5,7 +5,7 @@ import {
     fnasJson, onOff,
 } from "./api";
 import { NO_SNAPSHOTS, PolicyEditor, snapshotsWork } from "./backups";
-import { AccessEditor, CreateShare, LanSubnet, NfsServer, SmbServer, WaysToShare, nobody } from "./sharing";
+import { AccessEditor, CreateShare, LanSubnet, NfsServer, SmbServer, nobody } from "./sharing";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 /** "kim (read), group family (read and write)" */
@@ -171,7 +171,7 @@ function ShareSettings({ share, lan, onDone }: { share: Share; lan: string; onDo
     const [tab, setTab] = useState<keyof typeof TABS>("access");
     return (
         <div class="stack">
-            <div class="segmented" role="tablist">
+            <div class="segmented subtle share-panel-tabs" role="tablist">
                 {(Object.keys(TABS) as (keyof typeof TABS)[]).map(key => (
                     <button key={key} type="button" role="tab" aria-selected={tab === key} class={tab === key ? "current" : ""}
                             onClick={() => setTab(key)}>{TABS[key]}</button>
@@ -201,75 +201,149 @@ async function deletionTerms(name: string): Promise<{ phrase: string; lost: stri
     throw new FnasError("fnas didn't ask for confirmation");
 }
 
-function ShareList({ shares, lan, reload }: { shares: Share[]; lan: string; reload: () => void }) {
-    const [editing, setEditing] = useState<string | null>(null);
+/** "Sam, Family", "Everyone": who can use a share, without the read or write detail. */
+export function accessNames(share: Share) {
+    if (share.mode === "everyone") {
+        return "Everyone";
+    }
+    const names = [...Object.keys(share.access.users), ...Object.keys(share.access.groups)]
+        .map(name => name.charAt(0).toUpperCase() + name.slice(1));
+    if (!names.length) {
+        return "Nobody yet";
+    }
+    return names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
+}
+
+/** The protocols a share is on, as one short line: "SMB · NFS". */
+function protocolsOf(share: Share) {
+    return [share.smb ? "SMB" : "", share.nfs ? "NFS" : ""].filter(Boolean).join(" · ");
+}
+
+/** Where to reach a share from another machine, per protocol it is on. */
+function connectLines(share: Share) {
+    const host = window.location.hostname;
+    const lines = [];
+    if (share.smb) {
+        lines.push(`\\\\${host}\\${share.name}`, `smb://${host}/${share.name}`);
+    }
+    if (share.nfs) {
+        lines.push(`mount ${host}:${share.path} /media/${share.name}`);
+    }
+    return lines;
+}
+
+const FolderIcon = () => (
+    <svg class="folder-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+        <path d="M2.5 5.6c0-.7.6-1.3 1.3-1.3h3.4c.4 0 .7.1 1 .4l1.4 1.4h6.6c.7 0 1.3.6 1.3 1.3v7.2c0 .7-.6 1.3-1.3 1.3H3.8c-.7 0-1.3-.6-1.3-1.3z"
+              fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+    </svg>
+);
+
+/** One share's panel: how to reach it, which ways it is shared, and its settings. */
+function SharePanel({ share, lan, busy, toggle, onDone }: {
+    share: Share; lan: string; busy: boolean; toggle: (share: Share, protocol: "nfs" | "smb") => void;
+    onDone: () => void;
+}) {
+    const lines = connectLines(share);
+    return (
+        <div class="stack share-panel">
+            <div class="connect-block">
+                <span class="field-label">Connect from another device</span>
+                {lines.length
+                    ? lines.map(line => <code key={line} class="mono small">{line}</code>)
+                    : <span class="muted small">Turn on SMB or NFS below to reach it from another machine.</span>}
+                <span class="muted small mono">{share.path}</span>
+            </div>
+            <div class="row share-toggles">
+                <label class="check">
+                    <input type="checkbox" checked={share.smb} disabled={busy || share.readonly}
+                           onChange={() => toggle(share, "smb")} />
+                    <span>SMB{share.smb && share.smb_options.guest ? " (guests)" : ""}</span>
+                </label>
+                <label class="check">
+                    <input type="checkbox" checked={share.nfs} disabled={busy || share.readonly}
+                           onChange={() => toggle(share, "nfs")} />
+                    <span>NFS{share.nfs && share.nfs_options.clients.length
+                        ? ` (${share.nfs_options.clients.length} chosen computers)` : ""}</span>
+                </label>
+            </div>
+            {share.readonly
+                ? <p class="muted small">This share is on a read-only pool, so it can't be changed.</p>
+                : <ShareSettings share={share} lan={lan} onDone={onDone} />}
+        </div>
+    );
+}
+
+function ShareList({ shares, lan, reload, creating, setCreating }: {
+    shares: Share[]; lan: string; reload: () => void; creating: boolean; setCreating: (open: boolean) => void;
+}) {
+    const [open, setOpen] = useState<string | null>(null);
+    const [menu, setMenu] = useState<string | null>(null);
     const [deleting, setDeleting] = useState<{ name: string; phrase: string; lost: string[] } | null>(null);
     const action = useAction(reload);
     const deleteAction = useAction(reload);
-    const host = window.location.hostname;
-
-    if (!shares.length) {
-        return <Card title="Shares"><p class="muted">No shares yet.</p></Card>;
-    }
     const toggle = (share: Share, protocol: "nfs" | "smb") =>
         action.run(() => fnas(["share", "set", share.name, `--${protocol}`, share[protocol] ? "off" : "on"]));
+    const choose = (name: string) => { setMenu(null); setOpen(open === name ? null : name); };
 
     return (
-        <Card title="Shares">
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Share</th><th>Who can use it</th><th>Shared with</th><th /></tr></thead>
-                    <tbody>
-                        {shares.map(share => (
-                            <Fragment key={share.dataset}>
-                                <tr>
-                                    <td>
-                                        <strong>{share.name}</strong>
-                                        {share.readonly && <> <Badge kind="neutral">read-only pool</Badge></>}
-                                        <br /><span class="small muted mono">{share.path}</span>
-                                        {share.smb && <><br /><span class="small muted mono">{`\\\\${host}\\${share.name}`}</span></>}
-                                        {share.nfs && <><br /><span class="small muted mono">{`${host}:${share.path}`}</span></>}
-                                    </td>
-                                    <td class="small">{describeAccess(share)}</td>
-                                    <td>
-                                        <div class="stack">
-                                            <label class="check">
-                                                <input type="checkbox" checked={share.smb} disabled={action.busy || share.readonly}
-                                                       onChange={() => toggle(share, "smb")} />
-                                                <span>SMB{share.smb && share.smb_options.readonly ? " (read-only)" : ""}
-                                                    {share.smb && share.smb_options.guest ? " (guests)" : ""}</span>
-                                            </label>
-                                            <label class="check">
-                                                <input type="checkbox" checked={share.nfs} disabled={action.busy || share.readonly}
-                                                       onChange={() => toggle(share, "nfs")} />
-                                                <span>NFS{share.nfs && share.nfs_options.clients.length
-                                                    ? ` (${share.nfs_options.clients.length} chosen computers)` : ""}</span>
-                                            </label>
-                                            <span class="small muted">SFTP, FTP, WebDAV: not built yet</span>
-                                        </div>
-                                    </td>
-                                    <td class="actions">
-                                        {!share.readonly && (
-                                            <div class="row row-end">
-                                                <Button onClick={() => setEditing(editing === share.name ? null : share.name)}>
-                                                    {editing === share.name ? "Close" : "Settings"}</Button>
-                                                <Button busy={deleteAction.busy && !deleting} onClick={() => deleteAction.run(async () => {
-                                                    setDeleting({ name: share.name, ...await deletionTerms(share.name) });
-                                                })}>Delete</Button>
-                                            </div>
-                                        )}
-                                    </td>
-                                </tr>
-                                {editing === share.name && (
-                                    <tr><td colSpan={4}>
-                                        <ShareSettings share={share} lan={lan} onDone={reload} />
-                                    </td></tr>
-                                )}
-                            </Fragment>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+        <Card title="Shared folders"
+              actions={<Button kind="primary" onClick={() => setCreating(!creating)}>+ New share</Button>}>
+            <p class="muted small share-intro">Manage access and connect from another device.</p>
+            {creating && <CreateShare onCreated={() => { setCreating(false); reload(); }} />}
+            {!shares.length && <p class="muted">No shares yet. Use New share to make the first one.</p>}
+            {shares.length > 0 && (
+                <div class="table-wrap">
+                    <table class="share-table">
+                        <thead><tr><th>Folder</th><th>Access</th><th>Protocols</th><th /></tr></thead>
+                        <tbody>
+                            {shares.map(share => (
+                                <Fragment key={share.dataset}>
+                                    <tr>
+                                        <td>
+                                            <span class="share-name"><FolderIcon /><strong>{share.name}</strong></span>
+                                            {share.readonly && <> <Badge kind="neutral">read-only pool</Badge></>}
+                                        </td>
+                                        <td class="small">{accessNames(share)}</td>
+                                        <td class="small">
+                                            {protocolsOf(share) || <span class="muted">Not shared</span>}
+                                        </td>
+                                        <td class="share-actions">
+                                            <button type="button" class="link-button" aria-expanded={open === share.name}
+                                                    onClick={() => choose(share.name)}>Connect</button>
+                                            <span class="menu-wrap">
+                                                <button type="button" class="kebab" aria-haspopup="menu"
+                                                        aria-expanded={menu === share.name} aria-label={`More for ${share.name}`}
+                                                        onClick={() => setMenu(menu === share.name ? null : share.name)}>⋯</button>
+                                                {menu === share.name && (
+                                                    <span class="share-menu" role="menu">
+                                                        <button type="button" role="menuitem"
+                                                                onClick={() => choose(share.name)}>Settings…</button>
+                                                        {!share.readonly && (
+                                                            <button type="button" role="menuitem" class="danger-text"
+                                                                    onClick={() => { setMenu(null); deleteAction.run(async () => {
+                                                                        setDeleting({ name: share.name, ...await deletionTerms(share.name) });
+                                                                    }); }}>Delete…</button>
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {open === share.name && (
+                                        <tr class="share-open">
+                                            <td colSpan={4}>
+                                                <SharePanel share={share} lan={lan} busy={action.busy}
+                                                            toggle={toggle} onDone={reload} />
+                                            </td>
+                                        </tr>
+                                    )}
+                                </Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
             <Result outcome={action.outcome} />
             {!deleting && <Result outcome={deleteAction.outcome} />}
             {deleting && (
@@ -291,23 +365,59 @@ function ShareList({ shares, lan, reload }: { shares: Share[]; lan: string; relo
     );
 }
 
+/** The short state of every way to share, and the ones still to come. */
+function WaysToShareStrip({ protocols }: { protocols: Protocol[] }) {
+    const here = protocols.filter(protocol => protocol.state !== "not-built" && protocol.state !== "later");
+    const planned = protocols.filter(protocol => protocol.state === "not-built" || protocol.state === "later");
+    return (
+        <Card title="Ways to share">
+            <div class="proto-row">
+                {here.map(protocol => (
+                    <span class="proto" key={protocol.name}>
+                        <strong>{protocol.title}</strong>
+                        <span class={`state-dot ${protocol.state}`} />
+                        <span class="muted small">{protocol.state === "running" ? "Running" : protocol.detail}</span>
+                    </span>
+                ))}
+                {!here.length && <span class="muted small">Nothing is shared yet.</span>}
+            </div>
+            {planned.length > 0 && (
+                <p class="muted small proto-planned">Planned: {planned.map(protocol => protocol.title).join(" · ")}</p>
+            )}
+        </Card>
+    );
+}
+
 export function Shares() {
     const shares = useLoad(() => fnasJson<Share[]>(["share", "list"]));
     const protocols = useLoad(() => fnasJson<Protocol[]>(["share", "services"]));
     const sharing = useLoad(() => fnasJson<SharingSettings>(["sharing", "show"]));
     const lan = useLoad(async () => (await fnas(["lan", "show"])).trim());
+    const [tab, setTab] = useState<"folders" | "settings">("folders");
+    const [creating, setCreating] = useState(false);
     const reload = () => { shares.reload(); protocols.reload(); };
     return (
-        <Page intro="Folders that computers on your home network can open, who can use each one, and how.">
-            <Loading loaded={protocols}>{() => <WaysToShare protocols={protocols.data!} shares={shares.data || []} />}</Loading>
-            <Loading loaded={shares}>{() => <ShareList shares={shares.data!} lan={lan.data || "the home network"} reload={reload} />}</Loading>
-            <CreateShare onCreated={reload} />
-            <Notice>People's accounts and passwords are in Users: each person's one password works for SMB.</Notice>
-            <Loading loaded={sharing}>{() => <>
-                <SmbServer settings={sharing.data!.smb} reload={sharing.reload} />
-                <NfsServer settings={sharing.data!.nfs} reload={sharing.reload} />
-            </>}</Loading>
-            <LanSubnet />
+        <Page>
+            <div class="segmented share-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={tab === "folders"} class={tab === "folders" ? "current" : ""}
+                        onClick={() => setTab("folders")}>Shared folders</button>
+                <button type="button" role="tab" aria-selected={tab === "settings"} class={tab === "settings" ? "current" : ""}
+                        onClick={() => setTab("settings")}>Sharing settings</button>
+            </div>
+            {tab === "folders" ? <>
+                <Loading loaded={shares}>{() => (
+                    <ShareList shares={shares.data!} lan={lan.data || "the home network"} reload={reload}
+                               creating={creating} setCreating={setCreating} />
+                )}</Loading>
+                <Loading loaded={protocols}>{() => <WaysToShareStrip protocols={protocols.data!} />}</Loading>
+            </> : <>
+                <Loading loaded={sharing}>{() => <>
+                    <SmbServer settings={sharing.data!.smb} reload={sharing.reload} />
+                    <NfsServer settings={sharing.data!.nfs} reload={sharing.reload} />
+                </>}</Loading>
+                <LanSubnet />
+                <Notice>People's accounts and passwords are in Users: each person's one password works for SMB.</Notice>
+            </>}
         </Page>
     );
 }

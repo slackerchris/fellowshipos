@@ -639,7 +639,7 @@ The desktop is the interface from the start. Every app opens in a window; there 
 | App | What it does |
 | --- | --- |
 | Storage | Pools on every engine; disks by bay; create (engine, then disks, then layout); grow; scrub, check or sync; guided disk replacement; identify light |
-| Shares | "Ways to share" (every protocol, its state and settings); shares on any pool with a checkbox per protocol; permissions per user and group; the LAN subnet |
+| Shares | Two tabs: Shared folders, one line per share with its access and protocols and a Connect panel, and Sharing settings for the SMB and NFS server and the LAN subnet; permissions per user and group; the LAN subnet |
 | Users | Accounts, passwords, groups, `nas-admins`, and the shares each person can reach |
 | Snapshots and backup | Snapshot schedules per share; browse and restore; backup jobs with last and next run |
 | Health | Every check with its result and time; services; system; pools; disks; alerts (see Health) |

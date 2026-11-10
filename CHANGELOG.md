@@ -96,6 +96,12 @@ bump.
 
 ### Changed
 
+- The Shares app is two tabs. **Shared folders** lists each share on one line with
+  who can use it and which protocols it is on, and **Connect** opens that share's
+  paths and its SMB and NFS switches under the row. A menu on each row holds its
+  settings and deletion. **Sharing settings** holds the NAS-wide SMB and NFS
+  settings and the home network, which used to sit below the folder table. A
+  compact **Ways to share** card replaces the four-column protocol table.
 - fnas scrubs ZFS pools instead of Debian's `zfsutils-linux` cron job: each pool gets
   `org.debian:periodic-scrub=disable`, which that job honours, so only one runs. Its
   monthly TRIM still does.

@@ -532,3 +532,50 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .legend-row { display: flex; align-items: center; gap: 8px; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .swatch.free { background: var(--surface-sunk); border: 1px solid var(--border); }
+
+/* Shares: the folder list stays quiet; connecting and settings open under it */
+.share-tabs { width: max-content; margin-bottom: 2px; }
+.share-tabs button { flex: 0 0 auto; padding: 6px 16px; }
+.share-intro { margin: 0 0 14px; }
+.share-name { display: inline-flex; align-items: center; gap: 8px; }
+.folder-icon { color: var(--accent); flex: none; }
+.share-table td { vertical-align: middle; }
+.share-actions { text-align: right; white-space: nowrap; }
+.share-actions > * + * { margin-left: 12px; }
+.link-button {
+    background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.menu-wrap { position: relative; display: inline-block; }
+.kebab {
+    background: none; border: 0; color: var(--muted); font-size: 1.15rem; line-height: 1;
+    padding: 2px 7px; border-radius: 6px; cursor: pointer;
+}
+.kebab:hover, .kebab[aria-expanded="true"] { background: var(--raised); color: var(--text); }
+.share-menu {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; min-width: 150px;
+    display: grid; padding: 4px; text-align: left; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 26px rgba(16, 26, 23, 0.28);
+}
+.share-menu button {
+    background: none; border: 0; color: inherit; font: inherit; text-align: left;
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+}
+.share-menu button:hover { background: var(--raised); }
+.share-menu .danger-text { color: var(--bad); }
+.share-open > td { background: var(--surface-sunk); }
+.share-panel { padding: 6px 2px 4px; }
+.connect-block {
+    display: grid; gap: 5px; padding: 10px 12px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+}
+.connect-block .field-label { color: var(--muted); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.share-toggles { gap: 22px; }
+.proto-row { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+.proto { display: inline-flex; align-items: center; gap: 8px; }
+.proto-planned { margin: 10px 0 0; }
+/* Tabs inside an open share: lighter than the two at the top of the page */
+.segmented.subtle { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; overflow: visible; }
+.segmented.subtle button { flex: 0 0 auto; padding: 6px 14px; border-bottom: 2px solid transparent; border-radius: 0; }
+.segmented.subtle button.current { background: none; color: var(--text); border-bottom-color: var(--accent); }
+.share-panel-tabs { margin-bottom: 2px; }
