@@ -65,13 +65,13 @@ func (s *Server) davShareFor(token, share string) (davShare, bool, string) {
 
 // davPut writes a whole file, or replaces one, and only if the client is
 // replacing the version it read when it sent If-Match.
-func (s *Server) davPut(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davPut(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
-	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
-		writeError(w, http.StatusLocked,
-			"that is locked by someone else: "+held.token)
+	if _, blocked := s.davBlockedBy(r, who, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked, davLockedOthers)
 		return
 	}
 	if r.Header.Get("Content-Range") != "" {
@@ -209,12 +209,13 @@ func davWriteFailure(w http.ResponseWriter, response protocol.Response) {
 
 // davMkcol makes one folder. WebDAV says a name that is already taken is not a
 // conflict to retry but a request that can't be met.
-func (s *Server) davMkcol(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davMkcol(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
-	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
-		writeError(w, http.StatusLocked, "that is locked by someone else: "+held.token)
+	if _, blocked := s.davBlockedBy(r, who, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked, davLockedOthers)
 		return
 	}
 	_, exists, said := s.davEntryAt(token, where.Share, where.Inside)
@@ -247,7 +248,8 @@ func (s *Server) davMkcol(w http.ResponseWriter, r *http.Request, token string, 
 }
 
 // davDelete removes one file, or a folder and everything in it.
-func (s *Server) davDelete(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davDelete(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
@@ -260,9 +262,17 @@ func (s *Server) davDelete(w http.ResponseWriter, r *http.Request, token string,
 		writeError(w, http.StatusNotFound, davNoSuch)
 		return
 	}
-	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
-		writeError(w, http.StatusLocked, "that is locked by someone else: "+held.token)
+	if _, blocked := s.davBlockedBy(r, who, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked, davLockedOthers)
 		return
+	}
+	if entry.Dir {
+		// Something further down may be open in someone's word processor, and a
+		// folder delete takes it with the rest
+		if blocked, any := s.davFolderBlocked(r, who, where.Share, where.Inside); any && blocked {
+			writeError(w, http.StatusLocked, davLockedInside)
+			return
+		}
 	}
 	if entry.Dir && r.Header.Get("Depth") == "0" {
 		writeError(w, http.StatusBadRequest, "say Depth: infinity to delete a folder and what is in it")
@@ -279,7 +289,8 @@ func (s *Server) davDelete(w http.ResponseWriter, r *http.Request, token string,
 // Both ends are checked before anything is done: the source has to be theirs to
 // read, the share has to be theirs to write, and the address it is going to has
 // to be free.
-func (s *Server) davMoveCopy(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davMoveCopy(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
@@ -324,12 +335,16 @@ func (s *Server) davMoveCopy(w http.ResponseWriter, r *http.Request, token strin
 			"there is already something at that address; delete it first if you mean to replace it")
 		return
 	}
-	// A lock at either end has to be named, or two clients would work on the same
-	// file without knowing about each other
+	// A lock at either end has to be satisfied, or two clients would work on the
+	// same file without knowing about each other. A folder being moved takes what
+	// is inside it, so a lock further down counts too.
 	for _, end := range []davWhere{where, dest} {
-		if held, blocked := s.davBlockedBy(r, end.Share, end.Inside); blocked {
-			writeError(w, http.StatusLocked,
-				"that is locked by someone else: "+held.token)
+		if _, blocked := s.davBlockedBy(r, who, end.Share, end.Inside); blocked {
+			writeError(w, http.StatusLocked, davLockedOthers)
+			return
+		}
+		if blocked, any := s.davFolderBlocked(r, who, end.Share, end.Inside); any && blocked {
+			writeError(w, http.StatusLocked, davLockedInside)
 			return
 		}
 	}

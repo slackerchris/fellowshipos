@@ -30,7 +30,10 @@ const (
 
 // davLock is one client's hold on one address.
 type davLock struct {
-	token   string
+	token string
+	// Whose lock it is. The token alone is not enough: a token seen over someone
+	// else's shoulder would otherwise let them write, or turn the lock off.
+	user    string
 	share   string
 	inside  string
 	depth   string // "0", or "infinity" for a folder and everything in it
@@ -108,14 +111,54 @@ func (s *Server) davLockOnLocked(share, inside string) (davLock, bool) {
 	return davLock{}, false
 }
 
-// davBlockedBy is the check every change makes: is this address locked by
-// someone else, and if so did this request bring the token?
-func (s *Server) davBlockedBy(r *http.Request, share, inside string) (davLock, bool) {
+// davBlockedBy is the check every change makes: is this address locked, and does
+// this request satisfy the lock? Satisfying it means being the account that took
+// it *and* naming its token.
+func (s *Server) davBlockedBy(r *http.Request, who davPerson, share, inside string) (davLock, bool) {
 	one, held := s.davLockOn(share, inside)
 	if !held {
 		return davLock{}, false
 	}
-	return one, !davTokensIn(r.Header.Get("If"))[one.token]
+	return one, !one.settled(r, who)
+}
+
+// settled answers whether this request may work through a lock.
+func (one davLock) settled(r *http.Request, who davPerson) bool {
+	return one.user == who.name && davTokensIn(r.Header.Get("If"))[one.token]
+}
+
+// davLocksUnder is every lock at or beneath a folder, which a delete or a move
+// of that folder would take with it.
+func (s *Server) davLocksUnder(share, inside string) []davLock {
+	prefix := strings.TrimSuffix(inside, "/") + "/"
+	s.davLocks.mu.Lock()
+	defer s.davLocks.mu.Unlock()
+	var found []davLock
+	for _, one := range s.davLocks.live() {
+		if one.share != share {
+			continue
+		}
+		if one.inside == inside || strings.HasPrefix(one.inside, prefix) {
+			found = append(found, one)
+		}
+	}
+	return found
+}
+
+// davFolderBlocked answers whether something inside a folder is locked in a way
+// this request doesn't satisfy, which is what stops a folder being deleted or
+// moved out from under someone's open file.
+func (s *Server) davFolderBlocked(r *http.Request, who davPerson, share, inside string) (bool, bool) {
+	held := s.davLocksUnder(share, inside)
+	if len(held) == 0 {
+		return false, false
+	}
+	for _, one := range held {
+		if !one.settled(r, who) {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 // davTokensIn reads every lock token in an If header, which can be a plain list
@@ -164,7 +207,8 @@ func (l *davLocks) expiry(header string) time.Duration {
 
 // davLock answers LOCK, which either takes a lock or renews the one the client
 // already holds.
-func (s *Server) davLock(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davLock(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
@@ -182,7 +226,7 @@ func (s *Server) davLock(w http.ResponseWriter, r *http.Request, token string, w
 	// Renewing: the client sends the token it holds and no lockinfo with it
 	if len(davTokensIn(r.Header.Get("If"))) > 0 &&
 		!strings.Contains(strings.ToLower(text), "lockinfo") {
-		s.davRenew(w, r, where)
+		s.davRenew(w, r, who, where)
 		return
 	}
 	entry, exists, said := s.davEntryAt(token, where.Share, where.Inside)
@@ -206,9 +250,9 @@ func (s *Server) davLock(w http.ResponseWriter, r *http.Request, token string, w
 	s.davLocks.mu.Lock()
 	defer s.davLocks.mu.Unlock()
 	if held, taken := s.davLockOnLocked(where.Share, where.Inside); taken {
-		// Its own holder asking again is a renewal rather than a second lock
-		if !davTokensIn(r.Header.Get("If"))[held.token] {
-			w.Header().Set("Lock-Token", "<"+held.token+">")
+		// Only the account holding it may take it again or renew it: a token seen
+		// over someone's shoulder is no use to anyone else
+		if !held.settled(r, who) {
 			writeError(w, http.StatusLocked,
 				"someone else is working on that; try again when they have finished")
 			return
@@ -219,8 +263,8 @@ func (s *Server) davLock(w http.ResponseWriter, r *http.Request, token string, w
 	// about to write it. Making the empty file now would break the
 	// If-None-Match: * that goes with that write, which is how a mounted drive
 	// saves a new file.
-	one := davLock{token: davLockPrefix + newLockToken(), share: where.Share, inside: where.Inside,
-		depth: depth, owner: davOwnerOf(text),
+	one := davLock{token: davLockPrefix + newLockToken(), user: who.name,
+		share: where.Share, inside: where.Inside, depth: depth, owner: davOwnerOf(text),
 		expires: s.davLocks.clock().Add(s.davLocks.expiry(r.Header.Get("Timeout")))}
 	s.davLocks.held = append(s.davLocks.held, one)
 	davSendLock(w, one, http.StatusOK)
@@ -228,12 +272,20 @@ func (s *Server) davLock(w http.ResponseWriter, r *http.Request, token string, w
 
 // davRenew pushes a lock's time out, for a client in the middle of working on the
 // file. A token it doesn't hold is not a renewal.
-func (s *Server) davRenew(w http.ResponseWriter, r *http.Request, where davWhere) {
+func (s *Server) davRenew(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
 	s.davLocks.mu.Lock()
 	defer s.davLocks.mu.Unlock()
 	mine := davTokensIn(r.Header.Get("If"))
+	for _, one := range s.davLocks.live() {
+		// Somebody else's lock, whatever token is offered with it
+		if one.share == where.Share && one.inside == where.Inside && one.user != who.name {
+			writeError(w, http.StatusLocked, davLockedOthers)
+			return
+		}
+	}
 	for i, one := range s.davLocks.live() {
-		if one.share != where.Share || one.inside != where.Inside || !mine[one.token] {
+		if one.share != where.Share || one.inside != where.Inside || one.user != who.name ||
+			!mine[one.token] {
 			continue
 		}
 		s.davLocks.held[i].expires = s.davLocks.clock().Add(s.davLocks.expiry(r.Header.Get("Timeout")))
@@ -252,7 +304,8 @@ func davSendLock(w http.ResponseWriter, one davLock, status int) {
 }
 
 // davUnlock lets go of a lock, which only the client holding it can do.
-func (s *Server) davUnlock(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davUnlock(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
@@ -272,6 +325,11 @@ func (s *Server) davUnlock(w http.ResponseWriter, r *http.Request, token string,
 	if found == nil {
 		s.davLocks.mu.Unlock()
 		writeError(w, http.StatusConflict, "that lock isn't held here")
+		return
+	}
+	if found.user != who.name {
+		s.davLocks.mu.Unlock()
+		writeError(w, http.StatusLocked, "that lock belongs to another account")
 		return
 	}
 	s.davLocks.drop(want)

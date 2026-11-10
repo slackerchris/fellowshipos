@@ -65,8 +65,8 @@ func (d *davHelper) call(request protocol.Request) (protocol.Response, error) {
 			return protocol.Response{Code: protocol.CodeUnauthenticated,
 				Error: "The user name or password is wrong."}, nil
 		}
-		return protocol.Response{Token: "secret", Session: &protocol.Session{User: request.User,
-			CSRF: "csrf-token"}}, nil
+		return protocol.Response{Token: "secret-" + request.User, Session: &protocol.Session{
+			User: request.User, CSRF: "csrf-token"}}, nil
 	case protocol.OpFileMkdir:
 		folder := request.Share + "/" + request.Path
 		if _, taken := d.folders[folder]; taken {
@@ -92,7 +92,7 @@ func (d *davHelper) call(request protocol.Request) (protocol.Response, error) {
 		}
 		return protocol.Response{}, nil
 	case protocol.OpFileList:
-		if request.Session != "secret" {
+		if !strings.HasPrefix(request.Session, "secret-") {
 			return protocol.Response{Code: protocol.CodeUnauthenticated, Error: "signed out"}, nil
 		}
 		if request.Share == "" {
@@ -201,13 +201,25 @@ func davAsk(handler http.Handler, method, path, password string, headers http.He
 // davAskBody is davAsk with something to send.
 func davAskBody(handler http.Handler, method, path, password, body string,
 	headers http.Header) *httptest.ResponseRecorder {
+	return davAskBodyAs(handler, "sam", method, path, password, body, headers)
+}
+
+// davAskAs is the same request made by somebody else, since a lock belongs to an
+// account and not to whoever happens to be holding the token
+func davAskAs(handler http.Handler, user, method, path, password string,
+	headers http.Header) *httptest.ResponseRecorder {
+	return davAskBodyAs(handler, user, method, path, password, "", headers)
+}
+
+func davAskBodyAs(handler http.Handler, user, method, path, password, body string,
+	headers http.Header) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, "https://nas.local"+path, strings.NewReader(body))
 	for name, values := range headers {
 		req.Header[name] = values
 	}
 	if password != "" {
 		req.Header.Set("Authorization", "Basic "+
-			base64.StdEncoding.EncodeToString([]byte("sam:"+password)))
+			base64.StdEncoding.EncodeToString([]byte(user+":"+password)))
 	}
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
@@ -897,5 +909,125 @@ func TestWebDAVChecksThePasswordOnceForAClient(t *testing.T) {
 	}
 	if logins != 1 {
 		t.Errorf("the password was checked %d times for one client", logins)
+	}
+}
+
+// A lock is the account's, not the token's. Two people have write access to
+// media here, and one of them has been told the token: it still gets them
+// nowhere, because the account that took the lock is what the lock is for.
+func TestWebDAVLockBelongsToTheAccountThatTookIt(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	locked := davAskAs(handler, "sam", "LOCK", "/dav/media/notes.txt", "right", nil)
+	if locked.Code != http.StatusOK {
+		t.Fatalf("LOCK answered %d %q", locked.Code, locked.Body.String())
+	}
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	if token == "" {
+		t.Fatalf("no lock token came back")
+	}
+	named := http.Header{"If": {"(<" + token + ">)"}}
+
+	// alex may write to media, and knows the exact token
+	for _, c := range []struct {
+		method  string
+		path    string
+		headers http.Header
+	}{
+		{"PUT", "/dav/media/notes.txt", named},
+		{"DELETE", "/dav/media/notes.txt", named},
+		{"MOVE", "/dav/media/notes.txt", http.Header{"If": {"(<" + token + ">)"},
+			"Destination": {"/dav/media/taken.txt"}}},
+		{"COPY", "/dav/media/notes.txt", http.Header{"If": {"(<" + token + ">)"},
+			"Destination": {"/dav/media/taken.txt"}}},
+		{"LOCK", "/dav/media/notes.txt", named},
+		{"UNLOCK", "/dav/media/notes.txt", http.Header{"Lock-Token": {"<" + token + ">"}}},
+	} {
+		answer := davAskAs(handler, "alex", c.method, c.path, "right", c.headers)
+		if answer.Code != http.StatusLocked {
+			t.Errorf("alex %s with the owner's token answered %d %q",
+				c.method, answer.Code, answer.Body.String())
+		}
+		if strings.Contains(answer.Body.String(), token) {
+			t.Errorf("a refusal told alex the token: %q", answer.Body.String())
+		}
+		if got := answer.Header().Get("Lock-Token"); got != "" {
+			t.Errorf("a refusal handed alex the lock token %q", got)
+		}
+	}
+
+	// Nothing alex tried changed the file or the lock
+	if got := d.files["media/notes.txt"]; got != "Things for the weekend\n" {
+		t.Errorf("the file is now %q", got)
+	}
+	if _, gone := d.files["media/taken.txt"]; gone {
+		t.Errorf("alex moved or copied the file")
+	}
+	still := davAskAs(handler, "sam", "PROPFIND", "/dav/media/notes.txt", "right",
+		http.Header{"Depth": {"0"}})
+	if still.Code != http.StatusMultiStatus ||
+		!strings.Contains(still.Body.String(), token) {
+		t.Fatalf("the lock is no longer held: %d %q", still.Code, still.Body.String())
+	}
+
+	// The owner can still work, renew, and let go
+	if wrote := davAskAs(handler, "sam", "PUT", "/dav/media/notes.txt", "right", named); wrote.Code != http.StatusNoContent {
+		t.Errorf("the owner's write answered %d %q", wrote.Code, wrote.Body.String())
+	}
+	if renewed := davAskAs(handler, "sam", "LOCK", "/dav/media/notes.txt", "right", named); renewed.Code != http.StatusOK {
+		t.Errorf("the owner's renewal answered %d %q", renewed.Code, renewed.Body.String())
+	}
+	if let := davAskAs(handler, "sam", "UNLOCK", "/dav/media/notes.txt", "right",
+		http.Header{"Lock-Token": {"<" + token + ">"}}); let.Code != http.StatusNoContent {
+		t.Fatalf("the owner's UNLOCK answered %d %q", let.Code, let.Body.String())
+	}
+	if free := davAskAs(handler, "alex", "PUT", "/dav/media/notes.txt", "right", nil); free.Code != http.StatusNoContent {
+		t.Errorf("a write after the owner let go answered %d %q", free.Code, free.Body.String())
+	}
+}
+
+// A folder being deleted or moved takes what is inside it, so a lock further
+// down has to stop the whole thing before anything is touched.
+func TestWebDAVAFolderWithALockedFileInsideIsKept(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	locked := davAskAs(handler, "sam", "LOCK", "/dav/media/photos/sunrise.png", "right", nil)
+	if locked.Code != http.StatusOK {
+		t.Fatalf("LOCK answered %d %q", locked.Code, locked.Body.String())
+	}
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+
+	for _, c := range []struct {
+		method  string
+		path    string
+		headers http.Header
+	}{
+		{"DELETE", "/dav/media/photos/", nil},
+		{"MOVE", "/dav/media/photos/", http.Header{"Destination": {"/dav/media/album/"}}},
+		{"DELETE", "/dav/media/photos/sunrise.png", nil},
+	} {
+		answer := davAskAs(handler, "alex", c.method, c.path, "right", c.headers)
+		if answer.Code != http.StatusLocked {
+			t.Errorf("alex %s of %s answered %d %q", c.method, c.path, answer.Code,
+				answer.Body.String())
+		}
+	}
+	if _, gone := d.folders["media/photos"]; !gone {
+		t.Fatalf("the folder went anyway")
+	}
+	if got := d.files["media/photos/sunrise.png"]; got == "" {
+		t.Fatalf("the photo went anyway")
+	}
+	for _, asked := range d.asked {
+		if asked.Op == protocol.OpFileDelete || asked.Op == protocol.OpFileRename {
+			t.Errorf("the helper was asked to change something after the refusal: %v", asked)
+		}
+	}
+
+	// The folder is free once the owner lets go
+	if let := davAskAs(handler, "sam", "UNLOCK", "/dav/media/photos/sunrise.png", "right",
+		http.Header{"Lock-Token": {"<" + token + ">"}}); let.Code != http.StatusNoContent {
+		t.Fatalf("UNLOCK answered %d %q", let.Code, let.Body.String())
+	}
+	if gone := davAskAs(handler, "alex", "DELETE", "/dav/media/photos/", "right", nil); gone.Code != http.StatusNoContent {
+		t.Errorf("the delete after unlocking answered %d %q", gone.Code, gone.Body.String())
 	}
 }

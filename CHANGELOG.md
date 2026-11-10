@@ -14,6 +14,12 @@ bump.
 
 ### Added
 
+- Sharing, a WebDAV lock belongs to the account that took it. Writing through
+  the lock, renewing it and releasing it now need that account as well as the
+  token, so a token replayed by someone else on the same share gets nowhere, and
+  no 423 answer hands the token back. A folder being deleted or moved is checked
+  against every lock inside it first, so it can't be taken out from under a file
+  someone has open.
 - Sharing, WebDAV takes locks, which is what a word processor insists on before
   it will save to a network drive: `LOCK` and `UNLOCK`, an exclusive lock on a
   file or on a folder and everything in it, renewed by its holder and running out

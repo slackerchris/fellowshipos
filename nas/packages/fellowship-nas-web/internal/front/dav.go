@@ -45,6 +45,12 @@ const (
 	davNoShare  = "There is no WebDAV folder at that address."
 	davHidden   = "That folder isn't served over WebDAV."
 	davNoTarget = "A write has to name a file, not the share itself."
+	// Two ways of saying no to a change: the thing itself is locked, or something
+	// inside the folder is. Neither names the lock's token, which is the holder's
+	// business and nobody else's.
+	davLockedOthers = "someone else is working on that; try again when they have finished"
+	davLockedInside = "something inside that folder is open in someone else's app, " +
+		"so it can't be moved or deleted yet"
 )
 
 // davToken is one client's session, kept so its password isn't checked again.
@@ -53,6 +59,13 @@ type davToken struct {
 	token  string
 	at     time.Time
 	failed string
+}
+
+// davPerson is who a request is from: the account, and the session the helper gave
+// them. A lock belongs to the account, so both travel together.
+type davPerson struct {
+	name  string
+	token string
 }
 
 // davWhere is the address a client asked for, split the way the helper wants it.
@@ -110,6 +123,9 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, said)
 		return
 	}
+	// Who this is, as well as what the helper calls them: a lock belongs to an
+	// account, not to a token somebody may have seen
+	who := davPerson{name: user, token: token}
 	where, err := davPath(r.URL.EscapedPath())
 	if err != nil {
 		status := http.StatusBadRequest
@@ -124,21 +140,21 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 		davAllowHeaders(w)
 		w.WriteHeader(http.StatusOK)
 	case "PROPFIND":
-		s.davPropfind(w, r, token, where)
+		s.davPropfind(w, r, who, where)
 	case http.MethodGet, http.MethodHead:
-		s.davGet(w, r, token, where)
+		s.davGet(w, r, who, where)
 	case http.MethodPut:
-		s.davPut(w, r, token, where)
+		s.davPut(w, r, who, where)
 	case "MKCOL":
-		s.davMkcol(w, r, token, where)
+		s.davMkcol(w, r, who, where)
 	case http.MethodDelete:
-		s.davDelete(w, r, token, where)
+		s.davDelete(w, r, who, where)
 	case "MOVE", "COPY":
-		s.davMoveCopy(w, r, token, where)
+		s.davMoveCopy(w, r, who, where)
 	case "LOCK":
-		s.davLock(w, r, token, where)
+		s.davLock(w, r, who, where)
 	case "UNLOCK":
-		s.davUnlock(w, r, token, where)
+		s.davUnlock(w, r, who, where)
 	case "PROPPATCH", "POST", "PATCH":
 		davAllowHeaders(w)
 		writeError(w, http.StatusMethodNotAllowed, davReadOnly)
@@ -312,7 +328,8 @@ func (s *Server) davEntryAt(token, share, inside string) (davEntry, bool, string
 }
 
 // davPropfind answers what is at an address, and with Depth: 1 what is in it.
-func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	depth := r.Header.Get("Depth")
 	if depth == "" {
 		depth = "1"
@@ -406,7 +423,8 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token strin
 
 // davGet sends a file's bytes, honouring Range, exactly as the desktop's
 // download does: same op, same offsets, same refusals.
-func (s *Server) davGet(w http.ResponseWriter, r *http.Request, token string, where davWhere) {
+func (s *Server) davGet(w http.ResponseWriter, r *http.Request, who davPerson, where davWhere) {
+	token := who.token
 	if where.Share == "" || where.Inside == "" {
 		w.Header().Set(contentType, "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
