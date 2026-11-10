@@ -33,6 +33,10 @@ them before the release candidate or they will be forgotten.
 
 ## 2. Slice A: multi-select and bulk actions
 
+**Built** (Nov 10), as below, with Move left to slice B: dragging a picked item onto a
+folder moves everything picked with it, which covers the mouse. The zip's answer runs
+to the end of the connection, since its size isn't known before it is made.
+
 Built from the same list that exists: selection becomes a set of names rather
 than one name.
 

@@ -10,12 +10,15 @@
 package filechild
 
 import (
+	"archive/zip"
+	"compress/flate"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -146,6 +149,19 @@ func Run(args []string) int {
 			return say(out, err.Error())
 		}
 		if err := out.Encode(Folder{Entries: entries}); err != nil {
+			return 1
+		}
+		return 0
+	case "zip":
+		// The rest are names inside the folder, each put in the zip with what it holds
+		items, total, err := gather(root, inside, rest)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		if err := out.Encode(Head{Size: total}); err != nil {
+			return 1
+		}
+		if err := zipUp(os.Stdout, root, items); err != nil {
 			return 1
 		}
 		return 0
@@ -312,6 +328,133 @@ func write(path string, body io.Reader, replace bool) (int64, error) {
 		return 0, explain(err)
 	}
 	return wrote, nil
+}
+
+// MaxZip is the most a zip may hold, before compression. It is counted before a
+// byte is sent, so a zip that is too big is refused rather than cut short.
+var MaxZip int64 = 2 << 30
+
+// zipItem is one thing going in a zip: where it is in the share, what it is
+// called in the zip, and whether it is a folder.
+type zipItem struct {
+	inside, name string
+	dir          bool
+	// A folder's own time, since its entry carries no file to take one from
+	modified time.Time
+}
+
+// gather lists what each name in a folder brings into a zip, with the folders'
+// contents, and adds up their size. A link is never followed: a picked name that
+// is a link is refused, and one met inside a folder is left out, as are things
+// that aren't files or folders.
+func gather(root int, folder string, names []string) ([]zipItem, int64, error) {
+	var items []zipItem
+	var total int64
+	var walk func(inside, name string, top bool) error
+	walk = func(inside, name string, top bool) error {
+		fd, err := beneath(root, inside, oPath)
+		if err != nil {
+			if top {
+				return fmt.Errorf("%s: %w", name, explain(err))
+			}
+			return nil
+		}
+		var info syscall.Stat_t
+		err = syscall.Fstat(fd, &info)
+		syscall.Close(fd)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, explain(err))
+		}
+		switch info.Mode & syscall.S_IFMT {
+		case syscall.S_IFREG:
+			total += info.Size
+			if total > MaxZip {
+				return errors.New("these come to more than the 2 GB a zip may hold: download fewer at a time")
+			}
+			items = append(items, zipItem{inside: inside, name: name})
+		case syscall.S_IFDIR:
+			items = append(items, zipItem{inside: inside, name: name, dir: true,
+				modified: time.Unix(info.Mtim.Sec, info.Mtim.Nsec)})
+			found, err := listed(root, inside)
+			if err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			for _, child := range found {
+				if err := walk(path.Join(inside, child), path.Join(name, child), false); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, name := range names {
+		if err := walk(path.Join(folder, name), name, true); err != nil {
+			return nil, 0, err
+		}
+	}
+	return items, total, nil
+}
+
+// listed is a folder's names, read beneath the share like everything else.
+func listed(root int, inside string) ([]string, error) {
+	fd, err := beneath(root, inside, syscall.O_RDONLY|syscall.O_DIRECTORY)
+	if err != nil {
+		return nil, explain(err)
+	}
+	dir := os.NewFile(uintptr(fd), through(fd))
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return nil, explain(err)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// zipUp writes the zip as it reads, so nothing of it is kept anywhere. Pictures
+// and films barely compress, so it compresses at its quickest. A file that went
+// away since it was counted is left out, since the zip has already started.
+func zipUp(to io.Writer, root int, items []zipItem) error {
+	writer := zip.NewWriter(to)
+	writer.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+		return flate.NewWriter(out, flate.BestSpeed)
+	})
+	for _, item := range items {
+		if item.dir {
+			if _, err := writer.CreateHeader(&zip.FileHeader{Name: item.name + "/", Method: zip.Store,
+				Modified: item.modified}); err != nil {
+				return err
+			}
+			continue
+		}
+		fd, err := beneath(root, item.inside, syscall.O_RDONLY)
+		if err != nil {
+			continue
+		}
+		file := os.NewFile(uintptr(fd), through(fd))
+		info, err := file.Stat()
+		if err != nil {
+			file.Close()
+			continue
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			file.Close()
+			return err
+		}
+		header.Name, header.Method = item.name, zip.Deflate
+		entry, err := writer.CreateHeader(header)
+		if err != nil {
+			file.Close()
+			return err
+		}
+		_, err = io.Copy(entry, file)
+		file.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return writer.Close()
 }
 
 // explain says what went wrong in words a person reading the desktop can use.

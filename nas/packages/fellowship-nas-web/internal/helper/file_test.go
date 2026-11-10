@@ -328,3 +328,34 @@ func TestSharesAreAskedForOnceAWhile(t *testing.T) {
 		t.Errorf("after %s fnas was asked %d times in all", RootsFor, len(f.ran))
 	}
 }
+
+func TestAZipChecksEveryNameBeforeTheChildRuns(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token := login(t, h, "kim").Token
+	for _, names := range [][]string{nil, {"../etc"}, {"notes.txt", "a/b"}, {".."}, {"gone.txt"}} {
+		response, body := h.Stream(protocol.Request{Op: protocol.OpFileZip, Session: token, Share: "media",
+			Names: names}, nil)
+		if body != nil {
+			body.Close()
+		}
+		if response.Code == "" {
+			t.Errorf("a zip of %q was started", names)
+		}
+	}
+	if len(f.childed) != 0 {
+		t.Errorf("a child was run for a zip that should have been refused: %v", f.childed)
+	}
+	f.body = `{"size":5}` + "\nPK"
+	response, body := h.Stream(protocol.Request{Op: protocol.OpFileZip, Session: token, Share: "media",
+		Names: []string{"notes.txt"}}, nil)
+	if response.Code != "" || body == nil {
+		t.Fatalf("a zip of notes.txt answered %q %s", response.Code, response.Error)
+	}
+	body.Close()
+	if len(f.childed) != 1 || f.childed[0] != "zip  notes.txt" {
+		t.Errorf("the child was asked %v", f.childed)
+	}
+}

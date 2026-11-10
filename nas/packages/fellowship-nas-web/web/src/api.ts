@@ -685,6 +685,13 @@ export function fileUrl(share: string, path: string, save = false): string {
     return `/api/files/download?${query}${save ? "&save=1" : ""}`;
 }
 
+/** Several things in one folder as a zip, which the NAS makes while the browser saves it. */
+export function zipUrl(share: string, folder: string, names: string[]): string {
+    const query = [`share=${encodeURIComponent(share)}`, `path=${encodeURIComponent(folder)}`,
+        ...names.map(name => `name=${encodeURIComponent(name)}`)];
+    return `/api/files/zip?${query.join("&")}`;
+}
+
 export function diskName(disk: { by_id: string | null; path: string }): string {
     return (disk.by_id || disk.path).replace("/dev/disk/by-id/", "");
 }

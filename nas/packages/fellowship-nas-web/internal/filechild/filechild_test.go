@@ -4,7 +4,9 @@
 package filechild
 
 import (
+	"archive/zip"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,5 +119,56 @@ func TestANameIsReachedInsideItsOpenFolder(t *testing.T) {
 			release()
 			t.Errorf("%q was given a folder to write in", inside)
 		}
+	}
+}
+
+func TestAZipHoldsWhatWasPickedAndNothingALinkLeadsTo(t *testing.T) {
+	root, dir := share(t)
+	if err := os.Symlink(filepath.Join(filepath.Dir(dir), "secret"), filepath.Join(dir, "photos", "sneaky")); err != nil {
+		t.Fatal(err)
+	}
+	items, total, err := gather(root, "", []string{"photos"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Errorf("the zip counted %d bytes, want the 3 of cat.png", total)
+	}
+	var made strings.Builder
+	if err := zipUp(&made, root, items); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(strings.NewReader(made.String()), int64(made.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, file := range reader.File {
+		names = append(names, file.Name)
+		if file.Name == "photos/cat.png" {
+			opened, _ := file.Open()
+			got, _ := io.ReadAll(opened)
+			if string(got) != "cat" {
+				t.Errorf("cat.png came out as %q", got)
+			}
+		}
+	}
+	// The link inside the folder is left out rather than followed out of the share
+	if strings.Join(names, " ") != "photos/ photos/cat.png" {
+		t.Errorf("the zip held %v", names)
+	}
+	// A picked name that is itself a link is refused outright
+	if _, _, err := gather(root, "", []string{"out"}); err == nil {
+		t.Error("a link was put in a zip")
+	}
+}
+
+func TestAZipTooBigIsRefusedBeforeAByteIsSent(t *testing.T) {
+	root, _ := share(t)
+	kept := MaxZip
+	MaxZip = 2
+	defer func() { MaxZip = kept }()
+	if _, _, err := gather(root, "", []string{"photos"}); err == nil || !strings.Contains(err.Error(), "2 GB") {
+		t.Errorf("a zip over the cap answered %v", err)
 	}
 }

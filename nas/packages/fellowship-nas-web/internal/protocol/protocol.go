@@ -29,9 +29,14 @@ const (
 	OpFileMkdir  = "file-mkdir"
 	OpFileRename = "file-rename"
 	OpFileDelete = "file-delete"
+	OpFileZip    = "file-zip"
 	OpSessions   = "sessions"
 	OpEndSession = "end-session"
 )
+
+// ToTheEnd is the Length of an answer whose bytes run until the helper closes the
+// connection, since nobody knows a zip's size before it is made.
+const ToTheEnd int64 = -1
 
 const (
 	CodeUnauthenticated = "unauthenticated"
@@ -64,6 +69,8 @@ type Request struct {
 	Replace bool   `json:"replace,omitempty"`
 	// A folder delete that takes what is inside with it
 	Recursive bool `json:"recursive,omitempty"`
+	// Several things in the folder Path names, by name alone, as a zip downloads them
+	Names []string `json:"names,omitempty"`
 }
 
 type Session struct {
@@ -85,7 +92,8 @@ type Response struct {
 	Session    *Session  `json:"session,omitempty"`
 	Sessions   []Session `json:"sessions,omitempty"`
 	Output     string    `json:"output,omitempty"`
-	// A file's bytes follow this answer: Length of them, out of a file of Size
+	// A file's bytes follow this answer: Length of them, out of a file of Size, or
+	// to the end when Length is ToTheEnd, for a zip that is made as it is sent
 	Size   int64 `json:"size,omitempty"`
 	Length int64 `json:"length,omitempty"`
 }
@@ -147,10 +155,14 @@ func Stream(socket string, request Request) (Response, io.ReadCloser, error) {
 		conn.Close()
 		return response, nil, nil
 	}
+	var bytes io.Reader = reader
+	if response.Length != ToTheEnd {
+		bytes = io.LimitReader(reader, response.Length)
+	}
 	return response, struct {
 		io.Reader
 		io.Closer
-	}{io.LimitReader(reader, response.Length), conn}, nil
+	}{bytes, conn}, nil
 }
 
 // Call sends one request to the helper listening on socket and waits for

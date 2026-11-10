@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/events", s.withSession(false, s.jobEvents))
 	mux.HandleFunc("GET /api/files", s.withSession(false, s.files))
 	mux.HandleFunc("GET /api/files/download", s.withSession(false, s.download))
+	mux.HandleFunc("GET /api/files/zip", s.withSession(false, s.zip))
 	mux.HandleFunc("POST /api/files/upload", s.withSession(true, s.upload))
 	mux.HandleFunc("POST /api/files/mkdir", s.withSession(true, s.mkdir))
 	mux.HandleFunc("POST /api/files/rename", s.withSession(true, s.rename))
@@ -397,6 +398,57 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, session *proto
 	}
 	if _, err := io.Copy(w, body); err != nil {
 		log.Printf("sending %s: %v", inside, err)
+	}
+}
+
+// zip sends several things from one folder as a zip, made while it is sent. It is
+// a GET like a download, so the browser saves it as it arrives rather than the
+// desktop holding it in memory first.
+func (s *Server) zip(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	share, folder, names := query.Get("share"), query.Get("path"), query["name"]
+	if share == "" || len(names) == 0 {
+		writeError(w, http.StatusBadRequest, "say which share and what goes in the zip")
+		return
+	}
+	controller := http.NewResponseController(w)
+	controller.SetWriteDeadline(time.Time{})
+	stream := s.Stream
+	if stream == nil {
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	response, body, err := stream(protocol.Request{Op: protocol.OpFileZip, Session: token, Share: share,
+		Path: folder, Names: names})
+	if err != nil {
+		log.Printf("helper: %v", err)
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	if body != nil {
+		defer body.Close()
+	}
+	if response.Code != "" {
+		writeFailure(w, response)
+		return
+	}
+	// One thing is named after itself, several after the folder they're in
+	called := share
+	if len(names) == 1 {
+		called = names[0]
+	} else if folder != "" {
+		called = filepath.Base(folder)
+	}
+	header := w.Header()
+	header.Set(contentType, "application/zip")
+	downloadPolicy(header, "application/zip")
+	header.Set("Content-Disposition", `attachment; filename="`+safeName(called)+`.zip"`)
+	w.WriteHeader(http.StatusOK)
+	if body == nil {
+		return
+	}
+	if _, err := io.Copy(w, body); err != nil {
+		log.Printf("sending a zip from %s: %v", share, err)
 	}
 }
 

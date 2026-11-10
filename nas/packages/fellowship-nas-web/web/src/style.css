@@ -681,6 +681,10 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .file-table thead th button:hover { color: var(--text); }
 .caret { font-size: 0.7rem; opacity: 0.8; }
 .file-row { cursor: default; user-select: none; }
+.file-tile { user-select: none; }
+/* What a delete of several will take, and a pane for several picked */
+.files-going { margin: 6px 0 0 18px; display: grid; gap: 2px; }
+.picked-body { display: grid; gap: 8px; align-content: start; padding: 12px; }
 .file-row td {
     padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     vertical-align: middle; white-space: nowrap;

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path"
+	"strings"
 	"time"
 
 	"fellowship-nas-web/internal/filechild"
@@ -167,11 +169,64 @@ func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Respo
 		log.Printf("reading %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that file can't be opened right now"), nil
 	}
+	return headed(out, "that file can't be opened right now")
+}
+
+// MaxZipNames is how many things one zip may be asked for by name; a folder among
+// them brings what it holds, which the child counts against its own size cap.
+const MaxZipNames = 1000
+
+// fileZip answers with a zip of several things in one folder, made by the child
+// as the person while it is sent. Every name is checked before any work starts.
+func (h *Helper) fileZip(user string, request protocol.Request) (protocol.Response, io.ReadCloser) {
+	if len(request.Names) == 0 {
+		return failure(protocol.CodeBadRequest, "say what goes in the zip"), nil
+	}
+	if len(request.Names) > MaxZipNames {
+		return failure(protocol.CodeBadRequest, fmt.Sprintf("a zip takes at most %d things at once", MaxZipNames)), nil
+	}
+	root, err := h.fileRoots(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error()), nil
+	}
+	folder, err := files.Resolve([]files.Root{root}, request.Share, request.Path)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error()), nil
+	}
+	for _, name := range request.Names {
+		// Names in the folder, never a path: the folder is the only path, and it is resolved above
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
+			return failure(protocol.CodeForbidden, "that name can't be used"), nil
+		}
+		if _, err := files.Resolve([]files.Root{root}, request.Share, path.Join(request.Path, name)); err != nil {
+			return failure(protocol.CodeForbidden, err.Error()), nil
+		}
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now"), nil
+	}
+	out, err := h.child(account, nil, "zip", root, folder, 0, 0, request.Names...)
+	if err != nil {
+		log.Printf("zipping in %s for %s: %v", folder, user, err)
+		return failure(protocol.CodeFailed, "the zip can't be made right now"), nil
+	}
+	response, body := headed(out, "the zip can't be made right now")
+	if response.Code == "" {
+		// The zip's size is only known once it is made, so it runs to the end
+		response.Length = protocol.ToTheEnd
+	}
+	return response, body
+}
+
+// headed reads the child's one line of JSON, which says how big what follows is
+// or why there is nothing, and hands back the bytes after it.
+func headed(out io.ReadCloser, failed string) (protocol.Response, io.ReadCloser) {
 	body := bufio.NewReaderSize(out, 64<<10)
 	line, err := body.ReadBytes('\n')
 	if err != nil {
 		out.Close()
-		return failure(protocol.CodeFailed, "that file can't be opened right now"), nil
+		return failure(protocol.CodeFailed, failed), nil
 	}
 	// The child answers with the size, or says why it won't
 	var head struct {
@@ -180,7 +235,7 @@ func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Respo
 	}
 	if err := json.Unmarshal(line, &head); err != nil {
 		out.Close()
-		return failure(protocol.CodeFailed, "that file can't be opened right now"), nil
+		return failure(protocol.CodeFailed, failed), nil
 	}
 	if head.Error != "" {
 		out.Close()
@@ -204,13 +259,16 @@ func (h *Helper) Stream(request protocol.Request, body io.Reader) (protocol.Resp
 			return failure(protocol.CodeUnauthenticated, signedOut), nil
 		}
 		return h.fileWrite(found.user, request, body), nil
-	case protocol.OpFileRead:
+	case protocol.OpFileRead, protocol.OpFileZip:
 	default:
 		return h.Handle(request), nil
 	}
 	found := h.find(request.Session, request.Touch)
 	if found == nil {
 		return failure(protocol.CodeUnauthenticated, signedOut), nil
+	}
+	if request.Op == protocol.OpFileZip {
+		return h.fileZip(found.user, request)
 	}
 	return h.fileRead(found.user, request)
 }

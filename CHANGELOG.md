@@ -14,6 +14,16 @@ bump.
 
 ### Added
 
+- Files, slice A: pick several things at once (Ctrl-click or Cmd-click adds or takes one
+  away, Shift-click and Shift with the arrows pick a run, Ctrl-A picks everything shown,
+  Escape lets go), with a pane that says how many and how big. Delete them together
+  behind one typed confirmation ("delete 4 from media"); each goes on its own, so one
+  refused doesn't stop the rest, and the status line says "3 deleted, 1 refused: …".
+  Drag a picked one onto a folder and the others go with it.
+- Download several things, or a folder, as one zip, made by the person's own child
+  process while it is sent, so nothing is kept on the NAS or held in the browser. A zip
+  never follows a link, counts its size first and is refused past 2 GB before a byte is
+  sent, and carries the same sandbox as any download.
 - Files can change things now, not only look at them: **Upload** takes one or
   more files, or drop them on the folder; **New folder**; **Rename…** and
   **Delete…** in a row's menu, the delete asking for the name to be typed as

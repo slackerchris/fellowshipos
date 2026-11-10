@@ -1,11 +1,10 @@
 // The Files app: the shares a person can use down the left, what a folder holds
-// in the middle, and whatever is picked on the right. Uploading, moving and
-// deleting come next, so a read-only share and one someone can write to look the
-// same here.
+// in the middle, and whatever is picked on the right: one file's preview, or what
+// can be done with several at once.
 import { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { FileEntry, FileShare, deleteFile, fileShares, fileUrl, folderIn, humanSize,
-    makeFolder, renameFile, uploadFile } from "./api";
+    makeFolder, renameFile, uploadFile, zipUrl } from "./api";
 import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const IMAGE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"];
@@ -145,14 +144,23 @@ export function Files() {
     );
 }
 
-type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entry: FileEntry } | null;
+type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entries: FileEntry[] } | null;
+
+/** How a click picks: on its own, added to or taken from the rest, or everything since the last click. */
+type Picking = { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean };
+
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
 function Browser({ share, view, setView }: {
     share: FileShare; view: "list" | "grid"; setView: (view: "list" | "grid") => void;
 }) {
     const [path, setPath] = useState("");
     const [before, setBefore] = useState<string[]>([]);
-    const [picked, setPicked] = useState<string | null>(null);
+    // The names picked, and the one a Shift-click or Shift-arrow measures from
+    const [picked, setPicked] = useState<Set<string>>(new Set());
+    const [anchor, setAnchor] = useState<string | null>(null);
+    const [lead, setLead] = useState<string | null>(null);
+    const [said, setSaid] = useState("");
     const [sort, setSort] = useState<Sort>({ by: "name", down: false });
     const [filter, setFilter] = useState("");
     const [doing, setDoing] = useState<Doing>(null);
@@ -177,13 +185,43 @@ function Browser({ share, view, setView }: {
                 : Date.parse(a.modified) - Date.parse(b.modified);
         return sort.down ? -order : order;
     });
-    const chosen = items.find(item => item.name === picked) || null;
+    // Only what is shown counts as picked, so a filter never hides something a bulk action would touch
+    const pickedItems = items.filter(item => picked.has(item.name));
+    const chosen = pickedItems.length === 1 ? pickedItems[0] : null;
     const folders = items.filter(item => item.dir).length;
+
+    const forget = () => { setPicked(new Set()); setAnchor(null); setLead(null); };
+    const only = (name: string) => { setPicked(new Set([name])); setAnchor(name); setLead(name); };
+    const between = (from: string | null, to: string): string[] => {
+        const start = items.findIndex(item => item.name === from);
+        const end = items.findIndex(item => item.name === to);
+        if (start < 0 || end < 0) return [to];
+        return items.slice(Math.min(start, end), Math.max(start, end) + 1).map(item => item.name);
+    };
+    /** A click: on its own picks one; Ctrl or Cmd adds or takes away; Shift picks the run from the last click. */
+    const pick = (entry: FileEntry, how: Picking = {}) => {
+        if (how.shiftKey && anchor) {
+            const run = between(anchor, entry.name);
+            setPicked(old => new Set(how.ctrlKey || how.metaKey ? [...old, ...run] : run));
+            setLead(entry.name);
+        } else if (how.ctrlKey || how.metaKey) {
+            setPicked(old => {
+                const next = new Set(old);
+                if (next.has(entry.name)) next.delete(entry.name); else next.add(entry.name);
+                return next;
+            });
+            setAnchor(entry.name);
+            setLead(entry.name);
+        } else {
+            only(entry.name);
+        }
+    };
 
     const go = (to: string) => {
         setBefore(old => [...old, path]);
         setPath(to);
-        setPicked(null);
+        forget();
+        setSaid("");
     };
     const up = () => go(parentOf(path));
     const back = () => {
@@ -191,16 +229,17 @@ function Browser({ share, view, setView }: {
         if (last === undefined) return;
         setBefore(rest.reverse());
         setPath(last);
-        setPicked(null);
+        forget();
+        setSaid("");
     };
     const open = (entry: FileEntry) => {
         if (entry.dir) {
             go(join(here, entry.name));
         } else {
-            setPicked(entry.name);
+            only(entry.name);
         }
     };
-    const again = () => { folder.reload(); setPicked(null); };
+    const again = () => { folder.reload(); forget(); };
     const newFolder = async (name: string) => {
         try {
             await makeFolder(share.share, here, name);
@@ -219,14 +258,35 @@ function Browser({ share, view, setView }: {
             setTrouble((error as Error).message);
         }
     };
-    const removeNow = async (entry: FileEntry) => {
-        try {
-            await deleteFile(share.share, join(here, entry.name), entry.dir);
-            setDoing(null);
-            again();
-        } catch (error) {
-            setTrouble((error as Error).message);
+    // Each goes on its own, so one that is refused doesn't stop the rest, and the
+    // status line says what happened to all of them
+    const removeNow = async (entries: FileEntry[]) => {
+        if (entries.length === 1) {
+            try {
+                await deleteFile(share.share, join(here, entries[0].name), entries[0].dir);
+                setDoing(null);
+                again();
+            } catch (error) {
+                setTrouble((error as Error).message);
+            }
+            return;
         }
+        setDoing(null);
+        setTrouble(null);
+        const refused: string[] = [];
+        for (const [at, entry] of entries.entries()) {
+            setBusy(`Deleting ${entry.name} (${at + 1} of ${entries.length})`);
+            try {
+                await deleteFile(share.share, join(here, entry.name), entry.dir);
+            } catch (error) {
+                refused.push(`${entry.name}: ${(error as Error).message}`);
+            }
+        }
+        setBusy("");
+        const gone = entries.length - refused.length;
+        setSaid(`${gone} deleted`);
+        if (refused.length) setTrouble(`${refused.length} refused: ${refused.join("; ")}`);
+        again();
     };
     // Uploads go one at a time, so a slow file doesn't hide the others' progress
     const send = async (files: FileList | File[], replace = false) => {
@@ -243,35 +303,55 @@ function Browser({ share, view, setView }: {
         setBusy("");
         again();
     };
-    const moveInto = async (entry: FileEntry, folderName: string) => {
-        try {
-            await renameFile(share.share, join(here, entry.name), join(join(here, folderName), entry.name));
-            again();
-        } catch (error) {
-            setTrouble((error as Error).message);
+    // Dragging something picked moves everything picked with it
+    const moveInto = async (names: string[], folderName: string) => {
+        const refused: string[] = [];
+        for (const name of names.filter(one => one !== folderName)) {
+            try {
+                await renameFile(share.share, join(here, name), join(join(here, folderName), name));
+            } catch (error) {
+                refused.push(`${name}: ${(error as Error).message}`);
+            }
         }
+        setTrouble(refused.length ? refused.join("; ") : null);
+        again();
     };
+    const dragged = (entry: FileEntry) => picked.has(entry.name) ? [...picked] : [entry.name];
     const sortBy = (by: Sort["by"]) => setSort(old => ({ by, down: old.by === by ? !old.down : false }));
     const ariaSort = (by: Sort["by"]) =>
         sort.by === by ? (sort.down ? "descending" : "ascending") : "none" as const;
 
-    // A browser's keyboard: arrows pick, Enter opens, Backspace goes up, Escape
-    // forgets the pick
+    // A browser's keyboard: arrows pick, Shift with them picks a run, Ctrl or Cmd
+    // with A picks everything shown, Enter opens, Delete asks to delete what is
+    // picked, Backspace goes up, and Escape forgets the pick
     const keys = (event: KeyboardEvent) => {
-        const at = items.findIndex(item => item.name === picked);
+        const at = items.findIndex(item => item.name === lead);
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             const step = event.key === "ArrowDown" ? 1 : -1;
             const next = items[Math.min(items.length - 1, Math.max(0, at + step))];
-            if (next) setPicked(next.name);
+            if (!next) return;
+            if (event.shiftKey && anchor) {
+                setPicked(new Set(between(anchor, next.name)));
+                setLead(next.name);
+            } else {
+                only(next.name);
+            }
+        } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+            event.preventDefault();
+            setPicked(new Set(items.map(item => item.name)));
         } else if (event.key === "Enter" && chosen) {
             event.preventDefault();
             open(chosen);
+        } else if (event.key === "Delete" && changing && pickedItems.length) {
+            event.preventDefault();
+            setTrouble(null);
+            setDoing({ kind: "delete", entries: pickedItems });
         } else if (event.key === "Backspace" && path) {
             event.preventDefault();
             up();
         } else if (event.key === "Escape") {
-            setPicked(null);
+            forget();
         }
     };
 
@@ -331,14 +411,27 @@ function Browser({ share, view, setView }: {
                           onCancel={() => { setDoing(null); setTrouble(null); }}
                           onDone={name => newName(doing.entry, name)} />
             )}
-            {doing && doing.kind === "delete" && (
-                <Confirm title={`Delete ${doing.entry.name}`} phrase={doing.entry.name}
+            {doing && doing.kind === "delete" && doing.entries.length === 1 && (
+                <Confirm title={`Delete ${doing.entries[0].name}`} phrase={doing.entries[0].name}
                          busy={false} outcome={trouble ? { kind: "error", text: trouble } : null}
                          onCancel={() => { setDoing(null); setTrouble(null); }}
-                         onConfirm={() => removeNow(doing.entry)}>
-                    <p>{doing.entry.dir
-                        ? `${doing.entry.name} and everything in it goes for good.`
-                        : `${doing.entry.name} goes for good.`}</p>
+                         onConfirm={() => removeNow(doing.entries)}>
+                    <p>{doing.entries[0].dir
+                        ? `${doing.entries[0].name} and everything in it goes for good.`
+                        : `${doing.entries[0].name} goes for good.`}</p>
+                </Confirm>
+            )}
+            {doing && doing.kind === "delete" && doing.entries.length > 1 && (
+                <Confirm title={`Delete ${doing.entries.length} items`}
+                         phrase={`delete ${doing.entries.length} from ${share.share}`}
+                         busy={false} outcome={null}
+                         onCancel={() => { setDoing(null); setTrouble(null); }}
+                         onConfirm={() => removeNow(doing.entries)}>
+                    <p>These go for good{doing.entries.some(entry => entry.dir) ? ", folders with everything in them" : ""}:</p>
+                    <ul class="files-going">
+                        {doing.entries.slice(0, 8).map(entry => <li key={entry.name}>{entry.name}</li>)}
+                        {doing.entries.length > 8 && <li>and {plural(doing.entries.length - 8, "more")}</li>}
+                    </ul>
                 </Confirm>
             )}
             <Loading loaded={folder}>
@@ -379,22 +472,22 @@ function Browser({ share, view, setView }: {
                                     <tbody>
                                         {items.map(entry => (
                                             <tr key={entry.name}
-                                                class={`file-row ${entry.dir ? "is-folder" : ""} ${picked === entry.name ? "picked" : ""}`}
-                                                aria-selected={picked === entry.name}
+                                                class={`file-row ${entry.dir ? "is-folder" : ""} ${picked.has(entry.name) ? "picked" : ""}`}
+                                                aria-selected={picked.has(entry.name)}
                                                 draggable={changing}
-                                                onDragStart={event => event.dataTransfer?.setData("text/plain", entry.name)}
+                                                onDragStart={event => event.dataTransfer?.setData("text/plain",
+                                                    JSON.stringify(dragged(entry)))}
                                                 onDragOver={event => {
                                                     if (changing && entry.dir) event.preventDefault();
                                                 }}
                                                 onDrop={event => {
-                                                    const from = event.dataTransfer?.getData("text/plain");
-                                                    if (!changing || !entry.dir || !from || from === entry.name) return;
+                                                    const from = draggedNames(event.dataTransfer?.getData("text/plain"));
+                                                    if (!changing || !entry.dir || !from.length) return;
                                                     event.preventDefault();
                                                     event.stopPropagation();
-                                                    const moved = all.find(one => one.name === from);
-                                                    if (moved) moveInto(moved, entry.name);
+                                                    moveInto(from.filter(name => all.some(one => one.name === name)), entry.name);
                                                 }}
-                                                onClick={() => setPicked(entry.name)}
+                                                onClick={event => pick(entry, event)}
                                                 onDblClick={() => open(entry)}>
                                                 <td class="file-name">
                                                     <Thumb share={share.share} path={join(here, entry.name)} entry={entry} />
@@ -410,7 +503,10 @@ function Browser({ share, view, setView }: {
                                                                 onClick={() => setMenuFor(menuFor === entry.name ? null : entry.name)}>⋯</button>
                                                         {menuFor === entry.name && (
                                                             <span class="row-menu" role="menu">
-                                                                {!entry.dir && (
+                                                                {entry.dir ? (
+                                                                    <a role="menuitem" class="row-menu-link"
+                                                                       href={zipUrl(share.share, here, [entry.name])}>Download as zip</a>
+                                                                ) : (
                                                                     <a role="menuitem" class="row-menu-link"
                                                                        href={fileUrl(share.share, join(here, entry.name), true)}
                                                                        download={entry.name}>Download</a>
@@ -420,7 +516,7 @@ function Browser({ share, view, setView }: {
                                                                     Rename…
                                                                 </button>}
                                                                 {changing && <button type="button" role="menuitem" class="danger-text"
-                                                                    onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "delete", entry }); }}>
+                                                                    onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "delete", entries: [entry] }); }}>
                                                                     Delete…
                                                                 </button>}
                                                             </span>
@@ -436,8 +532,9 @@ function Browser({ share, view, setView }: {
                                     {items.map(entry => (
                                         <li key={entry.name}>
                                             <button type="button"
-                                                    class={`file-tile ${picked === entry.name ? "picked" : ""}`}
-                                                    onClick={() => setPicked(entry.name)}
+                                                    class={`file-tile ${picked.has(entry.name) ? "picked" : ""}`}
+                                                    aria-pressed={picked.has(entry.name)}
+                                                    onClick={event => pick(entry, event)}
                                                     onDblClick={() => open(entry)}>
                                                 <Thumb share={share.share} path={join(here, entry.name)} entry={entry} large />
                                                 <span class="file-tile-name">{entry.name}</span>
@@ -452,20 +549,70 @@ function Browser({ share, view, setView }: {
                                     {busy ? busy
                                         : items.length === 0
                                             ? (filter ? `Nothing matches “${filter}”` : "Nothing here")
-                                            : `${items.length} item${items.length === 1 ? "" : "s"}`}
-                                    {!busy && folders > 0 && `, ${folders} folder${folders === 1 ? "" : "s"}`}
+                                            : pickedItems.length > 1
+                                                ? `${pickedItems.length} of ${plural(items.length, "item")} picked`
+                                                : plural(items.length, "item")}
+                                    {!busy && pickedItems.length <= 1 && folders > 0 && `, ${plural(folders, "folder")}`}
+                                    {!busy && said && ` · ${said}`}
                                 </span>
                                 <span>{trouble ? trouble : share.level === "read" ? "Read only" : ""}</span>
                             </p>
                         </div>
                         {chosen && !chosen.dir && (
                             <Preview share={share} entry={chosen} path={join(here, chosen.name)}
-                                     onClose={() => setPicked(null)} />
+                                     onClose={forget} />
+                        )}
+                        {pickedItems.length > 1 && (
+                            <Picked share={share} folder={here} entries={pickedItems} changing={changing}
+                                    onDelete={() => { setTrouble(null); setDoing({ kind: "delete", entries: pickedItems }); }}
+                                    onClose={forget} />
                         )}
                     </div>
                 )}
             </Loading>
         </>
+    );
+}
+
+/** The names a drag carries: everything picked when the dragged one was among them. */
+function draggedNames(carried: string | undefined): string[] {
+    if (!carried) return [];
+    try {
+        const names = JSON.parse(carried);
+        return Array.isArray(names) ? names.filter(name => typeof name === "string") : [];
+    } catch {
+        return [carried];
+    }
+}
+
+/** Several things picked: how many, how big, and what can be done with them all. */
+function Picked({ share, folder, entries, changing, onDelete, onClose }: {
+    share: FileShare; folder: string; entries: FileEntry[]; changing: boolean;
+    onDelete: () => void; onClose: () => void;
+}) {
+    const folders = entries.filter(entry => entry.dir).length;
+    const files = entries.length - folders;
+    const size = entries.reduce((sum, entry) => sum + (entry.dir ? 0 : entry.size), 0);
+    return (
+        <aside class="files-preview" aria-label={`${entries.length} items picked`}>
+            <div class="preview-head">
+                <Icon of="file" />
+                <strong>{entries.length} items picked</strong>
+                <button type="button" class="tool" title="Let go of them" aria-label="Let go of them" onClick={onClose}>
+                    <Icon of="close" size={14} />
+                </button>
+            </div>
+            <div class="preview-body picked-body">
+                <p>{[files && plural(files, "file"), folders && plural(folders, "folder")].filter(Boolean).join(" and ")}
+                    {files > 0 && <>, {humanSize(size)}{folders > 0 ? " besides what the folders hold" : ""}</>}</p>
+                <p class="muted small">Ctrl-click (Cmd on a Mac) adds or takes one away; Shift-click picks a run.</p>
+            </div>
+            <div class="preview-foot">
+                {changing && <Button onClick={onDelete}>Delete…</Button>}
+                <a class="button button-primary" href={zipUrl(share.share, folder, entries.map(entry => entry.name))}>
+                    Download as zip</a>
+            </div>
+        </aside>
     );
 }
 

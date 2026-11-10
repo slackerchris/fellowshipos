@@ -84,3 +84,35 @@ func TestStreamHandsBackNoBodyForARefusal(t *testing.T) {
 		t.Errorf("the refusal answered %q", response.Code)
 	}
 }
+
+// A zip is made as it is sent, so its answer has no length and its bytes run
+// until the helper closes the connection.
+func TestAStreamOfUnknownLengthRunsToTheEnd(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	body := bytes.Repeat([]byte("PK zip "), 20000)
+	go func() {
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var request Request
+		json.NewDecoder(conn).Decode(&request)
+		json.NewEncoder(conn).Encode(Response{Size: 5, Length: ToTheEnd})
+		conn.Write(body)
+	}()
+	_, reader, err := Stream(socket, Request{Op: OpFileZip, Share: "media", Names: []string{"a", "b"}})
+	if err != nil || reader == nil {
+		t.Fatalf("no bytes followed the answer: %v", err)
+	}
+	defer reader.Close()
+	got, _ := io.ReadAll(reader)
+	if !bytes.Equal(got, body) {
+		t.Fatalf("got %d of %d bytes", len(got), len(body))
+	}
+}
