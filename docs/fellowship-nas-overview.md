@@ -1,6 +1,6 @@
 # FellowshipNAS project overview
 
-Baseline as of November 10, 2026 · `nas-edition` at `abdb1d8`
+Baseline as of November 10, 2026 · `nas-edition` at `e99ca0c`
 
 FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS. FellowshipOS builds a bootable ISO and a Proxmox LXC template. The NAS role runs on a full install on a physical machine or a VM. At this baseline, it manages ZFS pools and traditional RAID arrays, serves files over SMB and NFS, and provides a browser desktop for administration.
 
@@ -56,7 +56,7 @@ The key editor validates public keys and rejects leading authorized-key options 
 
 ## Decisions and roadmap
 
-Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arrived in Phase 5. Phases 6 and 7 added the graphical installer and expanded ZFS management. Phases 8 and 9 made feature states visible and added user, group and share controls. After Phase 9, `7f80680` added the Health overview, browser cache update fix and login text. `3b3c6a6` added pool history and SSH lockdown. `d5b4488` rebuilt Health around gauges, charts and a drive bay map. `b2a8b52` made traditional RAID a working storage engine, and `e8a4450` added its desktop screens and fixed seven bugs a real-disk test in the VM found. `07976d6` sent mdadm's events to alerts and had Health record Debian's monthly array checks. `652d27f` moved each engine's differences out of the desktop into the engine, and made ZFS disk errors a Health finding. `5d5bd41` added Settings → Storage checks, with fnas scrubbing ZFS pools on its own schedule. `bb01ba6` added the Silverwater, Hearthfield and Highwatch themes, and `abdb1d8` Unraid-style pools (Phase 11).
+Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arrived in Phase 5. Phases 6 and 7 added the graphical installer and expanded ZFS management. Phases 8 and 9 made feature states visible and added user, group and share controls. After Phase 9, `7f80680` added the Health overview, browser cache update fix and login text. `3b3c6a6` added pool history and SSH lockdown. `d5b4488` rebuilt Health around gauges, charts and a drive bay map. `b2a8b52` made traditional RAID a working storage engine, and `e8a4450` added its desktop screens and fixed seven bugs a real-disk test in the VM found. `07976d6` sent mdadm's events to alerts and had Health record Debian's monthly array checks. `652d27f` moved each engine's differences out of the desktop into the engine, and made ZFS disk errors a Health finding. `5d5bd41` added Settings → Storage checks, with fnas scrubbing ZFS pools on its own schedule. `bb01ba6` added the Silverwater, Hearthfield and Highwatch themes, and `abdb1d8` Unraid-style pools (Phase 11). `e99ca0c` kept those pools mounted when the desktop's helper restarts, as on every update, and let the desktop's widget column scroll on shorter screens.
 
 | Phase | Planned work |
 | --- | --- |
@@ -84,7 +84,7 @@ For desktop development, run `npm ci` and `npm run build` in `nas/packages/fello
 
 [CI](../.github/workflows/ci.yml) runs the Python and Go suites, `gofmt` and `go vet`, both frontend builds and ShellCheck on every push. The phase gates below still run by hand in a VM.
 
-**Checked for this overview.** The checked-out branch is `nas-edition` at `abdb1d8`. All 249 Python unit tests passed on a fresh run, and the desktop type-checks.
+**Checked for this overview.** The checked-out branch is `nas-edition` at `e99ca0c`. All 250 Python unit tests passed on a fresh run, and the desktop type-checks.
 
 **Running development VM.** On the host, [https://localhost:8443/](https://localhost:8443/) forwards to the VM's HTTPS port. On November 9, the signed-in desktop showed both `tank` and `usb`. The `tank` details rendered the space breakdown, per-share table and diagnostics. Both Week and Year showed insufficient history to draw a chart, so chart hover remains unverified. Settings showed SSH and password authentication enabled. The guest's exact revision was not checked. The RAID test later added a third pool, `vault`, a RAID 5 array on four disks.
 
