@@ -34,9 +34,12 @@ docker run --rm -it -p 127.0.0.1:8080:80 -v "$PWD:/src:ro" debian:trixie bash -c
     usermod -aG media guest
     python3 /src/dev/sample-files.py /mnt/tank/shares
     chown -R root:media /mnt/tank/shares/media
+    chown -R root:media /mnt/tank/shares/archive
     chown -R root:nas-admins /mnt/tank/shares/family
-    find /mnt/tank/shares -type d -exec chmod 2750 {} +
-    find /mnt/tank/shares -type f -exec chmod 0640 {} +
+    # A share fnas calls read and write is writable by its group, as the ACLs on
+    # a real NAS would make it; family is for nas-admins alone
+    find /mnt/tank/shares -type d -exec chmod 2770 {} +
+    find /mnt/tank/shares -type f -exec chmod 0660 {} +
     # People walk through the pools folders to reach their share
     chmod 755 /mnt/tank /mnt/tank/shares
     /usr/lib/fellowship-nas-web/fellowship-nas-helper &

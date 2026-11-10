@@ -647,6 +647,37 @@ export const folderIn = (share: string, path: string) =>
     request<{ share: string; path: string; folder: { entries: FileEntry[] } }>(
         "GET", `/api/files?share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`);
 
+/** Make a folder inside a share the signed-in person can change. */
+export const makeFolder = (share: string, path: string, name: string) =>
+    request<{ done: boolean }>("POST", "/api/files/mkdir", { share, path, name });
+
+/** Rename or move something inside one share. to is the whole path it should
+    have afterwards, not just the new name. */
+export const renameFile = (share: string, path: string, to: string) =>
+    request<{ done: boolean }>("POST", "/api/files/rename", { share, path, to });
+
+export const deleteFile = (share: string, path: string, recursive = false) =>
+    request<{ done: boolean }>("POST", "/api/files/delete", { share, path, recursive });
+
+/** Send one file's bytes. The server passes them to the helper, which writes them
+    as the signed-in person, so a refusal comes back in the same words as any
+    other. */
+export async function uploadFile(share: string, path: string, name: string, file: File,
+                                 replace = false): Promise<number> {
+    const query = `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}` +
+        `&name=${encodeURIComponent(name)}${replace ? "&replace=1" : ""}`;
+    const answer = await fetch(`/api/files/upload?${query}`, {
+        method: "POST",
+        body: file,
+        headers: { "X-Fellowship-Token": token },
+    });
+    if (!answer.ok) {
+        const told = await answer.json().catch(() => ({ error: "" }));
+        throw new FnasError(told.error || `The upload was refused (${answer.status}).`);
+    }
+    return (await answer.json()).size as number;
+}
+
 /** Where the browser asks for a file's bytes. Inline previews and downloads use
     the same answer; save asks for it as a download rather than showing it. */
 export function fileUrl(share: string, path: string, save = false): string {

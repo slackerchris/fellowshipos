@@ -120,6 +120,12 @@ DEFAULT = {
     "pools": [{"name": "tank", "size": 16 * 10 ** 12, "allocated": 9 * 10 ** 12, "free": 7 * 10 ** 12,
                "health": "ONLINE", "readonly": False, "engine": "zfs"}],
     "shares": [
+        # Handed out read only, so the desktop's own refusal can be seen without
+        # the kernel having to be the one to say no
+        {"name": "archive", "pool": "tank", "dataset": "tank/shares/archive", "path": "/mnt/tank/shares/archive",
+         "mode": "chosen", "access": {"users": {"guest": "read", "admin": "write"}, "groups": {}}, "nfs": False,
+         "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
+         "engine": "zfs", "snapshots": True, "readonly": False},
         {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/mnt/tank/shares/media",
          "mode": "everyone", "access": {"users": {}, "groups": {}}, "nfs": True, "smb": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,

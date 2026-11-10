@@ -24,7 +24,8 @@ def main(root):
     media = os.path.join(root, "media")
     photos = os.path.join(media, "photos")
     family = os.path.join(root, "family")
-    for folder in (media, photos, family):
+    archive = os.path.join(root, "archive")
+    for folder in (media, photos, family, archive):
         os.makedirs(folder, exist_ok=True)
     with open(os.path.join(media, "notes.txt"), "w") as file:
         file.write("Things for the weekend\n\n"
@@ -33,6 +34,8 @@ def main(root):
                    "- book the ferry before Friday\n")
     with open(os.path.join(photos, "sunrise.txt"), "w") as file:
         file.write("Taken from the top field, a little after five.\n")
+    with open(os.path.join(archive, "old-notes.txt"), "w") as file:
+        file.write("Kept for the record.\n")
     with open(os.path.join(family, "private.txt"), "w") as file:
         file.write("Only the people this share is for can read this.\n")
     with open(os.path.join(media, "holiday.png"), "wb") as file:

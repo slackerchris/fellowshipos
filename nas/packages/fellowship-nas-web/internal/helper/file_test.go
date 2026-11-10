@@ -16,11 +16,12 @@ import (
 // fileFake is a helper whose fnas knows two shares, one per person, and whose
 // child records what it was asked to do and as whom.
 type fileFake struct {
-	roots   string // what `fnas share roots USER` prints
-	ran     [][]string
-	childed []string
-	person  Account
-	body    string
+	roots    string // what `fnas share roots USER` prints
+	ran      [][]string
+	childed  []string
+	person   Account
+	body     string
+	uploaded string
 }
 
 func newFileFake(t *testing.T) (*fileFake, *Helper, string) {
@@ -39,9 +40,14 @@ func newFileFake(t *testing.T) (*fileFake, *Helper, string) {
 			f.ran = append(f.ran, args)
 			return f.roots, "", nil
 		},
-		Child: func(account Account, op, path string, start, length int64) (io.ReadCloser, error) {
+		Child: func(account Account, body io.Reader, op, path string, start, length int64,
+			extra ...string) (io.ReadCloser, error) {
 			f.person = account
-			f.childed = append(f.childed, op+" "+path)
+			f.childed = append(f.childed, op+" "+path+" "+strings.Join(extra, " "))
+			if body != nil {
+				written, _ := io.ReadAll(body)
+				f.uploaded = string(written)
+			}
 			return io.NopCloser(strings.NewReader(f.body)), nil
 		},
 		Now: func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) },
@@ -73,7 +79,7 @@ func TestAShareAPersonCantUseIsRefusedBeforeAnyFileWork(t *testing.T) {
 	token := login(t, h, "kim").Token
 	for _, op := range []string{protocol.OpFileList, protocol.OpFileRead} {
 		request := protocol.Request{Op: op, Session: token, Share: "private", Path: ""}
-		response, body := h.Stream(request)
+		response, body := h.Stream(request, nil)
 		if response.Code != protocol.CodeForbidden {
 			t.Errorf("%s of a share they can't use answered %q, want it refused", op, response.Code)
 		}
@@ -120,7 +126,7 @@ func TestReadingSendsTheHeadThenTheBytes(t *testing.T) {
 	}
 	token := login(t, h, "kim").Token
 	response, body := h.Stream(protocol.Request{Op: protocol.OpFileRead, Session: token,
-		Share: "media", Path: "notes.txt"})
+		Share: "media", Path: "notes.txt"}, nil)
 	if response.Code != "" {
 		t.Fatalf("reading: %s %s", response.Code, response.Error)
 	}
@@ -146,12 +152,12 @@ func TestAChildThatRefusesSaysWhy(t *testing.T) {
 	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h.config.Child = func(Account, string, string, int64, int64) (io.ReadCloser, error) {
+	h.config.Child = func(Account, io.Reader, string, string, int64, int64, ...string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(`{"error":"you don't have permission to open that"}` + "\n")), nil
 	}
 	token := login(t, h, "kim").Token
 	response, body := h.Stream(protocol.Request{Op: protocol.OpFileRead, Session: token,
-		Share: "media", Path: "notes.txt"})
+		Share: "media", Path: "notes.txt"}, nil)
 	if body != nil {
 		body.Close()
 	}
@@ -167,7 +173,7 @@ func TestAClimbOutIsRefusedBeforeAnyFileWork(t *testing.T) {
 	f, h, _ := newFileFake(t)
 	token := login(t, h, "kim").Token
 	response, body := h.Stream(protocol.Request{Op: protocol.OpFileRead, Session: token,
-		Share: "media", Path: "../../etc/shadow"})
+		Share: "media", Path: "../../etc/shadow"}, nil)
 	if body != nil {
 		body.Close()
 	}
@@ -176,5 +182,110 @@ func TestAClimbOutIsRefusedBeforeAnyFileWork(t *testing.T) {
 	}
 	if len(f.childed) != 0 {
 		t.Errorf("a child was run for a path outside the share: %v", f.childed)
+	}
+}
+
+// The write side: a share the person may only read refuses everything, and a
+// name that is already there is not quietly replaced.
+func TestWritingNeedsAShareThePersonCanChange(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"read","through":"own","snapshots":true}]`
+	token := login(t, h, "kim").Token
+	cases := []struct {
+		name    string
+		request protocol.Request
+		body    string
+	}{
+		{"an upload", protocol.Request{Op: protocol.OpFileWrite, Share: "media", Path: "new.txt"}, "hello"},
+		{"a new folder", protocol.Request{Op: protocol.OpFileMkdir, Share: "media", Path: "holiday"}, ""},
+		{"a rename", protocol.Request{Op: protocol.OpFileRename, Share: "media", Path: "notes.txt", To: "other.txt"}, ""},
+		{"a delete", protocol.Request{Op: protocol.OpFileDelete, Share: "media", Path: "notes.txt"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.request.Session = token
+			response, body := h.Stream(c.request, strings.NewReader(c.body))
+			if body != nil {
+				body.Close()
+			}
+			if response.Code != protocol.CodeForbidden {
+				t.Fatalf("%s answered %q, want it refused", c.name, response.Code)
+			}
+			if !strings.Contains(response.Error, "read only") {
+				t.Errorf("%s said %q", c.name, response.Error)
+			}
+		})
+	}
+	if len(f.childed) != 0 {
+		t.Errorf("a child was run for a share that can only be read: %v", f.childed)
+	}
+}
+
+func TestUploadArrivesAsThePersonsChild(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	f.body = `{"size":5,"length":5}` + "\n"
+	token := login(t, h, "kim").Token
+	response, body := h.Stream(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+		Share: "media", Path: "new notes.txt"}, strings.NewReader("hello"))
+	if body != nil {
+		body.Close()
+	}
+	if response.Code != "" {
+		t.Fatalf("upload: %s %s", response.Code, response.Error)
+	}
+	if response.Size != 5 {
+		t.Errorf("the answer said %d bytes", response.Size)
+	}
+	if f.uploaded != "hello" {
+		t.Errorf("the child was given %q", f.uploaded)
+	}
+	if len(f.childed) != 1 || f.childed[0] != "write "+filepath.Join(dir, "new notes.txt")+" " {
+		t.Errorf("the child was asked %v", f.childed)
+	}
+}
+
+func TestUploadsCannotClimbOutOrLandOnWhatIsThere(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token := login(t, h, "kim").Token
+	for _, path := range []string{"../escape.txt", "notes.txt"} {
+		response, body := h.Stream(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+			Share: "media", Path: path}, strings.NewReader("hello"))
+		if body != nil {
+			body.Close()
+		}
+		if response.Code == "" {
+			t.Errorf("%q was written", path)
+		}
+	}
+	if len(f.childed) != 0 {
+		t.Errorf("a child was run for a refused upload: %v", f.childed)
+	}
+}
+
+func TestAFolderDeleteSaysWhetherItTakesWhatIsInside(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	if err := os.Mkdir(filepath.Join(dir, "photos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.body = `{}` + "\n"
+	token := login(t, h, "kim").Token
+	response := h.Handle(protocol.Request{Op: protocol.OpFileDelete, Session: token,
+		Share: "media", Path: "photos"})
+	if response.Code != "" {
+		t.Fatalf("delete: %s %s", response.Code, response.Error)
+	}
+	if got := f.childed[len(f.childed)-1]; !strings.HasSuffix(got, "keep") {
+		t.Errorf("a plain delete asked the child for %q", got)
+	}
+	h.Handle(protocol.Request{Op: protocol.OpFileDelete, Session: token, Share: "media",
+		Path: "photos", Recursive: true})
+	if got := f.childed[len(f.childed)-1]; !strings.HasSuffix(got, "tree") {
+		t.Errorf("a folder delete asked the child for %q", got)
 	}
 }

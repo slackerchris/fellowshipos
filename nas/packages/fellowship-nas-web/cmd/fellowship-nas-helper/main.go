@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -93,7 +94,8 @@ func lookup(name string) (helper.Account, error) {
 // person's uid, gid and groups. The kernel does the permission checking, so a
 // mistake in the path check can't reach a file the person couldn't open
 // themselves.
-func runChild(account helper.Account, op, path string, start, length int64) (io.ReadCloser, error) {
+func runChild(account helper.Account, body io.Reader, op, path string, start, length int64,
+	extra ...string) (io.ReadCloser, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -102,8 +104,12 @@ func runChild(account helper.Account, op, path string, start, length int64) (io.
 	if op == "read" {
 		args = append(args, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
 	}
+	args = append(args, extra...)
 	command := exec.Command(self, args...)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
+	if body != nil {
+		command.Stdin = body
+	}
 	command.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: uint32(account.UID), Gid: uint32(account.GID),
 			Groups: account.Groups, NoSetGroups: len(account.Groups) == 0},
@@ -169,11 +175,18 @@ func serve(h *helper.Helper, conn *net.UnixConn, allowed int) {
 		log.Printf("refused a connection from uid %d", uid)
 		return
 	}
-	var request protocol.Request
-	if err := json.NewDecoder(io.LimitReader(conn, protocol.MaxMessage)).Decode(&request); err != nil {
+	// The request is one line of JSON. Reading it as a line leaves anything after
+	// it on the connection, which is what an upload is
+	reader := bufio.NewReaderSize(conn, 64<<10)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
 		return
 	}
-	response, body := h.Stream(request)
+	var request protocol.Request
+	if err := json.Unmarshal(line, &request); err != nil {
+		return
+	}
+	response, body := h.Stream(request, reader)
 	if err := json.NewEncoder(conn).Encode(response); err != nil {
 		return
 	}

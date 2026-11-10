@@ -14,6 +14,14 @@ bump.
 
 ### Added
 
+- Files can change things now, not only look at them: **Upload** takes one or
+  more files, or drop them on the folder; **New folder**; **Rename…** and
+  **Delete…** in a row's menu, the delete asking for the name to be typed as
+  everywhere else; and dragging a file onto a folder moves it there. A box filters
+  the folder as you type. A share fnas says is read only hides the three change
+  buttons and refuses them if they are called anyway, and a folder delete takes
+  what is inside only when the desktop says so.
+
 - Phase 12's Files app, first two slices: browse the shares your account can use,
   open a folder, and preview an image, video, audio file, PDF or text file, with
   download. The helper does the work as you: it asks `fnas share roots USER` where

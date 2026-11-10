@@ -3,9 +3,10 @@
 // deleting come next, so a read-only share and one someone can write to look the
 // same here.
 import { ComponentChildren } from "preact";
-import { useState } from "preact/hooks";
-import { FileEntry, FileShare, fileShares, fileUrl, folderIn, humanSize } from "./api";
-import { Loading, Notice, Page, useLoad } from "./ui";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { FileEntry, FileShare, deleteFile, fileShares, fileUrl, folderIn, humanSize,
+    makeFolder, renameFile, uploadFile } from "./api";
+import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const IMAGE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"];
 const VIDEO = [".mp4", ".webm", ".m4v", ".mov", ".ogv"];
@@ -144,6 +145,8 @@ export function Files() {
     );
 }
 
+type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entry: FileEntry } | null;
+
 function Browser({ share, view, setView }: {
     share: FileShare; view: "list" | "grid"; setView: (view: "list" | "grid") => void;
 }) {
@@ -151,12 +154,22 @@ function Browser({ share, view, setView }: {
     const [before, setBefore] = useState<string[]>([]);
     const [picked, setPicked] = useState<string | null>(null);
     const [sort, setSort] = useState<Sort>({ by: "name", down: false });
+    const [filter, setFilter] = useState("");
+    const [doing, setDoing] = useState<Doing>(null);
+    const [menuFor, setMenuFor] = useState<string | null>(null);
+    const [busy, setBusy] = useState("");
+    const [trouble, setTrouble] = useState<string | null>(null);
     const folder = useLoad(() => folderIn(share.share, path), [path]);
+    const changing = share.level === "write";
 
     // The path the listing belongs to, which is what its names are joined to:
     // while another folder loads, the old listing is still on screen
     const here = folder.data?.path ?? path;
-    const items = [...(folder.data?.folder.entries || [])].sort((a, b) => {
+    const all = folder.data?.folder.entries || [];
+    const shown = filter
+        ? all.filter(entry => entry.name.toLowerCase().includes(filter.toLowerCase()))
+        : all;
+    const items = [...shown].sort((a, b) => {
         if (a.dir !== b.dir) return a.dir ? -1 : 1;
         const order = sort.by === "name"
             ? a.name.toLowerCase().localeCompare(b.name.toLowerCase())
@@ -185,6 +198,57 @@ function Browser({ share, view, setView }: {
             go(join(here, entry.name));
         } else {
             setPicked(entry.name);
+        }
+    };
+    const again = () => { folder.reload(); setPicked(null); };
+    const newFolder = async (name: string) => {
+        try {
+            await makeFolder(share.share, here, name);
+            setDoing(null);
+            again();
+        } catch (error) {
+            setTrouble((error as Error).message);
+        }
+    };
+    const newName = async (entry: FileEntry, name: string) => {
+        try {
+            await renameFile(share.share, join(here, entry.name), join(here, name));
+            setDoing(null);
+            again();
+        } catch (error) {
+            setTrouble((error as Error).message);
+        }
+    };
+    const removeNow = async (entry: FileEntry) => {
+        try {
+            await deleteFile(share.share, join(here, entry.name), entry.dir);
+            setDoing(null);
+            again();
+        } catch (error) {
+            setTrouble((error as Error).message);
+        }
+    };
+    // Uploads go one at a time, so a slow file doesn't hide the others' progress
+    const send = async (files: FileList | File[], replace = false) => {
+        setTrouble(null);
+        const list = [...files];
+        for (const [at, file] of list.entries()) {
+            setBusy(`Uploading ${file.name} (${at + 1} of ${list.length})`);
+            try {
+                await uploadFile(share.share, here, file.name, file, replace);
+            } catch (error) {
+                setTrouble(`${file.name}: ${(error as Error).message}`);
+            }
+        }
+        setBusy("");
+        again();
+    };
+    const moveInto = async (entry: FileEntry, folderName: string) => {
+        try {
+            await renameFile(share.share, join(here, entry.name), join(join(here, folderName), entry.name));
+            again();
+        } catch (error) {
+            setTrouble((error as Error).message);
         }
     };
     const sortBy = (by: Sort["by"]) => setSort(old => ({ by, down: old.by === by ? !old.down : false }));
@@ -229,6 +293,25 @@ function Browser({ share, view, setView }: {
                         </span>
                     ))}
                 </div>
+                <input class="files-filter" type="search" placeholder="Filter this folder"
+                       aria-label="Filter this folder" value={filter}
+                       onInput={event => setFilter(event.currentTarget.value)} />
+                {changing && (
+                    <button type="button" class="tool-text" onClick={() => setDoing({ kind: "mkdir" })}>
+                        New folder
+                    </button>
+                )}
+                {changing && (
+                    <label class="tool-text upload">
+                        Upload
+                        <input type="file" multiple aria-label="Upload files"
+                               onChange={event => {
+                                   const files = event.currentTarget.files;
+                                   if (files && files.length) send(files);
+                                   event.currentTarget.value = "";
+                               }} />
+                    </label>
+                )}
                 <div class="segmented view-switch" role="group" aria-label="How to show the files">
                     <button type="button" class={view === "list" ? "current" : ""} aria-pressed={view === "list"}
                             title="List" aria-label="List" onClick={() => setView("list")}><Icon of="list" /></button>
@@ -237,10 +320,37 @@ function Browser({ share, view, setView }: {
                 </div>
             </div>
 
+            {doing && doing.kind === "mkdir" && (
+                <NameForm title="New folder" label="Folder name" value="" busy={false}
+                          trouble={trouble} onCancel={() => { setDoing(null); setTrouble(null); }}
+                          onDone={name => newFolder(name)} />
+            )}
+            {doing && doing.kind === "rename" && (
+                <NameForm title={`Rename ${doing.entry.name}`} label="New name" value={doing.entry.name}
+                          busy={false} trouble={trouble}
+                          onCancel={() => { setDoing(null); setTrouble(null); }}
+                          onDone={name => newName(doing.entry, name)} />
+            )}
+            {doing && doing.kind === "delete" && (
+                <Confirm title={`Delete ${doing.entry.name}`} phrase={doing.entry.name}
+                         busy={false} outcome={trouble ? { kind: "error", text: trouble } : null}
+                         onCancel={() => { setDoing(null); setTrouble(null); }}
+                         onConfirm={() => removeNow(doing.entry)}>
+                    <p>{doing.entry.dir
+                        ? `${doing.entry.name} and everything in it goes for good.`
+                        : `${doing.entry.name} goes for good.`}</p>
+                </Confirm>
+            )}
             <Loading loaded={folder}>
                 {() => (
                     <div class="files-split">
-                        <div class="files-pane" tabindex={0} onKeyDown={keys}>
+                        <div class="files-pane" tabindex={0} onKeyDown={keys}
+                             onDragOver={event => { if (changing) event.preventDefault(); }}
+                             onDrop={event => {
+                                 if (!changing) return;
+                                 event.preventDefault();
+                                 if (event.dataTransfer?.files.length) send(event.dataTransfer.files);
+                             }}>
                             <div class="file-scroll">
                             {items.length === 0 ? (
                                 <p class="files-blank"><Icon of="folder" size={30} />This folder is empty.</p>
@@ -263,6 +373,7 @@ function Browser({ share, view, setView }: {
                                                     Changed {sort.by === "modified" && <span class="caret">{sort.down ? "▾" : "▴"}</span>}
                                                 </button>
                                             </th>
+                                            <th class="file-actions" aria-label="Actions"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -270,6 +381,19 @@ function Browser({ share, view, setView }: {
                                             <tr key={entry.name}
                                                 class={`file-row ${entry.dir ? "is-folder" : ""} ${picked === entry.name ? "picked" : ""}`}
                                                 aria-selected={picked === entry.name}
+                                                draggable={changing}
+                                                onDragStart={event => event.dataTransfer?.setData("text/plain", entry.name)}
+                                                onDragOver={event => {
+                                                    if (changing && entry.dir) event.preventDefault();
+                                                }}
+                                                onDrop={event => {
+                                                    const from = event.dataTransfer?.getData("text/plain");
+                                                    if (!changing || !entry.dir || !from || from === entry.name) return;
+                                                    event.preventDefault();
+                                                    event.stopPropagation();
+                                                    const moved = all.find(one => one.name === from);
+                                                    if (moved) moveInto(moved, entry.name);
+                                                }}
                                                 onClick={() => setPicked(entry.name)}
                                                 onDblClick={() => open(entry)}>
                                                 <td class="file-name">
@@ -278,6 +402,31 @@ function Browser({ share, view, setView }: {
                                                 </td>
                                                 <td class="file-size">{entry.dir ? "" : humanSize(entry.size)}</td>
                                                 <td class="file-when">{new Date(entry.modified).toLocaleDateString()}</td>
+                                                <td class="file-actions">
+                                                    <span class="menu-wrap">
+                                                        <button type="button" class="kebab" aria-haspopup="menu"
+                                                                aria-expanded={menuFor === entry.name}
+                                                                aria-label={`More for ${entry.name}`}
+                                                                onClick={() => setMenuFor(menuFor === entry.name ? null : entry.name)}>⋯</button>
+                                                        {menuFor === entry.name && (
+                                                            <span class="row-menu" role="menu">
+                                                                {!entry.dir && (
+                                                                    <a role="menuitem" class="row-menu-link"
+                                                                       href={fileUrl(share.share, join(here, entry.name), true)}
+                                                                       download={entry.name}>Download</a>
+                                                                )}
+                                                                {changing && <button type="button" role="menuitem"
+                                                                    onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "rename", entry }); }}>
+                                                                    Rename…
+                                                                </button>}
+                                                                {changing && <button type="button" role="menuitem" class="danger-text"
+                                                                    onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "delete", entry }); }}>
+                                                                    Delete…
+                                                                </button>}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -300,11 +449,13 @@ function Browser({ share, view, setView }: {
                             </div>
                             <p class="files-status">
                                 <span>
-                                    {items.length === 0 ? "Nothing here"
-                                        : `${items.length} item${items.length === 1 ? "" : "s"}`}
-                                    {folders > 0 && `, ${folders} folder${folders === 1 ? "" : "s"}`}
+                                    {busy ? busy
+                                        : items.length === 0
+                                            ? (filter ? `Nothing matches “${filter}”` : "Nothing here")
+                                            : `${items.length} item${items.length === 1 ? "" : "s"}`}
+                                    {!busy && folders > 0 && `, ${folders} folder${folders === 1 ? "" : "s"}`}
                                 </span>
-                                <span>{share.level === "read" ? "Read only" : ""}</span>
+                                <span>{trouble ? trouble : share.level === "read" ? "Read only" : ""}</span>
                             </p>
                         </div>
                         {chosen && !chosen.dir && (
@@ -315,6 +466,30 @@ function Browser({ share, view, setView }: {
                 )}
             </Loading>
         </>
+    );
+}
+
+/** One name, typed: a new folder's, or what something should be called. */
+function NameForm({ title, label, value, busy, trouble, onCancel, onDone }: {
+    title: string; label: string; value: string; busy: boolean; trouble: string | null;
+    onCancel: () => void; onDone: (name: string) => void;
+}) {
+    const [name, setName] = useState(value);
+    const field = useRef<HTMLInputElement>(null);
+    useEffect(() => { field.current?.focus(); field.current?.select(); }, []);
+    return (
+        <form class="files-form" onSubmit={event => { event.preventDefault(); if (name.trim()) onDone(name.trim()); }}>
+            <Field label={label}>
+                <input ref={field} value={name} onInput={event => setName(event.currentTarget.value)} />
+            </Field>
+            <Result outcome={trouble ? { kind: "error", text: trouble } : null} />
+            <div class="row row-end">
+                <Button onClick={onCancel}>Cancel</Button>
+                <Button kind="primary" type="submit" busy={busy} disabled={!name.trim() || name === value}>
+                    {title}
+                </Button>
+            </div>
+        </form>
     );
 }
 

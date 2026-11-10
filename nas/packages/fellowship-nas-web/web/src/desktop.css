@@ -216,6 +216,7 @@
 .panel-left { left: 8px; }
 .panel-right { right: 8px; }
 .panel-small { width: 240px; }
+.desktop-context-menu { bottom: auto; width: min(200px, calc(100vw - 16px)); padding: 4px; gap: 2px; }
 .launcher { width: min(420px, calc(100vw - 16px)); }
 .launcher-app, .notification, .menu-item {
     display: flex;

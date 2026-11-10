@@ -51,6 +51,8 @@ type Server struct {
 	Call Caller
 	// Stream is Call for an answer that carries a file after it
 	Stream func(protocol.Request) (protocol.Response, io.ReadCloser, error)
+	// Send is Call for a request that carries a file after it, such as an upload
+	Send   func(protocol.Request, io.Reader) (protocol.Response, error)
 	Static fs.FS
 	// Read for the list of people's accounts
 	Passwd string
@@ -74,6 +76,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/events", s.withSession(false, s.jobEvents))
 	mux.HandleFunc("GET /api/files", s.withSession(false, s.files))
 	mux.HandleFunc("GET /api/files/download", s.withSession(false, s.download))
+	mux.HandleFunc("POST /api/files/upload", s.withSession(true, s.upload))
+	mux.HandleFunc("POST /api/files/mkdir", s.withSession(true, s.mkdir))
+	mux.HandleFunc("POST /api/files/rename", s.withSession(true, s.rename))
+	mux.HandleFunc("POST /api/files/delete", s.withSession(true, s.remove))
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }
@@ -390,6 +396,115 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, session *proto
 	if _, err := io.Copy(w, body); err != nil {
 		log.Printf("sending %s: %v", inside, err)
 	}
+}
+
+// MaxUpload is the most one file may be, matching the helper's own cap.
+const MaxUpload = 10 << 30
+
+// upload receives a file and hands it to the helper, which writes it as the
+// person. The body is the file itself, so nothing is held in memory here.
+func (s *Server) upload(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	share, folder, name := query.Get("share"), query.Get("path"), query.Get("name")
+	if share == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "say which file: share and name")
+		return
+	}
+	path := name
+	if folder != "" {
+		path = folder + "/" + name
+	}
+	controller := http.NewResponseController(w)
+	controller.SetReadDeadline(time.Time{})
+	controller.SetWriteDeadline(time.Time{})
+	body := http.MaxBytesReader(w, r.Body, MaxUpload)
+	if s.Send == nil {
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	response, err := s.Send(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+		Share: share, Path: path, Replace: query.Get("replace") != ""}, body)
+	if err != nil {
+		log.Printf("helper: %v", err)
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	if response.Code != "" {
+		writeFailure(w, response)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"size": response.Size})
+}
+
+// filesChange carries out the small changes: a new folder, a rename, a removal.
+func (s *Server) filesChange(w http.ResponseWriter, r *http.Request, token string, op string,
+	read func(body changeRequest) protocol.Request, missed func(body changeRequest) string) {
+	var body changeRequest
+	if !readJSON(w, r, 1<<16, &body) {
+		return
+	}
+	// A new folder names the folder it goes in, which is empty at the top of a
+	// share, so each change says for itself what it needs
+	if body.Share == "" {
+		writeError(w, http.StatusBadRequest, "say which share")
+		return
+	}
+	if said := missed(body); said != "" {
+		writeError(w, http.StatusBadRequest, said)
+		return
+	}
+	request := read(body)
+	request.Op = op
+	request.Session = token
+	request.Touch = r.Header.Get(BackgroundHeader) == ""
+	if _, ok := s.call(w, request); ok {
+		writeJSON(w, http.StatusOK, map[string]bool{"done": true})
+	}
+}
+
+type changeRequest struct {
+	Share     string `json:"share"`
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	To        string `json:"to"`
+	Recursive bool   `json:"recursive"`
+}
+
+func (s *Server) mkdir(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	s.filesChange(w, r, token, protocol.OpFileMkdir, func(body changeRequest) protocol.Request {
+		path := body.Name
+		if body.Path != "" {
+			path = body.Path + "/" + body.Name
+		}
+		return protocol.Request{Share: body.Share, Path: path}
+	}, func(body changeRequest) string {
+		if body.Name == "" {
+			return "say what to call the folder"
+		}
+		return ""
+	})
+}
+
+func (s *Server) rename(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	s.filesChange(w, r, token, protocol.OpFileRename, func(body changeRequest) protocol.Request {
+		return protocol.Request{Share: body.Share, Path: body.Path, To: body.To}
+	}, func(body changeRequest) string {
+		if body.Path == "" || body.To == "" {
+			return "say what to rename and what to call it"
+		}
+		return ""
+	})
+}
+
+func (s *Server) remove(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	s.filesChange(w, r, token, protocol.OpFileDelete, func(body changeRequest) protocol.Request {
+		return protocol.Request{Share: body.Share, Path: body.Path, Recursive: body.Recursive}
+	}, func(body changeRequest) string {
+		if body.Path == "" {
+			return "say what to remove"
+		}
+		return ""
+	})
 }
 
 // byteRange reads the one range a media player asks for. Anything else asks for

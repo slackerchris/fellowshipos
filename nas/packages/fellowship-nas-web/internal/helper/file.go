@@ -99,7 +99,7 @@ func (h *Helper) fileList(user string, request protocol.Request) protocol.Respon
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now")
 	}
-	out, err := h.config.Child(account, "list", path, 0, 0)
+	out, err := h.config.Child(account, nil, "list", path, 0, 0)
 	if err != nil {
 		log.Printf("listing %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that folder can't be listed right now")
@@ -140,7 +140,7 @@ func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Respo
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now"), nil
 	}
-	out, err := h.config.Child(account, "read", path, request.Start, request.Length)
+	out, err := h.config.Child(account, nil, "read", path, request.Start, request.Length)
 	if err != nil {
 		log.Printf("reading %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that file can't be opened right now"), nil
@@ -171,10 +171,19 @@ func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Respo
 		}{body, out}
 }
 
-// Stream is Handle for the one op that carries a file after its answer. The
-// caller must close the reader.
-func (h *Helper) Stream(request protocol.Request) (protocol.Response, io.ReadCloser) {
-	if request.Op != protocol.OpFileRead {
+// Stream is Handle for the ops that carry bytes either way: a read answers with
+// the file after its answer, a write arrives with the file after its request.
+// The caller must close the reader.
+func (h *Helper) Stream(request protocol.Request, body io.Reader) (protocol.Response, io.ReadCloser) {
+	switch request.Op {
+	case protocol.OpFileWrite:
+		found := h.find(request.Session, request.Touch)
+		if found == nil {
+			return failure(protocol.CodeUnauthenticated, signedOut), nil
+		}
+		return h.fileWrite(found.user, request, body), nil
+	case protocol.OpFileRead:
+	default:
 		return h.Handle(request), nil
 	}
 	found := h.find(request.Session, request.Touch)
@@ -182,4 +191,171 @@ func (h *Helper) Stream(request protocol.Request) (protocol.Response, io.ReadClo
 		return failure(protocol.CodeUnauthenticated, signedOut), nil
 	}
 	return h.fileRead(found.user, request)
+}
+
+// MaxUpload is the most one file may be, per the plan's 10 GB transfer.
+const MaxUpload = 10 << 30
+
+// writable is the root for a share the person may also change.
+func (h *Helper) writable(user, share string) (files.Root, error) {
+	roots, found, err := h.roots(user)
+	if err != nil {
+		return files.Root{}, errors.New("the shares can't be listed right now")
+	}
+	root, err := files.Find(roots, share)
+	if err != nil {
+		return files.Root{}, err
+	}
+	for _, one := range found {
+		if one.Share == share && one.Level != "write" {
+			return files.Root{}, fmt.Errorf("%s is read only for you", share)
+		}
+	}
+	return root, nil
+}
+
+// fileWrite receives an upload and puts it in place as the person.
+func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader) protocol.Response {
+	root, err := h.writable(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	var path string
+	if request.Replace {
+		path, err = files.Resolve([]files.Root{root}, request.Share, request.Path)
+	} else {
+		path, err = files.ResolveNew([]files.Root{root}, request.Share, request.Path)
+	}
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	if body == nil {
+		return failure(protocol.CodeBadRequest, "no file arrived")
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	// One byte over the cap is enough to know the file is too big
+	counting := &counted{reader: io.LimitReader(body, MaxUpload+1)}
+	var extra []string
+	if request.Replace {
+		extra = []string{"replace"}
+	}
+	out, err := h.config.Child(account, counting, "write", path, 0, 0, extra...)
+	if err != nil {
+		log.Printf("writing %s for %s: %v", path, user, err)
+		return failure(protocol.CodeFailed, "that file can't be written right now")
+	}
+	defer out.Close()
+	if answer := childSaid(out); answer != "" {
+		return failure(protocol.CodeFailed, answer)
+	}
+	if counting.wrote > MaxUpload {
+		return failure(protocol.CodeBadRequest, "that file is larger than the 10 GB this allows")
+	}
+	return protocol.Response{Size: counting.wrote}
+}
+
+// counted remembers how much went through it, so a file over the cap is caught
+// without being kept anywhere.
+type counted struct {
+	reader io.Reader
+	wrote  int64
+}
+
+func (c *counted) Read(into []byte) (int, error) {
+	taken, err := c.reader.Read(into)
+	c.wrote += int64(taken)
+	return taken, err
+}
+
+// fileMkdir makes a folder in a share the person can change.
+func (h *Helper) fileMkdir(user string, request protocol.Request) protocol.Response {
+	return h.change(user, request, "that folder can't be made right now", func(root files.Root) (string, error) {
+		return files.ResolveNew([]files.Root{root}, request.Share, request.Path)
+	}, func(path string) []string { return []string{"mkdir", path} })
+}
+
+// fileRename moves or renames something inside one share. Moving between shares
+// would be a copy and a delete, and is not offered yet.
+func (h *Helper) fileRename(user string, request protocol.Request) protocol.Response {
+	root, err := h.writable(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	from, err := files.Resolve([]files.Root{root}, request.Share, request.Path)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	to, err := files.ResolveNew([]files.Root{root}, request.Share, request.To)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	out, err := h.config.Child(account, nil, "rename", from, 0, 0, to)
+	if err != nil {
+		return failure(protocol.CodeFailed, "that can't be renamed right now")
+	}
+	defer out.Close()
+	if answer := childSaid(out); answer != "" {
+		return failure(protocol.CodeFailed, answer)
+	}
+	return protocol.Response{}
+}
+
+// fileDelete removes something, taking a folder's contents with it only when
+// that was asked for.
+func (h *Helper) fileDelete(user string, request protocol.Request) protocol.Response {
+	whole := "keep"
+	if request.Recursive {
+		whole = "tree"
+	}
+	return h.change(user, request, "that can't be removed right now", func(root files.Root) (string, error) {
+		return files.Resolve([]files.Root{root}, request.Share, request.Path)
+	}, func(path string) []string { return []string{"remove", path, whole} })
+}
+
+// change is the shape mkdir and delete share: check the share can be written,
+// work out the path, then let the child do it and keep its words if it refuses.
+func (h *Helper) change(user string, request protocol.Request, failed string,
+	path func(root files.Root) (string, error), args func(path string) []string) protocol.Response {
+	root, err := h.writable(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	found, err := path(root)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	command := args(found)
+	out, err := h.config.Child(account, nil, command[0], found, 0, 0, command[1:]...)
+	if err != nil {
+		log.Printf("%s for %s: %v", command[0], user, err)
+		return failure(protocol.CodeFailed, failed)
+	}
+	defer out.Close()
+	if answer := childSaid(out); answer != "" {
+		return failure(protocol.CodeFailed, answer)
+	}
+	return protocol.Response{}
+}
+
+// childSaid reads the one line of JSON the child answers with, returning what it
+// complained about, if anything.
+func childSaid(out io.Reader) string {
+	var answer struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(out, 64<<10)).Decode(&answer); err != nil {
+		return ""
+	}
+	return answer.Error
 }

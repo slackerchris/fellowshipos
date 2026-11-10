@@ -82,8 +82,11 @@ type Config struct {
 	Lookup       func(user string) (Account, error)
 	// Runs fnas, returning what it printed and whether it succeeded
 	Fnas func(args []string, input string) (stdout, stderr string, err error)
-	// Runs one file operation as the person, returning what it printed
-	Child func(account Account, op, path string, start, length int64) (io.ReadCloser, error)
+	// Runs one file operation as the person, returning what it printed. The body
+	// is what an upload sends, and the extra words are the operation's own, such
+	// as a rename's new name.
+	Child func(account Account, body io.Reader, op, path string, start, length int64,
+		extra ...string) (io.ReadCloser, error)
 	Alert func(title, message string)
 	Now   func() time.Time
 }
@@ -141,6 +144,21 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 			return h.listShares(found.user)
 		}
 		return h.fileList(found.user, request)
+	case protocol.OpFileMkdir:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileMkdir(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileRename:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileRename(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileDelete:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileDelete(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	case protocol.OpSessions:
 		return h.list(request)
 	case protocol.OpEndSession:

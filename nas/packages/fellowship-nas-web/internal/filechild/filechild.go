@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,42 @@ func Run(args []string) int {
 		return say(out, "the file child needs an operation and a path")
 	}
 	switch args[0] {
+	case "mkdir":
+		// A share is worked in by a group, so a new folder is for the group too,
+		// and the share's setgid bit carries on into it
+		if err := os.Mkdir(args[1], 0o775); err != nil {
+			return say(out, explain(err).Error())
+		}
+		if err := os.Chmod(args[1], 0o775); err != nil {
+			return say(out, explain(err).Error())
+		}
+	case "rename":
+		if len(args) < 3 {
+			return say(out, "a rename needs where it is and where it goes")
+		}
+		if err := os.Rename(args[1], args[2]); err != nil {
+			return say(out, explain(err).Error())
+		}
+	case "remove":
+		// The helper says whether a folder goes with everything in it
+		whole := len(args) > 2 && args[2] == "tree"
+		var err error
+		if whole {
+			err = os.RemoveAll(args[1])
+		} else {
+			err = os.Remove(args[1])
+		}
+		if err != nil {
+			return say(out, explain(err).Error())
+		}
+	case "write":
+		wrote, err := write(args[1], os.Stdin, len(args) > 2 && args[2] == "replace")
+		if err != nil {
+			return say(out, err.Error())
+		}
+		if err := out.Encode(Head{Size: wrote, Length: wrote}); err != nil {
+			return 1
+		}
 	case "list":
 		entries, err := folder(args[1])
 		if err != nil {
@@ -134,6 +171,44 @@ func read(out *json.Encoder, path string, start, length int64) error {
 	return err
 }
 
+// write puts what it reads where it was told, through a temporary name in the
+// same folder, so a stalled upload never leaves half a file in place. A name
+// that is already there is refused unless replacing was asked for.
+func write(path string, body io.Reader, replace bool) (int64, error) {
+	folder := filepath.Dir(path)
+	temp, err := os.CreateTemp(folder, ".fnas-upload-*")
+	if err != nil {
+		return 0, explain(err)
+	}
+	defer os.Remove(temp.Name())
+	wrote, err := io.Copy(temp, body)
+	if err != nil {
+		temp.Close()
+		return 0, errors.New("the upload stopped before it finished")
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return 0, explain(err)
+	}
+	if err := temp.Close(); err != nil {
+		return 0, explain(err)
+	}
+	// Written for the share's group, as a file made on the NAS itself would be
+	if err := os.Chmod(temp.Name(), 0o664); err != nil {
+		return 0, explain(err)
+	}
+	if !replace {
+		if _, err := os.Lstat(path); err == nil {
+			return 0, errors.New("something with that name is already here")
+		}
+	}
+	// A rename over the name never follows a link that was put there since
+	if err := os.Rename(temp.Name(), path); err != nil {
+		return 0, explain(err)
+	}
+	return wrote, nil
+}
+
 // explain says what went wrong in words a person reading the desktop can use.
 func explain(err error) error {
 	switch {
@@ -143,6 +218,10 @@ func explain(err error) error {
 		return errors.New("that isn't there any more")
 	case errors.Is(err, syscall.ELOOP):
 		return errors.New("that changed while it was being opened")
+	case errors.Is(err, syscall.ENOTEMPTY):
+		return errors.New("that folder isn't empty")
+	case errors.Is(err, syscall.EEXIST):
+		return errors.New("something with that name is already here")
 	default:
 		return fmt.Errorf("that can't be read: %w", err)
 	}

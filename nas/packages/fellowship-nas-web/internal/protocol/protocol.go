@@ -25,6 +25,10 @@ const (
 	OpFnas       = "fnas"
 	OpFileList   = "file-list"
 	OpFileRead   = "file-read"
+	OpFileWrite  = "file-write"
+	OpFileMkdir  = "file-mkdir"
+	OpFileRename = "file-rename"
+	OpFileDelete = "file-delete"
 	OpSessions   = "sessions"
 	OpEndSession = "end-session"
 )
@@ -55,6 +59,11 @@ type Request struct {
 	Path   string `json:"path,omitempty"`
 	Start  int64  `json:"start,omitempty"`
 	Length int64  `json:"length,omitempty"`
+	// A rename's new name, and whether a write may replace what is there
+	To      string `json:"to,omitempty"`
+	Replace bool   `json:"replace,omitempty"`
+	// A folder delete that takes what is inside with it
+	Recursive bool `json:"recursive,omitempty"`
 }
 
 type Session struct {
@@ -79,6 +88,32 @@ type Response struct {
 	// A file's bytes follow this answer: Length of them, out of a file of Size
 	Size   int64 `json:"size,omitempty"`
 	Length int64 `json:"length,omitempty"`
+}
+
+// Send is Call for a request that carries bytes after it, such as an upload.
+func Send(socket string, request Request, body io.Reader) (Response, error) {
+	var response Response
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return response, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(6 * time.Hour))
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return response, err
+	}
+	if _, err := conn.Write(append(encoded, '\n')); err != nil {
+		return response, err
+	}
+	if _, err := io.Copy(conn, body); err != nil {
+		return response, fmt.Errorf("sending the file: %w", err)
+	}
+	conn.(*net.UnixConn).CloseWrite()
+	if err := json.NewDecoder(io.LimitReader(conn, MaxMessage)).Decode(&response); err != nil {
+		return response, fmt.Errorf("reading the helper's answer: %w", err)
+	}
+	return response, nil
 }
 
 // Stream is Call for an answer that carries a file after it. The caller must

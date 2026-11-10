@@ -768,6 +768,33 @@ img.thumb.big { object-fit: cover; }
     margin: 0; padding: 30px 16px; color: var(--muted); font-size: 0.85rem; text-align: center;
 }
 
+/* Filtering, the two changes worth a button, and the row's own menu */
+.files-filter {
+    margin-left: 8px; width: 164px; padding: 5px 9px; font-size: 0.82rem;
+    background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 7px; color: var(--text);
+}
+.files-filter::placeholder { color: var(--muted); }
+.tool-text {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; margin-left: 6px;
+    border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+    color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; white-space: nowrap;
+}
+.tool-text:hover { background: var(--raised); }
+.tool-text.upload { position: relative; }
+.tool-text.upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-actions { width: 34px; text-align: right; }
+.row-menu .row-menu-link {
+    display: block; padding: 7px 10px; border-radius: 6px;
+    color: inherit; text-decoration: none; font-size: 0.86rem;
+}
+.row-menu .row-menu-link:hover { background: var(--raised); }
+/* The form for a new folder or a new name, above the list */
+.files-form {
+    display: grid; gap: 10px; padding: 12px 14px;
+    border-bottom: 1px solid var(--border); background: var(--surface-sunk);
+}
+.files-form .row { margin: 0; }
+
 /* A narrow window loses the shares column, then the preview beside the list */
 .files { container-type: inline-size; }
 @container (max-width: 620px) {

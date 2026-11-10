@@ -47,6 +47,9 @@ func main() {
 		Stream: func(request protocol.Request) (protocol.Response, io.ReadCloser, error) {
 			return protocol.Stream(*socket, request)
 		},
+		Send: func(request protocol.Request, body io.Reader) (protocol.Response, error) {
+			return protocol.Send(*socket, request, body)
+		},
 		Static: os.DirFS(*static),
 		Passwd: "/etc/passwd",
 	}

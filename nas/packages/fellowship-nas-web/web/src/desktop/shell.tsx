@@ -1,5 +1,5 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
-import { useContext, useEffect, useState } from "preact/hooks";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
 import { MODES, useAppearance } from "../appearance";
@@ -315,6 +315,13 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
     const windows = useWindows(session.user, appsFor(session.admin));
     const status = useStatus(session.admin);
     const [panel, setPanel] = useState<Panel>(null);
+    const [contextMenu, setContextMenu] = useState<{
+        app?: AppId;
+        x: number;
+        y: number;
+        trigger: HTMLElement;
+    } | null>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
     // Until it is known, Setup's icon stays hidden rather than flashing up
     const [setupDone, setSetupDone] = useState(true);
     const apps = iconsFor(session.admin, setupDone);
@@ -334,12 +341,37 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
     }, [session.admin]);
 
     useEffect(() => {
-        const escape = (event: KeyboardEvent) => event.key === "Escape" && setPanel(null);
+        const escape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                contextMenu?.trigger.focus();
+                setContextMenu(null);
+                setPanel(null);
+            }
+        };
         window.addEventListener("keydown", escape);
         return () => window.removeEventListener("keydown", escape);
-    }, []);
+    }, [contextMenu]);
+
+    useLayoutEffect(() => {
+        const menu = menuRef.current;
+        if (!contextMenu || !menu) return;
+        const inset = 8;
+        menu.style.left = `${Math.max(inset, Math.min(contextMenu.x, window.innerWidth - menu.offsetWidth - inset))}px`;
+        menu.style.top = `${Math.max(inset, Math.min(contextMenu.y, window.innerHeight - menu.offsetHeight - inset))}px`;
+        menu.querySelector("button")?.focus();
+    }, [contextMenu]);
+
+    const showContextMenu = (event: MouseEvent, trigger: HTMLElement, app?: AppId) => {
+        event.preventDefault();
+        const anchor = trigger.getBoundingClientRect();
+        const keyboard = event.clientX === 0 && event.clientY === 0;
+        setPanel(null);
+        setContextMenu({ app, trigger, x: keyboard ? anchor.left : event.clientX,
+            y: keyboard ? anchor.top : event.clientY });
+    };
 
     const open = (app: AppId) => {
+        setContextMenu(null);
         setPanel(null);
         windows.open(app);
     };
@@ -363,11 +395,25 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
 
     return (
         <DesktopContext.Provider value={actions}>
-        <div class="desktop">
-            <main class="desktop-area" onPointerDown={event => event.target === event.currentTarget && setPanel(null)}>
+        <div class="desktop"
+             onContextMenu={event => {
+                 if (!event.defaultPrevented) {
+                     event.preventDefault();
+                     setContextMenu(null);
+                 }
+             }}
+             onPointerDown={event => {
+                 if (!menuRef.current?.contains(event.target as Node)) setContextMenu(null);
+             }}>
+            <main class="desktop-area" tabIndex={-1}
+                  onContextMenu={event => {
+                      if (event.target === event.currentTarget) showContextMenu(event, event.currentTarget);
+                  }}
+                  onPointerDown={event => event.target === event.currentTarget && setPanel(null)}>
                 <nav class="desktop-icons" aria-label="Apps">
                     {apps.map(app => (
-                        <button type="button" key={app} class="desktop-icon" onClick={() => open(app)}>
+                        <button type="button" key={app} class="desktop-icon" onClick={() => open(app)}
+                                onContextMenu={event => showContextMenu(event, event.currentTarget, app)}>
                             <AppIcon name={app} size={52} />
                             <span>{APPS[app].label || APPS[app].title}</span>
                         </button>
@@ -386,6 +432,21 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
             {panel === "launcher" && <Launcher apps={apps} open={open} />}
             {panel === "notifications" && <Notifications status={status} open={open} />}
             {panel === "user" && <UserMenu open={open} onSignOut={signOut} />}
+            {contextMenu && (
+                <div class="panel desktop-context-menu" ref={menuRef} role="group" aria-label="Desktop actions">
+                    <button type="button" class="menu-item" onClick={() => open(contextMenu.app ?? "files")}>
+                        Open {APPS[contextMenu.app ?? "files"].title}
+                    </button>
+                    {!contextMenu.app && (
+                        <button type="button" class="menu-item" onClick={() => {
+                            setContextMenu(null);
+                            setPanel("launcher");
+                        }}>
+                            Show apps
+                        </button>
+                    )}
+                </div>
+            )}
             <footer class="taskbar">
                 <button type="button" class={`taskbar-button ${panel === "launcher" ? "pressed" : ""}`} title="Apps"
                         aria-label="Apps" aria-expanded={panel === "launcher"} onClick={() => toggle("launcher")}>
