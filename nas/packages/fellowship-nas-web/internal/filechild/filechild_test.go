@@ -88,14 +88,14 @@ func TestALinkMetOnTheWayIsRefused(t *testing.T) {
 
 func TestAFolderIsListedThroughItsOwnDescriptor(t *testing.T) {
 	root, _ := share(t)
-	entries, err := folder(root, "photos")
+	entries, _, err := folder(root, "photos")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].Name != "cat.png" || entries[0].Size != 3 {
 		t.Errorf("photos held %+v", entries)
 	}
-	if _, err := folder(root, "pictures"); err == nil {
+	if _, _, err := folder(root, "pictures"); err == nil {
 		t.Error("a folder was listed through a link")
 	}
 }
@@ -327,5 +327,46 @@ func TestASearchStopsInTimeAndSaysWhy(t *testing.T) {
 	found = search(root, "", "cat", time.Now().Add(-time.Hour))
 	if found.Stopped != "time" || found.Hits == nil {
 		t.Errorf("a late search answered %+v", found)
+	}
+}
+
+func TestPermissionsReadAsLsWritesThem(t *testing.T) {
+	for mode, want := range map[uint32]string{
+		0o644: "rw-r--r--", 0o2770: "rwxrws---", 0o2760: "rwxrwS---", 0o1777: "rwxrwxrwt", 0o4755: "rwsr-xr-x",
+	} {
+		if got := permissions(mode); got != want {
+			t.Errorf("%o read as %s, want %s", mode, got, want)
+		}
+	}
+}
+
+// A listing says who may do what, with whether the person asking may change each
+// thing coming from the kernel, so it can say why something can't be changed.
+func TestAListingSaysWhoMayChangeWhat(t *testing.T) {
+	root, dir := share(t)
+	if err := os.WriteFile(filepath.Join(dir, "photos", "fixed.png"), []byte("x"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "photos"), 0o775|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	entries, self, err := folder(root, "photos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if self.Mode != "rwxrwsr-x" || self.Owner == "" || self.Group == "" {
+		t.Errorf("the folder itself was %+v", self)
+	}
+	byName := map[string]Entry{}
+	for _, entry := range entries {
+		byName[entry.Name] = entry
+	}
+	if byName["fixed.png"].Mode != "r--r--r--" || byName["cat.png"].Mode != "rw-r--r--" {
+		t.Errorf("the files were %+v", entries)
+	}
+	// Whoever runs the test owns cat.png, so may change it; a read-only file is
+	// still writable for root, so only the owner's own file is checked
+	if !byName["cat.png"].Writable {
+		t.Errorf("cat.png wasn't writable for its owner: %+v", byName["cat.png"])
 	}
 }

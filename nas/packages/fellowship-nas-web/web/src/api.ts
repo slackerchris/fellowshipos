@@ -639,12 +639,19 @@ export interface FileEntry {
     dir: boolean;
     size: number;
     modified: string;
+    // Who may do what: permissions as ls writes them, owner and group, whether an
+    // access list adds to them, and whether the signed-in person may change it
+    mode?: string;
+    owner?: string;
+    group?: string;
+    acl?: boolean;
+    writable?: boolean;
 }
 
 export const fileShares = () => request<{ shares: FileShare[] }>("GET", "/api/files");
 
 export const folderIn = (share: string, path: string) =>
-    request<{ share: string; path: string; folder: { entries: FileEntry[] } }>(
+    request<{ share: string; path: string; folder: { entries: FileEntry[]; self?: FileEntry } }>(
         "GET", `/api/files?share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`);
 
 /** Make a folder inside a share the signed-in person can change. */

@@ -103,6 +103,10 @@ The filter box stays for one folder. Searching needs the walk in the child.
 
 ## 5. Slice D: kind, owner and permissions
 
+**Built** (Nov 10), as below. Whether the person can write comes from the kernel
+(`faccessat` as them), and the words for why not are read from the permissions; an
+access list is named rather than read entry by entry.
+
 The question a person actually asks is "why can't I write in here?".
 
 - `list` already returns name, dir, size and modified. Add `mode` (the octal or

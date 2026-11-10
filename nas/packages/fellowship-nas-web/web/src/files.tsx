@@ -29,6 +29,33 @@ function kindOf(entry: { name: string; dir: boolean }): Kind {
     return "file";
 }
 
+const KIND_NAMES: Record<Kind, string> = {
+    folder: "Folder", image: "Picture", video: "Video", audio: "Audio", text: "Text", pdf: "PDF", file: "File",
+};
+
+/** Why the signed-in person can't change something, in words, or "" when they can.
+    Whether they can is the kernel's answer; the reason is read from the permissions. */
+function whyNot(entry: FileEntry | undefined, what = "it"): string {
+    if (!entry || entry.writable !== false || !entry.mode) return "";
+    const [owner, group, others] = [entry.mode[1], entry.mode[4], entry.mode[7]].map(bit => bit === "w");
+    if (entry.acl) return `An access list on ${what} decides who can change it, and it doesn't let you.`;
+    if (!owner && !group && !others) return `Nobody can change ${what}: it's read only for everyone.`;
+    if (group) return `The ${entry.group} group can change ${what}, and you aren't in it.`;
+    return `Only ${what === "it" ? "its" : "the"} owner, ${entry.owner}, can change ${what}.`;
+}
+
+/** Which of the extra columns show. Off at first, so the list stays clean on a phone. */
+type Columns = { kind: boolean; owner: boolean; mode: boolean };
+
+function savedColumns(): Columns {
+    try {
+        const saved = JSON.parse(localStorage.getItem("files-columns") || "{}");
+        return { kind: !!saved.kind, owner: !!saved.owner, mode: !!saved.mode };
+    } catch {
+        return { kind: false, owner: false, mode: false };
+    }
+}
+
 /** The drawings a browser needs: one per kind of file, and the toolbar's own.
     Stroke only, so each theme's colours carry them. */
 const DRAWINGS: Record<Drawing, ComponentChildren> = {
@@ -114,6 +141,11 @@ export function Files() {
     const [view, setView] = useState<"list" | "grid">("list");
     // Kept here, above the folder being shown, so it lasts while the person goes to another folder
     const [clip, setClip] = useState<Clip | null>(null);
+    const [columns, setColumnsNow] = useState<Columns>(savedColumns);
+    const setColumns = (next: Columns) => {
+        setColumnsNow(next);
+        try { localStorage.setItem("files-columns", JSON.stringify(next)); } catch { /* kept for this visit only */ }
+    };
     return (
         <Loading loaded={shares}>
             {() => (
@@ -139,7 +171,7 @@ export function Files() {
                             <div class="files-body">
                                 {share
                                     ? <Browser key={share.share} share={share} view={view} setView={setView}
-                                               clip={clip} setClip={setClip} />
+                                               clip={clip} setClip={setClip} columns={columns} setColumns={setColumns} />
                                     : <p class="files-blank">Choose a share to look inside.</p>}
                             </div>
                         </div>
@@ -158,10 +190,12 @@ type Picking = { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean };
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-function Browser({ share, view, setView, clip, setClip }: {
+function Browser({ share, view, setView, clip, setClip, columns, setColumns }: {
     share: FileShare; view: "list" | "grid"; setView: (view: "list" | "grid") => void;
     clip: Clip | null; setClip: (clip: Clip | null) => void;
+    columns: Columns; setColumns: (columns: Columns) => void;
 }) {
+    const [columnsOpen, setColumnsOpen] = useState(false);
     const [path, setPath] = useState("");
     const [before, setBefore] = useState<string[]>([]);
     // The names picked, and the one a Shift-click or Shift-arrow measures from
@@ -181,7 +215,11 @@ function Browser({ share, view, setView, clip, setClip }: {
     const [busy, setBusy] = useState("");
     const [trouble, setTrouble] = useState<string | null>(null);
     const folder = useLoad(() => folderIn(share.share, path), [path]);
-    const changing = share.level === "write";
+    // A share the person may change can still hold a folder they can't: the folder's
+    // own answer from the kernel decides what is offered here
+    const self = folder.data?.folder.self;
+    const changing = share.level === "write" && self?.writable !== false;
+    const folderWhy = share.level === "write" ? whyNot(self, "this folder") : "";
 
     // The path the listing belongs to, which is what its names are joined to:
     // while another folder loads, the old listing is still on screen
@@ -506,6 +544,21 @@ function Browser({ share, view, setView, clip, setClip }: {
                                }} />
                     </label>
                 )}
+                <span class="menu-wrap">
+                    <button type="button" class="tool-text" aria-haspopup="menu" aria-expanded={columnsOpen}
+                            onClick={() => setColumnsOpen(!columnsOpen)}>Columns</button>
+                    {columnsOpen && (
+                        <span class="row-menu columns-menu" role="menu">
+                            {([["kind", "Kind"], ["owner", "Owner"], ["mode", "Permissions"]] as const).map(([key, label]) => (
+                                <label key={key} class="check">
+                                    <input type="checkbox" checked={columns[key]}
+                                           onChange={event => setColumns({ ...columns, [key]: event.currentTarget.checked })} />
+                                    <span>{label}</span>
+                                </label>
+                            ))}
+                        </span>
+                    )}
+                </span>
                 <div class="segmented view-switch" role="group" aria-label="How to show the files">
                     <button type="button" class={view === "list" ? "current" : ""} aria-pressed={view === "list"}
                             title="List" aria-label="List" onClick={() => setView("list")}><Icon of="list" /></button>
@@ -587,6 +640,9 @@ function Browser({ share, view, setView, clip, setClip }: {
                                                     Changed {sort.by === "modified" && <span class="caret">{sort.down ? "▾" : "▴"}</span>}
                                                 </button>
                                             </th>
+                                            {columns.kind && <th class="file-extra">Kind</th>}
+                                            {columns.owner && <th class="file-extra">Owner</th>}
+                                            {columns.mode && <th class="file-extra">Permissions</th>}
                                             <th class="file-actions" aria-label="Actions"></th>
                                         </tr>
                                     </thead>
@@ -616,6 +672,11 @@ function Browser({ share, view, setView, clip, setClip }: {
                                                 </td>
                                                 <td class="file-size">{entry.dir ? "" : humanSize(entry.size)}</td>
                                                 <td class="file-when">{new Date(entry.modified).toLocaleDateString()}</td>
+                                                {columns.kind && <td class="file-extra">{KIND_NAMES[kindOf(entry)]}</td>}
+                                                {columns.owner && <td class="file-extra">{entry.owner}
+                                                    {entry.group && <span class="muted"> · {entry.group}</span>}</td>}
+                                                {columns.mode && <td class="file-extra mono small"
+                                                    title={whyNot(entry) || "You can change this"}>{entry.mode}{entry.acl ? "+" : ""}</td>}
                                                 <td class="file-actions">
                                                     <span class="menu-wrap">
                                                         <button type="button" class="kebab" aria-haspopup="menu"
@@ -691,7 +752,8 @@ function Browser({ share, view, setView, clip, setClip }: {
                                     {!busy && !found && pickedItems.length <= 1 && folders > 0 && `, ${plural(folders, "folder")}`}
                                     {!busy && said && ` · ${said}`}
                                 </span>
-                                <span>{trouble ? trouble : share.level === "read" ? "Read only" : ""}</span>
+                                <span>{trouble ? trouble : share.level === "read" ? "Read only"
+                                    : folderWhy ? `You can't change things here. ${folderWhy}` : ""}</span>
                             </p>
                         </div>
                         {chosen && !chosen.dir && (
@@ -909,8 +971,14 @@ function Preview({ share, entry, path, onClose }: {
                 </p>}
             </div>
             <div class="preview-foot">
-                <span>{humanSize(entry.size)}</span>
+                <span>{KIND_NAMES[kind]} · {humanSize(entry.size)}</span>
                 <span>Changed {new Date(entry.modified).toLocaleString()}</span>
+                {entry.owner && <span>Owner {entry.owner}, group {entry.group}</span>}
+                {entry.mode && <span class="mono small">{entry.mode}{entry.acl ? " + access list" : ""}</span>}
+                {entry.writable !== undefined && (
+                    <span class={entry.writable ? "muted small" : "small"}>
+                        {entry.writable ? "You can change it." : whyNot(entry)}</span>
+                )}
                 <a class="button button-primary" href={fileUrl(share.share, path, true)} download={entry.name}>Download</a>
             </div>
         </aside>

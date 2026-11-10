@@ -18,6 +18,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"sort"
@@ -50,11 +51,21 @@ type Entry struct {
 	Dir      bool      `json:"dir"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+	// Who may do what, so the desktop can say why something can't be changed:
+	// permissions as ls writes them, the owner and group by name, whether an
+	// access list adds to them, and whether the person asking can change it,
+	// which the kernel answers with the access list counted
+	Mode     string `json:"mode,omitempty"`
+	Owner    string `json:"owner,omitempty"`
+	Group    string `json:"group,omitempty"`
+	ACL      bool   `json:"acl,omitempty"`
+	Writable bool   `json:"writable"`
 }
 
-// Folder is the answer to "list": what a folder holds.
+// Folder is the answer to "list": what a folder holds, and the folder itself.
 type Folder struct {
 	Entries []Entry `json:"entries"`
+	Self    *Entry  `json:"self,omitempty"`
 }
 
 // Head goes before the bytes of a read: how big the file is, and how much of it
@@ -144,11 +155,11 @@ func Run(args []string) int {
 		}
 		return 0
 	case "list":
-		entries, err := folder(root, inside)
+		entries, self, err := folder(root, inside)
 		if err != nil {
 			return say(out, err.Error())
 		}
-		if err := out.Encode(Folder{Entries: entries}); err != nil {
+		if err := out.Encode(Folder{Entries: entries, Self: &self}); err != nil {
 			return 1
 		}
 		return 0
@@ -254,17 +265,24 @@ func named(root int, inside string) (string, func(), error) {
 
 // folder reads a folder. Folders come first and both kinds are in name order,
 // which is what the desktop shows.
-func folder(root int, inside string) ([]Entry, error) {
+func folder(root int, inside string) ([]Entry, Entry, error) {
 	fd, err := beneath(root, inside, syscall.O_RDONLY|syscall.O_DIRECTORY)
 	if err != nil {
-		return nil, explain(err)
+		return nil, Entry{}, explain(err)
 	}
 	// Named by the descriptor, so each entry's details are read inside this folder
 	dir := os.NewFile(uintptr(fd), through(fd))
 	defer dir.Close()
 	found, err := dir.ReadDir(-1)
 	if err != nil {
-		return nil, explain(err)
+		return nil, Entry{}, explain(err)
+	}
+	names := &namer{users: map[uint32]string{}, groups: map[uint32]string{}}
+	var self Entry
+	var own syscall.Stat_t
+	if syscall.Fstat(fd, &own) == nil {
+		self = Entry{Dir: true}
+		names.fill(&self, &own, fd, ".", through(fd))
 	}
 	entries := make([]Entry, 0, len(found))
 	for _, item := range found {
@@ -272,6 +290,9 @@ func folder(root int, inside string) ([]Entry, error) {
 		if info, err := item.Info(); err == nil {
 			entry.Size = info.Size()
 			entry.Modified = info.ModTime()
+			if stat, ok := info.Sys().(*syscall.Stat_t); ok && item.Type()&fs.ModeSymlink == 0 {
+				names.fill(&entry, stat, fd, item.Name(), filepath.Join(through(fd), item.Name()))
+			}
 		}
 		entries = append(entries, entry)
 	}
@@ -281,7 +302,76 @@ func folder(root int, inside string) ([]Entry, error) {
 		}
 		return strings.ToLower(entries[a].Name) < strings.ToLower(entries[b].Name)
 	})
-	return entries, nil
+	return entries, self, nil
+}
+
+// wOK is access(2)'s question "may this be written", which the syscall package leaves out
+const wOK = 2
+
+// namer turns owners and groups into names, asking once for each.
+type namer struct {
+	users, groups map[uint32]string
+}
+
+// fill adds who may do what to an entry: its permissions, owner and group, any
+// access list, and whether the person running this may change it. The kernel
+// answers that last one, as the person, so an access list counts.
+func (n *namer) fill(entry *Entry, stat *syscall.Stat_t, dir int, name, at string) {
+	entry.Mode = permissions(stat.Mode)
+	entry.Owner = n.user(stat.Uid)
+	entry.Group = n.group(stat.Gid)
+	entry.Writable = syscall.Faccessat(dir, name, wOK, 0) == nil
+	if size, err := syscall.Getxattr(at, "system.posix_acl_access", nil); err == nil && size > 0 {
+		entry.ACL = true
+	}
+}
+
+func (n *namer) user(id uint32) string {
+	if name, ok := n.users[id]; ok {
+		return name
+	}
+	name := strconv.FormatUint(uint64(id), 10)
+	if found, err := user.LookupId(name); err == nil {
+		name = found.Username
+	}
+	n.users[id] = name
+	return name
+}
+
+func (n *namer) group(id uint32) string {
+	if name, ok := n.groups[id]; ok {
+		return name
+	}
+	name := strconv.FormatUint(uint64(id), 10)
+	if found, err := user.LookupGroupId(name); err == nil {
+		name = found.Name
+	}
+	n.groups[id] = name
+	return name
+}
+
+// permissions writes a mode the way ls does, as in rwxrws---, so the setgid and
+// sticky bits show where a person used to a shell would look for them.
+func permissions(mode uint32) string {
+	text := []byte("rwxrwxrwx")
+	for at := 0; at < 9; at++ {
+		if mode&(1<<uint(8-at)) == 0 {
+			text[at] = '-'
+		}
+	}
+	special := func(at int, bit uint32, set, unset byte) {
+		if mode&bit != 0 {
+			if text[at] == 'x' {
+				text[at] = set
+			} else {
+				text[at] = unset
+			}
+		}
+	}
+	special(2, syscall.S_ISUID, 's', 'S')
+	special(5, syscall.S_ISGID, 's', 'S')
+	special(8, syscall.S_ISVTX, 't', 'T')
+	return string(text)
 }
 
 // read answers with the file's size, then the wanted part of it.

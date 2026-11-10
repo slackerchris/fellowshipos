@@ -674,6 +674,8 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
     padding: 4px 8px; text-align: left; font-weight: 600; font-size: 0.76rem;
     color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border);
     white-space: nowrap;
+    /* Sort buttons don't take the capitals other tables' headings have, so none here do */
+    text-transform: none; letter-spacing: normal;
 }
 .file-table thead th button {
     border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 2px 0;
@@ -696,6 +698,9 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 /* A search across the share, in place of the folder */
 .search-head { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .search-note { padding: 6px 10px; }
+/* The columns a person may add: kind, owner, permissions */
+.file-extra { white-space: nowrap; color: var(--muted); }
+.columns-menu { display: grid; gap: 6px; padding: 8px 10px; min-width: 160px; }
 .file-row td {
     padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     vertical-align: middle; white-space: nowrap;

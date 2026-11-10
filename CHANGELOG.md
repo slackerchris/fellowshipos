@@ -14,6 +14,13 @@ bump.
 
 ### Added
 
+- Files, slice D: a **Columns** control adds Kind, Owner and Permissions to the list (off
+  at first, remembered by the browser), and the preview gains a line each for kind,
+  owner and permissions. When the person can't change a file or the folder they are in,
+  it says why in words: "Only its owner, root, can change it", "The nas-admins group can
+  change this folder, and you aren't in it", or that an access list decides. Whether
+  they can is asked of the kernel as them, so access lists count, and a folder they
+  can't change no longer offers New folder, Upload or Paste.
 - Files, slice C: type three or more letters in the filter box and press Enter to
   search the whole share by name, in any case. Results show in place of the folder with
   the folder each is in, and opening one goes there and picks it. The search walks as

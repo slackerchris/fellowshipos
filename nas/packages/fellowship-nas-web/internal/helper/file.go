@@ -140,7 +140,7 @@ func (h *Helper) fileList(user string, request protocol.Request) protocol.Respon
 	if listed.Error != "" {
 		return failure(protocol.CodeFailed, listed.Error)
 	}
-	folder := filechild.Folder{Entries: listed.Entries}
+	folder := filechild.Folder{Entries: listed.Entries, Self: listed.Self}
 	answer := protocol.Response{}
 	folderText, err := json.Marshal(folder)
 	if err != nil {
