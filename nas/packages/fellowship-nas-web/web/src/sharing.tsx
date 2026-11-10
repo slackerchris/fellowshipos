@@ -80,6 +80,7 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
             </select>
         </div>
     );
+    const systemGroups = groups.filter(group => group.system);
     return (
         <div class="field">
             <span class="field-label">Who can use it</span>
@@ -97,7 +98,18 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
             {!everyone && (
                 <div class="stack">
                     {users.map(user => row("users", user.name, user.full_name))}
-                    {groups.map(group => row("groups", group.name, group.members.join(", ") || "no members"))}
+                    {groups.filter(group => !group.system)
+                        .map(group => row("groups", group.name, group.members.join(", ") || "no members"))}
+                    {systemGroups.length > 0 && (
+                        <details class="system-groups">
+                            <summary>System groups ({systemGroups.length})</summary>
+                            <p class="muted small">These came with the system. Give one access when an app already
+                                running here needs the files, such as Plex or the *arr apps reading media, or a
+                                backup tool writing to a folder.</p>
+                            {systemGroups.map(group => row("groups", group.name,
+                                                           group.members.join(", ") || "no members"))}
+                        </details>
+                    )}
                     {!users.length && <p class="muted small">No people yet: add them in Users.</p>}
                 </div>
             )}
@@ -110,7 +122,7 @@ export const nobody = (access: Access) => !Object.keys(access.users).length && !
 export function CreateShare({ onCreated }: { onCreated: (name: string) => void }) {
     const pools = useLoad(() => fnasJson<Pool[]>(["pool", "list"]));
     const users = useLoad(() => fnasJson<User[]>(["user", "list"]));
-    const groups = useLoad(() => fnasJson<Group[]>(["group", "list"]));
+    const groups = useLoad(() => fnasJson<Group[]>(["group", "list", "--system"]));
     const [name, setName] = useState("");
     const [pool, setPool] = useState("");
     const [everyone, setEveryone] = useState(true);

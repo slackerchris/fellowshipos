@@ -588,3 +588,13 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 }
 /* A panel inside .create-block keeps its heading but loses its own frame */
 .create-block > .card { background: none; border: 0; padding: 0; }
+/* The system's own groups: there when needed, folded away by default */
+.system-groups { margin-top: 6px; }
+.system-groups > summary {
+    cursor: pointer; color: var(--accent); font-size: 0.9rem;
+    list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.system-groups > summary::-webkit-details-marker { display: none; }
+.system-groups > summary::before { content: "▸"; font-size: 0.75rem; }
+.system-groups[open] > summary::before { content: "▾"; }
+.system-groups > summary:hover { text-decoration: underline; text-underline-offset: 2px; }

@@ -275,6 +275,9 @@ export interface Group {
     name: string;
     gid: number;
     members: string[];
+    // A group that came with the system, such as video or wheel: it can be
+    // granted a share and joined, but never renamed or removed from here
+    system: boolean;
 }
 
 export interface UserShare {

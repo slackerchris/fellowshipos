@@ -21,7 +21,7 @@ export function describeAccess(share: Share) {
 
 function AccessTab({ share, onDone }: { share: Share; onDone: () => void }) {
     const users = useLoad(() => fnasJson<User[]>(["user", "list"]));
-    const groups = useLoad(() => fnasJson<Group[]>(["group", "list"]));
+    const groups = useLoad(() => fnasJson<Group[]>(["group", "list", "--system"]));
     const [everyone, setEveryone] = useState(share.mode === "everyone");
     const [access, setAccess] = useState<Access>(share.access);
     const action = useAction(onDone);

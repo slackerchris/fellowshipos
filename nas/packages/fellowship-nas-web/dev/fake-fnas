@@ -97,7 +97,11 @@ DEFAULT = {
                "password": True, "smb_password": True, "enabled": True},
               {"name": "kim", "uid": 1001, "full_name": "Kim", "kind": "shares", "admin": False, "groups": ["family"],
                "password": True, "smb_password": True, "enabled": True}],
-    "groups": [{"name": "family", "gid": 1002, "members": ["kim", "tester"]}],
+    "groups": [{"name": "family", "gid": 1002, "members": ["kim", "tester"], "system": False},
+               # The machine's own groups, as an app such as Plex or a *arr uses them
+               {"name": "video", "gid": 44, "members": ["plex"], "system": True},
+               {"name": "render", "gid": 107, "members": [], "system": True},
+               {"name": "docker", "gid": 995, "members": ["plex"], "system": True}],
     "sharing": {"smb": {"workgroup": "WORKGROUP", "description": "FellowshipNAS", "min_protocol": "SMB2",
                         "encryption": "desired", "windows_discovery": True, "mac_discovery": True},
                 "nfs": {"v3": False, "threads": 8, "fixed_ports": False}},
@@ -288,7 +292,8 @@ def main(args):
             sys.stdin.read()
         out = f"Done for {rest[0]}"
     elif area == "group" and action == "list":
-        out = state["groups"]
+        # fnas lists the machine's own groups only when asked
+        out = [g for g in state["groups"] if "--system" in rest or not g.get("system")]
     elif area == "group":
         out = "Done"
     elif area == "sharing" and action == "show":

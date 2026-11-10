@@ -2722,7 +2722,22 @@ class Users(unittest.TestCase):
         self.accounts = [account("root", 0), account("tester", 1000), account("kim", 1001, "/usr/sbin/nologin"),
                          account("nas-share", 3000, "/usr/sbin/nologin")]
         self.groups = [group("tester", 1000), group("kim", 1001), group("nas-share", 3000),
-                       group("family", 1002, ["kim"]), group("nas-admins", 999, ["tester"])]
+                       group("family", 1002, ["kim"]), group("nas-admins", 999, ["tester"]),
+                       # What Debian and its packages leave behind
+                       group("video", 44, ["kim"]), group("wheel", 998, ["tester"]),
+                       group("docker", 997, ["plex"])]
+
+        def by_gid(gid):
+            for found in self.groups:
+                if found.gr_gid == gid:
+                    return found
+            raise KeyError(gid)
+
+        def by_name(name):
+            for found in self.groups:
+                if found.gr_name == name:
+                    return found
+            raise KeyError(name)
         self.calls = []
 
         def run(*command, check=True, stdin=None):
@@ -2744,10 +2759,8 @@ class Users(unittest.TestCase):
         for patcher in (patch("run", run), patch("SHADOW", shadow),
                         mock.patch.object(fnas.pwd, "getpwall", lambda: self.accounts),
                         mock.patch.object(fnas.grp, "getgrall", lambda: self.groups),
-                        mock.patch.object(fnas.grp, "getgrnam",
-                                          lambda n: next(g for g in self.groups if g.gr_name == n)),
-                        mock.patch.object(fnas.grp, "getgrgid",
-                                          lambda i: next(g for g in self.groups if g.gr_gid == i))):
+                        mock.patch.object(fnas.grp, "getgrnam", by_name),
+                        mock.patch.object(fnas.grp, "getgrgid", by_gid)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -2758,7 +2771,7 @@ class Users(unittest.TestCase):
         found = {u["name"]: u for u in fnas.list_users()}
         self.assertEqual(list(found), ["kim", "tester"])
         self.assertEqual((found["kim"]["kind"], found["kim"]["groups"], found["kim"]["smb_password"]),
-                         ("shares", ["family"], False))
+                         ("shares", ["family", "video"], False))
         self.assertEqual((found["tester"]["kind"], found["tester"]["admin"]), ("ssh", True))
         # No password yet isn't the same as turned off
         self.assertEqual((found["kim"]["password"], found["kim"]["enabled"]), (False, True))
@@ -2815,6 +2828,32 @@ class Users(unittest.TestCase):
             fnas.set_members("family", ["nobody2"])
         fnas.rename_group("family", "household")
         self.assertIn(("groupmod", "--new-name", "household", "family"), self.commands())
+
+    def test_the_machines_own_groups_are_offered_but_not_removed(self):
+        # An app such as Plex or a *arr runs as a system account in a group that
+        # already exists, so a share can be given to that group instead
+        found = {g["name"]: g for g in fnas.list_groups(include_system=True)}
+        self.assertEqual(sorted(found), ["docker", "family", "video", "wheel"])
+        self.assertEqual((found["video"]["system"], found["video"]["members"]), (True, ["kim"]))
+        self.assertFalse(found["family"]["system"])
+        # nas-admins is managed through the administrator switch, not as a group
+        self.assertNotIn("nas-admins", found)
+        self.assertEqual([g["name"] for g in fnas.list_groups()], ["family"])
+        with self.assertRaisesRegex(fnas.FnasError, "video belongs to the machine"):
+            fnas.rename_group("video", "films")
+        with self.assertRaisesRegex(fnas.FnasError, "wheel belongs to the machine"):
+            fnas.remove_group("wheel")
+
+    def test_a_person_may_join_a_machine_group_without_losing_the_app(self):
+        fnas.set_members("docker", ["kim"])
+        self.assertIn(("gpasswd", "-a", "kim", "docker"), self.commands())
+        # plex, the app the group exists for, is never replaced
+        self.assertNotIn(("gpasswd", "-M", "kim", "docker"), self.commands())
+        self.calls.clear()
+        # kim already has video, and joining it again from a person's form is quiet,
+        # apart from the Samba account list that every lookup reads
+        fnas.set_groups("kim", ["family", "video"])
+        self.assertEqual([command for command in self.commands() if command[0] != "pdbedit"], [])
 
 
 class Usage(unittest.TestCase):

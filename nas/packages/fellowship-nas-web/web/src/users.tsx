@@ -41,19 +41,30 @@ export const passwordProblem = (password: string, again: string) =>
     : password !== again ? "The passwords don't match." : "";
 
 function GroupChoices({ groups, chosen, setChosen }: { groups: Group[]; chosen: string[]; setChosen: (names: string[]) => void }) {
+    const system = groups.filter(group => group.system);
+    const managed = groups.filter(group => !group.system);
+    const box = (group: Group) => (
+        <label class="check" key={group.name}>
+            <input type="checkbox" checked={chosen.includes(group.name)}
+                   onChange={event => setChosen(event.currentTarget.checked ? [...chosen, group.name]
+                       : chosen.filter(name => name !== group.name))} />
+            <span>{group.name}</span>
+        </label>
+    );
     if (!groups.length) {
         return <p class="muted small">No groups yet. Groups are made below, and shares can be given to a whole group.</p>;
     }
     return (
-        <div class="row">
-            {groups.map(group => (
-                <label class="check" key={group.name}>
-                    <input type="checkbox" checked={chosen.includes(group.name)}
-                           onChange={event => setChosen(event.currentTarget.checked ? [...chosen, group.name]
-                               : chosen.filter(name => name !== group.name))} />
-                    <span>{group.name}</span>
-                </label>
-            ))}
+        <div class="stack">
+            {managed.length > 0 && <div class="row">{managed.map(box)}</div>}
+            {system.length > 0 && (
+                <details class="system-groups">
+                    <summary>System groups ({system.length})</summary>
+                    <p class="muted small">Groups the system already has, such as video. Joining one gives this person
+                        whatever those files are, and keeps everyone else who is already in it.</p>
+                    <div class="row">{system.map(box)}</div>
+                </details>
+            )}
         </div>
     );
 }
@@ -83,7 +94,7 @@ function KindChoice({ kind, setKind, admin, setAdmin }: {
 
 /** A form to add someone, used by the Users app and by Setup. */
 export function AddUser({ onAdded }: { onAdded: () => void }) {
-    const groups = useLoad(() => fnasJson<Group[]>(["group", "list"]));
+    const groups = useLoad(() => fnasJson<Group[]>(["group", "list", "--system"]));
     const [name, setName] = useState("");
     const [fullName, setFullName] = useState("");
     const [kind, setKind] = useState<User["kind"]>("shares");
@@ -338,6 +349,8 @@ function Groups({ groups, users, reload, creating, setCreating }: {
     const [edited, setEdited] = useState<string[]>([]);
     const [newName, setNewName] = useState("");
     const action = useAction(reload);
+    const managed = groups.filter(group => !group.system);
+    const machine = groups.filter(group => group.system);
     const memberChoices = (chosen: string[], set: (names: string[]) => void) => (
         <div class="row">
             {users.map(user => (
@@ -370,13 +383,13 @@ function Groups({ groups, users, reload, creating, setCreating }: {
                                              disabled={!USER_NAME.test(name)}>Add group</Button></div>
                 </form>
             )}
-            {!groups.length && <p class="muted">No groups yet. Use New group to make the first one.</p>}
-            {groups.length > 0 && (
+            {!managed.length && <p class="muted">No groups yet. Use New group to make the first one.</p>}
+            {managed.length > 0 && (
                 <div class="table-wrap">
                     <table>
                         <thead><tr><th>Group</th><th>Members</th><th /></tr></thead>
                         <tbody>
-                            {groups.map(group => (
+                            {managed.map(group => (
                                 <Fragment key={group.name}>
                                     <tr>
                                         <td><strong>{group.name}</strong></td>
@@ -429,6 +442,28 @@ function Groups({ groups, users, reload, creating, setCreating }: {
                 </div>
             )}
             <p class="muted small">Removing a group takes it off every share; its members keep their accounts.</p>
+            {machine.length > 0 && (
+                <details class="system-groups">
+                    <summary>System groups ({machine.length})</summary>
+                    <p class="muted small">These came with the system, and its packages expect them to stay. A share can
+                        be given to one from the share's access settings, which is how Plex, the *arr apps and other
+                        software already running here reach the files they need. They can't be renamed or removed.</p>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th>Group</th><th>ID</th><th>Members</th></tr></thead>
+                            <tbody>
+                                {machine.map(group => (
+                                    <tr key={group.name}>
+                                        <td><strong>{group.name}</strong></td>
+                                        <td class="small muted">{group.gid}</td>
+                                        <td class="small">{group.members.join(", ") || <span class="muted">no members</span>}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            )}
             <Result outcome={action.outcome} />
         </Card>
     );
@@ -436,7 +471,7 @@ function Groups({ groups, users, reload, creating, setCreating }: {
 
 export function Users() {
     const users = useLoad(() => fnasJson<User[]>(["user", "list"]));
-    const groups = useLoad(() => fnasJson<Group[]>(["group", "list"]));
+    const groups = useLoad(() => fnasJson<Group[]>(["group", "list", "--system"]));
     const [tab, setTab] = useState<"people" | "groups">("people");
     const [adding, setAdding] = useState(false);
     const [creating, setCreating] = useState(false);

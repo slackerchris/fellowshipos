@@ -176,7 +176,9 @@ def print_groups(found):
     if not found:
         print("No groups")
     for group in found:
-        print(f"{group['name']}: {', '.join(group['members']) or 'no members'}")
+        # The machine's own groups say so, since fnas can't rename or remove them
+        mark = f" ({group['gid']}, the machine's)" if group.get("system") else ""
+        print(f"{group['name']}{mark}: {', '.join(group['members']) or 'no members'}")
 
 
 def print_sharing(settings):
@@ -497,7 +499,9 @@ def build_parser():
     ssh_.add_parser("refresh", help="rewrite sshd's settings and who is in nas-ssh")
 
     group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
-    group.add_parser("list", help="list groups and their members")
+    group_list = group.add_parser("list", help="list groups and their members")
+    group_list.add_argument("--system", action="store_true",
+                            help="also list the machine's own groups, such as video and wheel")
     group_create = group.add_parser("create", help="add a group")
     group_create.add_argument("name")
     group_create.add_argument("--members", default="", help="comma-separated")
@@ -831,7 +835,7 @@ def print_ssh(status):
 
 def dispatch_group(args, show):
     if args.action == "list":
-        show(users.list_groups(), print_groups)
+        show(users.list_groups(include_system=args.system), print_groups)
     elif args.action == "create":
         users.create_group(args.name, names(args.members))
         print(f"Added group {args.name}")

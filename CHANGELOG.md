@@ -14,6 +14,14 @@ bump.
 
 ### Added
 
+- The system's own groups are offered where groups are chosen: video, render, wheel,
+  docker and the rest of what Debian and its packages made. A share can be given to
+  one, so Plex, the *arr apps or a backup tool that already runs on the NAS reach the
+  files they need without a second account, and a person can be given one from their
+  own form. fnas never renames or removes them, and changing who is in one only adds
+  and removes people it manages, so the app the group exists for stays put.
+  `fnas group list --system` lists them with their ID.
+
 - Unraid-style pools (Phase 11): whole files on each XFS disk, joined at `/mnt/NAME` by
   mergerfs, with one or two SnapRAID parity disks. Disks may differ in size, new files go
   to the disk with the most free space, and with more disks lost than parity only those

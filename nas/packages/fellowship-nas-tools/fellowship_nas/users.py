@@ -62,20 +62,41 @@ def private_group(account):
     return group.gr_name if group.gr_name == account.pw_name else None
 
 
-def list_groups():
-    """Groups people manage: those in the account range, without each account's own."""
+def managed_group_names():
+    """Groups in the account range that aren't an account's own group."""
     own = {private_group(a) for a in pwd.getpwall() if is_person(a)}
-    return sorted(({"name": g.gr_name, "gid": g.gr_gid, "members": sorted(g.gr_mem)}
-                   for g in grp.getgrall()
-                   if FIRST_ID <= g.gr_gid < LAST_ID and g.gr_name not in own | SERVICE_ACCOUNTS
-                   and ACCOUNT_NAME.match(g.gr_name)),
-                  key=lambda g: g["name"])
+    return {g.gr_name for g in grp.getgrall()
+            if FIRST_ID <= g.gr_gid < LAST_ID and g.gr_name not in own | SERVICE_ACCOUNTS
+            and ACCOUNT_NAME.match(g.gr_name)}
+
+
+def system_group_names():
+    """The machine's own groups: video, render, wheel, docker and the rest.
+
+    A share can be given to one, so an app that already runs here (Plex, the
+    *arr apps, a backup tool) reads what it needs without a second account, and
+    a person can join one. fnas never renames or removes them, because the
+    packages that made them expect them to stay."""
+    own = {private_group(account) for account in pwd.getpwall()}
+    return {g.gr_name for g in grp.getgrall()
+            if not FIRST_ID <= g.gr_gid < LAST_ID and ACCOUNT_NAME.match(g.gr_name)
+            and g.gr_name not in own | SERVICE_ACCOUNTS | {ADMIN_GROUP}}
+
+
+def list_groups(include_system=False):
+    """Groups people manage, and with include_system the machine's own too."""
+    managed = managed_group_names()
+    wanted = managed | (system_group_names() if include_system else set())
+    return sorted(({"name": g.gr_name, "gid": g.gr_gid, "members": sorted(g.gr_mem),
+                    "system": g.gr_name not in managed}
+                   for g in grp.getgrall() if g.gr_name in wanted),
+                  key=lambda group: group["name"])
 
 
 def list_users():
     smb = smb_accounts()
     passwords = shadow()
-    managed = {g["name"] for g in list_groups()}
+    mine = managed_group_names() | system_group_names()
     admin_names = admins()
     found = []
     for account in sorted(pwd.getpwall(), key=lambda a: a.pw_name):
@@ -85,7 +106,7 @@ def list_users():
         found.append({"name": name, "uid": account.pw_uid, "full_name": account.pw_gecos.split(",")[0],
                       "kind": "shares" if account.pw_shell.endswith(("nologin", "false")) else "ssh",
                       "admin": name in admin_names,
-                      "groups": sorted(g.gr_name for g in grp.getgrall() if name in g.gr_mem and g.gr_name in managed),
+                      "groups": sorted(g.gr_name for g in grp.getgrall() if name in g.gr_mem and g.gr_name in mine),
                       "password": passwords.get(name, {}).get("password", False),
                       "smb_password": name in smb, "enabled": not passwords.get(name, {}).get("off", False)})
     return found
@@ -98,10 +119,13 @@ def find_user(name):
     raise FnasError(f"no such user: {name}")
 
 
-def find_group(name):
-    for group in list_groups():
+def find_group(name, system=False):
+    """A group people manage, with system=True also accepting the machine's own."""
+    for group in list_groups(include_system=system):
         if group["name"] == name:
             return group
+    if not system and name in system_group_names():
+        raise FnasError(f"{name} belongs to the machine, so it can't be renamed or removed here")
     raise FnasError(f"no such group: {name}")
 
 
@@ -158,7 +182,9 @@ def set_admin(name, admin):
 def set_groups(name, wanted):
     current = set(find_user(name)["groups"])
     for group in wanted:
-        find_group(group)
+        # A person may join the machine's own group, such as video, because that
+        # is how an app's files reach them
+        find_group(group, system=True)
     for group in set(wanted) - current:
         run("gpasswd", "-a", name, group)
     for group in current - set(wanted):
@@ -224,10 +250,21 @@ def create_group(name, members):
 
 
 def set_members(name, members):
-    find_group(name)
+    group = find_group(name, system=True)
     for member in members:
         find_user(member)
-    run("gpasswd", "-M", ",".join(members), name)
+    if not group["system"]:
+        # A group fnas made holds only the people it put there, so replace the lot
+        run("gpasswd", "-M", ",".join(members), name)
+        return
+    # The machine's own group has members fnas didn't add, such as the app the
+    # group exists for, so only add and remove the people it manages
+    current = set(group["members"])
+    for member in sorted(set(members) - current):
+        run("gpasswd", "-a", member, name)
+    people = {account.pw_name for account in pwd.getpwall() if is_person(account)}
+    for member in sorted((current - set(members)) & people):
+        run("gpasswd", "-d", member, name)
 
 
 def rename_group(name, new):
