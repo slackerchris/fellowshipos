@@ -141,6 +141,8 @@ code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; fon
 a { color: var(--accent); }
 
 .page { padding: 16px; display: grid; gap: 16px; align-content: start; min-width: 0; }
+/* An app that lays itself out to the window's edges, such as Files */
+.page-fill { height: 100%; gap: 0; padding: 12px; grid-template-rows: minmax(0, 1fr); }
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
 
@@ -603,51 +605,179 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .look-mode { width: max-content; }
 .look-palettes { display: grid; gap: 8px; max-width: 420px; margin: 0; }
 .look-palettes .palette { padding: 9px 12px; }
-/* Files: shares down the left, the folder beside them, its rows one line each */
-.files { display: grid; grid-template-columns: 200px 1fr; gap: 18px; align-items: start; }
-.files-nav { display: grid; gap: 4px; }
+/* Files: a browser's three parts, the shares down the left, the folder in the
+   middle and the picked file on the right */
+.files {
+    display: grid; grid-template-columns: 178px minmax(0, 1fr); gap: 0;
+    height: 100%; min-height: 0;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    background: var(--surface);
+}
+.files-side {
+    display: grid; align-content: start; gap: 1px;
+    padding: 8px 6px; overflow: auto;
+    border-right: 1px solid var(--border); background: var(--surface-sunk);
+}
+.files-side-title {
+    margin: 4px 8px 6px; font-size: 0.7rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+}
 .files-share {
-    display: grid; gap: 1px; text-align: left; padding: 8px 10px;
-    border: 1px solid transparent; border-radius: 8px;
-    background: none; color: var(--text); font: inherit; cursor: pointer;
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+    padding: 6px 8px; border: 1px solid transparent; border-radius: 7px;
+    background: none; color: var(--text); font: inherit; font-size: 0.9rem;
+    text-align: left; cursor: pointer;
 }
 .files-share:hover { background: var(--raised); }
-.files-share.current { border-color: var(--accent); background: var(--raised); }
-.files-share-name { font-weight: 600; }
-.files-main { min-width: 0; display: grid; gap: 12px; }
-.files-bar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.files-share.current { background: var(--raised); border-color: var(--accent); }
+.files-share .file-icon { color: var(--muted); }
+.files-share.current .file-icon { color: var(--accent); }
+.files-share-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-lock { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.files-body { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+
+/* The toolbar: back, up, refresh, where you are, and how to see it */
+.files-tools {
+    display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.tool {
+    display: inline-grid; place-items: center; width: 28px; height: 28px;
+    border: 1px solid transparent; border-radius: 7px;
+    background: none; color: var(--text); cursor: pointer;
+}
+.tool:hover:not(:disabled) { background: var(--raised); border-color: var(--border); }
+.tool:disabled { opacity: 0.35; cursor: default; }
+.crumbs { display: flex; align-items: center; gap: 1px; min-width: 0; margin-left: 6px; overflow: hidden; }
 .crumbs button {
-    border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.9rem;
-    padding: 3px 4px; border-radius: 6px; cursor: pointer;
+    border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.88rem;
+    padding: 3px 5px; border-radius: 5px; cursor: pointer; white-space: nowrap;
 }
 .crumbs button:hover { background: var(--raised); }
 .crumbs button.current { color: var(--text); font-weight: 600; }
-.crumb-sep { color: var(--muted); }
-.file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.file-row {
-    display: grid; grid-template-columns: 22px 1fr auto auto; gap: 10px; align-items: center;
-    width: 100%; text-align: left; padding: 7px 9px;
-    border: 1px solid transparent; border-radius: 7px;
-    background: none; color: var(--text); font: inherit; cursor: pointer;
+.crumb-sep { color: var(--muted); font-size: 0.85rem; }
+.view-switch { margin-left: auto; }
+.view-switch button { display: inline-grid; place-items: center; width: 26px; height: 24px; }
+
+/* The folder and the picked file, side by side */
+.files-split { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
+.files-pane {
+    display: grid; grid-template-rows: minmax(0, 1fr) auto;
+    min-width: 0; min-height: 0; overflow: hidden;
 }
-.file-row:hover, .file-row:focus-visible { background: var(--raised); border-color: var(--border); }
+.files-pane:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* A list, with a header that sorts and columns that line up */
+.file-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.file-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    padding: 4px 8px; text-align: left; font-weight: 600; font-size: 0.76rem;
+    color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.file-table thead th button {
+    border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 2px 0;
+}
+.file-table thead th button:hover { color: var(--text); }
+.caret { font-size: 0.7rem; opacity: 0.8; }
+.file-row { cursor: default; user-select: none; }
+.file-row td {
+    padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+    vertical-align: middle; white-space: nowrap;
+}
+.file-row:hover td { background: var(--raised); }
+.file-row.picked td { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.file-row.picked td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.file-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.file-name > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .file-row.is-folder .file-name { font-weight: 600; }
-.file-mark { text-align: center; color: var(--muted); }
-.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-size { text-align: right; min-width: 68px; }
-.file-when { text-align: right; min-width: 84px; }
-.file-preview { display: grid; gap: 10px; justify-items: start; }
-.file-preview img, .file-preview video { max-width: 100%; max-height: 420px; border-radius: 8px; }
-.file-preview audio { width: 100%; }
-.file-preview iframe { width: 100%; height: 420px; border: 1px solid var(--border); border-radius: 8px; }
-.file-text {
-    margin: 0; padding: 12px; max-height: 420px; overflow: auto; width: 100%;
-    background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 8px;
-    font-size: 0.82rem; white-space: pre-wrap; word-break: break-word;
+.file-size { width: 92px; text-align: right; color: var(--muted); }
+.file-when { width: 108px; text-align: right; color: var(--muted); }
+
+/* A small picture where there is one, and the file's kind where there isn't */
+.thumb {
+    flex: none; display: inline-grid; place-items: center;
+    width: 24px; height: 24px; border-radius: 5px; object-fit: cover;
+    color: var(--muted); background: var(--surface-sunk);
 }
-@media (max-width: 720px) {
-    .files { grid-template-columns: 1fr; }
-    .files-nav { display: flex; flex-wrap: wrap; }
-    .file-size { display: none; }
+.thumb.kind-folder { color: var(--accent); background: none; }
+.thumb.kind-image { color: var(--palette-accent, var(--accent)); }
+.thumb.kind-text, .thumb.kind-pdf { color: var(--muted); }
+.thumb.big { width: 100%; height: 84px; border-radius: 7px; }
+img.thumb.big { object-fit: cover; }
+
+/* The grid, for folders of pictures */
+.file-scroll { overflow: auto; min-height: 0; }
+.file-grid {
+    list-style: none; margin: 0; padding: 10px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 10px;
+    align-content: start;
+}
+.file-tile {
+    display: grid; gap: 6px; width: 100%; padding: 6px;
+    border: 1px solid transparent; border-radius: 9px;
+    background: none; color: var(--text); font: inherit; font-size: 0.8rem;
+    cursor: pointer; text-align: center;
+}
+.file-tile:hover { background: var(--raised); border-color: var(--border); }
+.file-tile.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.file-tile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* How many there are, and whether you can change them */
+.files-status {
+    display: flex; justify-content: space-between; gap: 10px;
+    margin: 0; padding: 5px 10px; font-size: 0.76rem; color: var(--muted);
+    border-top: 1px solid var(--border); background: var(--surface-sunk);
+}
+
+/* The picked file, beside the list rather than under it */
+.files-preview {
+    display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+    width: 300px; min-height: 0;
+    border-left: 1px solid var(--border); background: var(--surface-sunk);
+}
+.preview-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+}
+.preview-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; }
+.preview-head .tool { margin-left: auto; width: 24px; height: 24px; }
+.preview-body { display: grid; place-items: start center; gap: 8px; padding: 10px; overflow: auto; }
+.preview-body img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+.preview-body video { width: 100%; max-height: 100%; border-radius: 8px; }
+.preview-body audio { width: 100%; }
+.preview-body iframe { width: 100%; height: 100%; border: 1px solid var(--border); border-radius: 8px; }
+.preview-none {
+    display: grid; justify-items: center; gap: 8px; margin: 0; padding: 24px 10px;
+    color: var(--muted); font-size: 0.82rem; text-align: center;
+}
+.preview-foot {
+    display: grid; gap: 2px; padding: 8px 10px;
+    border-top: 1px solid var(--border); font-size: 0.76rem; color: var(--muted);
+}
+.preview-foot .button { margin-top: 6px; text-align: center; text-decoration: none; }
+.file-text {
+    margin: 0; padding: 10px; max-height: 100%; overflow: auto; width: 100%;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    font-size: 0.78rem; white-space: pre-wrap; word-break: break-word;
+}
+
+/* Nothing to show yet */
+.files-blank {
+    display: grid; justify-items: center; align-content: center; gap: 8px;
+    margin: 0; padding: 30px 16px; color: var(--muted); font-size: 0.85rem; text-align: center;
+}
+
+/* A narrow window loses the shares column, then the preview beside the list */
+.files { container-type: inline-size; }
+@container (max-width: 620px) {
+    .files { grid-template-columns: minmax(0, 1fr); }
+    .files-side {
+        grid-auto-flow: column; grid-auto-columns: max-content; align-content: center;
+        overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border);
+    }
+    .files-side-title { display: none; }
+    .files-split { grid-template-columns: minmax(0, 1fr); }
+    .files-preview { width: auto; border-left: 0; border-top: 1px solid var(--border); max-height: 45%; }
+    .file-size, .file-when { display: none; }
 }

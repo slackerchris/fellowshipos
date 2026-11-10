@@ -8,8 +8,9 @@ export interface Loaded<T> {
     reload: () => void;
 }
 
-/** Load something when the page opens, and again whenever reload is called. */
-export function useLoad<T>(load: () => Promise<T>): Loaded<T> {
+/** Load something when the page opens, again whenever reload is called, and again
+    when what is being asked for changes: a folder path, for instance. */
+export function useLoad<T>(load: () => Promise<T>, asking: unknown[] = []): Loaded<T> {
     const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({ loading: true });
     const [round, setRound] = useState(0);
     useEffect(() => {
@@ -18,7 +19,7 @@ export function useLoad<T>(load: () => Promise<T>): Loaded<T> {
         load().then(data => current && setState({ data, loading: false }),
                     (error: Error) => current && setState({ error: error.message, loading: false }));
         return () => { current = false; };
-    }, [round]);
+    }, [round, ...asking]);
     return { ...state, reload: useCallback(() => setRound(r => r + 1), []) };
 }
 
@@ -49,10 +50,13 @@ export function useAction(after?: () => void) {
     return { busy, outcome, run, clear: () => setOutcome(null) };
 }
 
-/** An app's content. The window's title bar names it. */
-export function Page({ intro, children }: { intro?: string; children: ComponentChildren }) {
+/** An app's content. The window's title bar names it. fill gives the app the whole
+    window, for one that lays itself out to the edges, such as Files. */
+export function Page({ intro, fill, children }: {
+    intro?: string; fill?: boolean; children: ComponentChildren;
+}) {
     return (
-        <div class="page">
+        <div class={`page ${fill ? "page-fill" : ""}`}>
             {intro && <p class="muted">{intro}</p>}
             {children}
         </div>

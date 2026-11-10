@@ -126,6 +126,14 @@ bump.
 
 ### Changed
 
+- Files looks and behaves like a file browser: the shares down the left with how
+  you may use each one, a toolbar with back, up and refresh over a breadcrumb that
+  starts at the share's name, a sortable list with a header for name, size and
+  changed, a grid of thumbnails for folders of pictures, and the picked file in a
+  pane beside the list rather than under it. Clicking picks, a double click or
+  Enter opens, the arrow keys move, Backspace goes up and Escape forgets the pick.
+  A narrow window drops the shares column, then puts the preview under the list.
+
 - The theme choice moved out of the account menu into **Settings → Appearance**,
   beside the light, dark or automatic setting, because the look is a preference
   and the menu is for identity and signing out. The menu keeps the three-way

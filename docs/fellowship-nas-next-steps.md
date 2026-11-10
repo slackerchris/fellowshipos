@@ -135,10 +135,11 @@ What is true in the desktop today, so changes have a reference point:
   --system`).
 - Lists hold one line per thing, with its actions in a menu on the row, as Shares
   and Users now do; a form opens under the list rather than in a separate page.
-- Files puts the shares down the left and one line per file beside them, with the
-  size and date right-aligned, and opens a preview under the list rather than in
-  another window. It shows only the shares the signed-in account has, so nothing
-  in it is a link the server would refuse.
+- Files is shaped like a browser: shares down the left, a toolbar of back, up and
+  refresh over a breadcrumb that starts at the share's name, a sortable list or a
+  grid of thumbnails, and the picked file in a pane beside the list. Clicking
+  picks, a double click or Enter opens. It shows only the shares the signed-in
+  account has, so nothing in it is a link the server would refuse.
 - Not-built notes carry phase numbers. After the reorder those are Files at 12 and
   SFTP, FTP and WebDAV at 13. The sample data in `web/dev/fake-fnas` follows them.
 - The widget column scrolls on shorter screens, and icon slots fit a two-line
