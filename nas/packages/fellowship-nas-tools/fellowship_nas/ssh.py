@@ -70,7 +70,9 @@ def set_keys(name, text):
     """Replace an account's keys with these, one per line."""
     user = users.find_user(name)
     if user["kind"] != "ssh":
-        raise FnasError(f"{name} uses shares only, so SSH keys wouldn't let them in: make them Shares and SSH first")
+        only = "Files over SFTP" if user["kind"] == "sftp" else "shares only"
+        raise FnasError(f"{name} is set to {only}, and fnas keeps SSH keys for accounts set to Shares and SSH: "
+                        "make them Shares and SSH first")
     lines = [check_key(line.strip()) for line in text.splitlines() if line.strip() and not line.startswith("#")]
     if len(lines) > MAX_KEYS:
         raise FnasError(f"at most {MAX_KEYS} keys per account")

@@ -249,8 +249,10 @@ function Ssh() {
                 const noKey = !ssh.admins_with_keys.length;
                 return (
                     <div class="stack">
-                        <p class="small">Only accounts set to <strong>Shares and SSH</strong> in Users can log in over SSH;
-                            shares-only accounts are refused before they get a shell or a tunnel. Root can never log in
+                        <p class="small">Only accounts set to <strong>Shares and SSH</strong> or
+                            <strong>Files over SFTP</strong> in Users can log in over SSH. The first get a shell; the
+                            second get file transfer only, with no shell and nothing to forward, and see just their
+                            shares. Shares-only accounts are refused before they get either. Root can never log in
                             over SSH.</p>
                         <p class="small">May log in now: {ssh.allowed.length ? <strong>{ssh.allowed.join(", ")}</strong>
                             : "nobody"} · {ssh.running ? <Badge kind="good">running</Badge>

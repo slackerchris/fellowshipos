@@ -837,7 +837,9 @@ Pools, on every engine in the release build:
 
 Updates:
 
-- [ ] Reboot after a kernel update: pools and arrays come back, and shares with them
+- [ ] Reboot after a kernel update: pools and arrays come back, and shares with
+  them — including every SFTP view, which `fellowship-nas-refresh.service` makes
+  again because mounts don't survive a reboot
 - [ ] Force a ZFS module build failure: alert arrives, and the system boots the last good kernel with its pools
 
 Data recovery:

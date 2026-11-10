@@ -87,7 +87,7 @@ For desktop development, run `npm ci` and `npm run build` in `nas/packages/fello
 
 [CI](../.github/workflows/ci.yml) runs the Python and Go suites, `gofmt` and `go vet`, both frontend builds and ShellCheck on every push. The phase gates below still run by hand in a VM.
 
-**Checked for this overview.** The checked-out branch is `nas-edition` at `f1f0228`. All 264 Python unit tests passed on a fresh run, `gofmt`, `go vet` and `go test ./...` passed in the web module, and the desktop type-checks.
+**Checked for this overview.** The checked-out branch is `nas-edition` at `c29fe37`. All 280 Python unit tests passed on a fresh run, `gofmt`, `go vet` and `go test ./...` passed in the web module, and the desktop type-checks.
 
 **Files in the development container.** On November 10, the container's two accounts were given two shares with real owners: `admin` (in `nas-admins`) and `guest` (not) both in `media`, and `family` for `nas-admins` alone. Signed in as `admin`, Files listed both shares, opened `media`, previewed a 320x200 PNG and a text file, and downloaded the text file as an attachment. Signed in as `guest`, Files listed only `media`, browsed and previewed the same files, and was refused `family` with 403 "family isn't a share you can use" for both the folder and a file in it; a request for `media/../../family/private.txt` was refused as outside `media`. Run as `guest`, the file child was refused `/mnt/tank/shares/family` by the kernel as well. A `Range: bytes=100-199` request answered 206 with the right `Content-Range`, and the whole file compared byte for byte with the file on disk. Video, audio and PDF previews use the same path but no sample of each was tried, and nothing was run in the VM.
 

@@ -1,7 +1,8 @@
 # FellowshipNAS next steps
 
-Working note, written November 9, 2026 against `nas-edition` at `3610577`, and
-brought up to date against `059a150` when Phase 12 started.
+Working note, written November 9, 2026 against `nas-edition` at `3610577`,
+brought up to date against `059a150` when Phase 12 started, and again on
+November 10 against `c29fe37` when the SFTP work landed.
 The three canonical documents remain [the plan](fellowship-nas-plan.md),
 [the overview](fellowship-nas-overview.md) and
 [the review notes](fellowship-nas-changes.md). This file is a short brief for
@@ -13,10 +14,17 @@ picking work back up, not a fourth source of truth.
 | --- | --- |
 | Storage engines built | ZFS, traditional RAID (mdadm), Unraid-style (mergerfs + SnapRAID) |
 | Storage engines left | Btrfs (Phase 17, after office editing) |
-| Phases done | 1 to 11, with the gates recorded in the plan |
-| Next phase | 12, the Files app, which now comes before more ways to share. Built: the resolver, browsing and previewing, uploading, folders, renaming, moving and deleting, then slices A to E of the Files plan (several at once, copy and move, search, who may change what, earlier versions from a snapshot). Left here: the gate, walked on real hardware; the installable phone app is being kept as its own project |
-| Tests | 264 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, and CI runs on every push |
-| Docs baseline | The overview describes `f1f0228`, and the plan's Files section records each slice built and what was seen of it |
+| Phases done | 1 to 11, with the gates recorded in the plan; 12 built and its gate left for real hardware |
+| Phase 13 | WebDAV is built three times over: read over HTTPS, then writes with a strong `ETag` and `If-Match` checked as the write commits, then `LOCK`/`UNLOCK` with locks bound to the account that took them and folders that carry the locks inside them. SFTP is built: an account set to Files over SFTP is chrooted to a view of just its shares, with no shell, no forwarding and its view rebuilt whenever a share changes and at boot. **FTP is what is left of the phase**, FTPS first with plain FTP an opt-in |
+| Next | FTP, then the release gates on real hardware: everything in section 3, and the protocol gate in the plan (`An SFTP-only user can't get a shell and sees only their shares`, two accounts over SFTP, FTP and WebDAV) |
+| Tests | 280 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, and CI runs on every push |
+| Docs baseline | The overview describes `c29fe37`, and the plan's Sharing section records each WebDAV and SFTP slice built and what was seen of it |
+
+**The running VM predates all of Phase 13.** The SFTP views, the sshd `Match`
+block and `fellowship-nas-refresh.service` are new files, so they exist only
+after the packages are rebuilt (`nas/packages/build.sh`) and installed into a
+fresh image or over an existing one. A reboot of the VM as it stands brings back
+the pools and the arrays and no SFTP at all.
 
 ## 2. What the docs get right, and what drifted
 
@@ -63,13 +71,14 @@ Carried from Phase 11:
 - [ ] The sync and scrub timers actually firing
 - [ ] The 50-deleted-files limit skipping a sync with an alert
 - [ ] Spin-down of idle data disks
-- [ ] A reboot with pools mounted
+- [ ] A reboot with pools mounted, with every SFTP view back on its own after
+  `fellowship-nas-refresh.service` runs
 - [ ] Importing a mergerfs + SnapRAID setup that fnas did not make
 
 One VM session with four and sixteen disks should clear the list. Doing it before
 Phase 12 keeps this debt from riding into a phase that carries a new kind of risk.
 
-## 4. Phase 12: the Files app
+## 4. Phase 12: the Files app (built; gate left)
 
 Scope as written: browse and restore from snapshots, 10 GB transfers and video
 seeking, and the desktop as an installable phone web app. Files also builds the
@@ -93,28 +102,50 @@ per-user file helper that WebDAV reuses in Phase 13.
    already the house rule for a feature that can't work.
 
 The plan's Files section carries the same answers, and the code follows them.
-What is left of Phase 12 is planned slice by slice in
-[the Files plan](fellowship-nas-files-plan.md): multi-select, copy and a "Move
-to…" picker, search and the owner and permission columns are built; snapshots,
-then the installable phone app and the gate, are left.
+Every slice in [the Files plan](fellowship-nas-files-plan.md) is built, snapshots
+included. What is left is the gate on real hardware, and the installable phone
+app, which is being kept as its own project.
 
 ## 5. Order of work
 
-Done in this pass:
+Done:
 
 1. The two stale plan lines are fixed, and the untried tests are one checklist
    in section 3.
 2. The three Phase 12 questions are answered in the plan's Files section, which
    WebDAV in Phase 13 inherits.
+3. Phase 12, all slices, and the file helper WebDAV reuses.
+4. Phase 13's WebDAV, in three slices, and SFTP.
 
 Left, in order:
 
-3. Phase 12's remaining slices: snapshots on ZFS only and restoring from them;
-   then the phone work, so the gate can still pass on desktop if the
-   installable-app work runs long. Browsing, previewing, every change to files,
-   several at once, copy and move, search and permissions are built.
-4. The catch-up gate on real disks for both engines, which section 3 lists item
-   by item.
+5. FTP, FTPS by default, sharing the same chroot view SFTP builds.
+6. The catch-up gate on real disks for both engines, then the protocol gate,
+   which section 3 lists item by item.
+
+## 5a. What a reboot now does, and what to look at
+
+`fellowship-nas-refresh.service` runs `fnas share refresh` once
+`local-fs.target`, `remote-fs.target` and `zfs-mount.service` are up, so the
+SFTP views — which are bind mounts and cannot survive a reboot — are made again
+before anyone logs in. `fnas share refresh` rebuilds the NFS exports, the Samba
+files and those views from one list, and a share change does the same thing
+without waiting for a reboot.
+
+After a reboot, these say whether it worked:
+
+| Command | What it should show |
+| --- | --- |
+| `systemctl status fellowship-nas-refresh.service` | `active (exited)`, and no error in its log |
+| `findmnt -o TARGET | grep fellowship-nas/sftp` | one line per account and share, nothing else |
+| `fnas share list` | `SFTP` beside the shares that are shared that way |
+| `sftp ACCOUNT@ADDRESS` then `ls /` | that account's shares and nothing else of the machine |
+| `ssh ACCOUNT@ADDRESS` for the same account | "This service allows sftp connections only" |
+
+A share turned off, or a person taken off one, needs no reboot: the view is
+rebuilt by the change itself, and a session already open loses the share at
+once. A client that already has a file open keeps that one file, which is what
+POSIX allows and nothing can take back.
 
 ## 6. Notes for the UI work
 
@@ -145,8 +176,10 @@ What is true in the desktop today, so changes have a reference point:
   grid of thumbnails, and the picked file in a pane beside the list. Clicking
   picks, a double click or Enter opens. It shows only the shares the signed-in
   account has, so nothing in it is a link the server would refuse.
-- Not-built notes carry phase numbers. After the reorder those are Files at 12 and
-  SFTP, FTP and WebDAV at 13. The sample data in `web/dev/fake-fnas` follows them.
+- Not-built notes carry phase numbers, and only a feature that really isn't built
+  may carry one. After Phase 13, FTP is the only protocol still marked "not built
+  yet"; Files, WebDAV and SFTP are built. The sample data in `web/dev/fake-fnas`
+  follows the same rule, including the services list it keeps its own copy of.
 - The widget column scrolls on shorter screens, and icon slots fit a two-line
   label such as "Snapshots & backup".
 

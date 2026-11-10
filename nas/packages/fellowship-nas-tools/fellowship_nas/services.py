@@ -29,7 +29,7 @@ SYSTEM_SERVICES = [
     ("sanoid.timer", "Snapshot schedule", "Takes and prunes snapshots every 15 minutes"),
     ("zfs-zed.service", "ZFS events", "Alerts when a ZFS disk fails or a scrub finds errors"),
     ("smartmontools.service", "Disk health", "Watches each disk's SMART data"),
-    ("ssh.service", "SSH", "Logins over SSH, for accounts set to Shares and SSH"),
+    ("ssh.service", "SSH", "Logins over SSH, for accounts set to Shares and SSH or Files over SFTP"),
 ]
 
 
