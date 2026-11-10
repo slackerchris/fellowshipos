@@ -102,7 +102,10 @@ DEFAULT = {
                {"name": "video", "gid": 44, "members": ["plex"], "system": True, "private": False},
                {"name": "render", "gid": 107, "members": [], "system": True, "private": False},
                {"name": "docker", "gid": 995, "members": ["plex"], "system": True, "private": False},
+               {"name": "root", "gid": 0, "members": [], "system": True, "private": True},
                {"name": "adm", "gid": 4, "members": ["syslog"], "system": True, "private": False},
+               {"name": "disk", "gid": 6, "members": [], "system": True, "private": False},
+               {"name": "sudo", "gid": 27, "members": ["tester"], "system": True, "private": False},
                {"name": "audio", "gid": 29, "members": [], "system": True, "private": False},
                {"name": "users", "gid": 100, "members": [], "system": True, "private": False},
                {"name": "wheel", "gid": 998, "members": ["tester"], "system": True, "private": False},
@@ -301,7 +304,9 @@ def main(args):
         out = f"Done for {rest[0]}"
     elif area == "group" and action == "list":
         # fnas lists the machine's own groups only when asked
-        out = [g for g in state["groups"] if "--system" in rest or not g.get("system")]
+        # fnas sorts by name, and lists the machine's own groups only when asked
+        out = sorted((g for g in state["groups"] if "--system" in rest or not g.get("system")),
+                     key=lambda g: g["name"])
     elif area == "group":
         out = "Done"
     elif area == "sharing" and action == "show":

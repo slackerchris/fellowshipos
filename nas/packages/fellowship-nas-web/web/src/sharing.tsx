@@ -110,6 +110,8 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
                             <p class="muted small">Every group the machine has, so an app that already runs here can be
                                 given the files it needs: Plex and the *arr apps usually read as video or render, a
                                 container as docker, a backup tool as whatever it was installed with.</p>
+                            <p class="muted small">root and sudo need no grant: root already reads anything, and its
+                                members could change the files anyway.</p>
                             {systemGroups.length > 8 && (
                                 <input class="group-filter" type="search" placeholder="Filter groups"
                                        aria-label="Filter groups"
