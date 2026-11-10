@@ -64,9 +64,11 @@ def protocols(state):
     count = lambda name: len([s for s in state["shares"] if s.get(name)])
     return [entry("smb", "SMB", "Windows, Mac and phones", "running", f"Running, {count('smb')} shares"),
             entry("nfs", "NFS", "Linux computers, Proxmox and other servers", "running", f"Running, {count('nfs')} shares"),
-            entry("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", "not-built", "Not built yet (Phase 13)"),
+            entry("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", "running",
+                  f"Running, {count('sftp')} shares"),
             entry("ftp", "FTP", "Cameras, scanners and older devices", "not-built", "Not built yet (Phase 13)"),
-            entry("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", "not-built", "Not built yet (Phase 13)"),
+            entry("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", "running",
+                  f"Running, {count('webdav')} shares"),
             entry("dlna", "DLNA", "TVs and consoles finding media by themselves", "later", "Planned for after the storage engines"),
             entry("iscsi", "iSCSI", "Part of a pool as a disk on another machine", "later", "Planned for after the storage engines")]
 
@@ -124,24 +126,24 @@ DEFAULT = {
         # the kernel having to be the one to say no
         {"name": "archive", "pool": "tank", "dataset": "tank/shares/archive", "path": "/mnt/tank/shares/archive",
          "mode": "chosen", "access": {"users": {"guest": "read", "admin": "write"}, "groups": {}}, "nfs": False,
-         "smb": True, "webdav": True,
+         "smb": True, "webdav": True, "sftp": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
         {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/mnt/tank/shares/media",
-         "mode": "everyone", "access": {"users": {}, "groups": {}}, "nfs": True, "smb": True, "webdav": True,
+         "mode": "everyone", "access": {"users": {}, "groups": {}}, "nfs": True, "smb": True, "webdav": True, "sftp": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
         # Granted to admin alone, so the harness can show someone being refused it
         {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/mnt/tank/shares/family",
          "mode": "chosen", "access": {"users": {"admin": "write"}, "groups": {}}, "nfs": False,
-         "smb": True, "webdav": True,
+         "smb": True, "webdav": True, "sftp": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
         # One regular person's own share, so a second regular account has something
         # that is not theirs to be refused
         {"name": "private", "pool": "tank", "dataset": "tank/shares/private", "path": "/mnt/tank/shares/private",
          "mode": "chosen", "access": {"users": {"dana": "write"}, "groups": {}}, "nfs": False,
-         "smb": True, "webdav": True,
+         "smb": True, "webdav": True, "sftp": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
     ],
@@ -271,12 +273,13 @@ def main(args):
                                 "path": f"/mnt/{pool}/shares/{name}",
                                 "mode": "everyone" if "--everyone" in rest else "chosen",
                                 "access": {"users": {}, "groups": {}}, "engine": "zfs", "snapshots": True,
-                                "nfs": "--nfs" in rest, "smb": "--smb" in rest, "smb_options": SMB, "nfs_options": NFS,
+                                "nfs": "--nfs" in rest, "smb": "--smb" in rest, "sftp": "--sftp" in rest,
+                                "smb_options": SMB, "nfs_options": NFS,
                                 "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "readonly": False})
         out = f"Created share {name}"
     elif area == "share" and action == "set":
         share = next(s for s in state["shares"] if s["name"] == rest[0])
-        for protocol in ("nfs", "smb", "webdav"):
+        for protocol in ("nfs", "smb", "webdav", "sftp"):
             if f"--{protocol}" in rest:
                 share[protocol] = rest[rest.index(f"--{protocol}") + 1] == "on"
         out = f"Updated share {rest[0]}"
@@ -347,7 +350,7 @@ def main(args):
             if level:
                 out.append({"share": share["name"], "path": share["path"], "level": level,
                             "through": through, "snapshots": share.get("snapshots", False),
-                            "webdav": share.get("webdav", False)})
+                            "webdav": share.get("webdav", False), "sftp": share.get("sftp", False)})
     elif area == "group" and action == "list":
         # fnas lists the machine's own groups only when asked
         # fnas sorts by name, and lists the machine's own groups only when asked

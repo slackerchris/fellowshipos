@@ -10,6 +10,7 @@ const USER_NAME = /^[a-z_][a-z0-9_-]{0,31}$/;
 const KINDS = {
     shares: { title: "Shares only", text: "Uses shares from other computers. Refused by SSH, so no shell and no tunnels." },
     ssh: { title: "Shares and SSH", text: "Also logs in to the NAS over SSH." },
+    sftp: { title: "Files over SFTP", text: "Moves files over SFTP, with no shell and only their shares." },
 } as const;
 
 function PasswordFields({ password, setPassword, again, setAgain, label = "Password" }: {

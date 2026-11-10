@@ -214,9 +214,10 @@ export function accessNames(share: Share) {
     return names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
 }
 
-/** The protocols a share is on, as one short line: "SMB · NFS". */
+/** The protocols a share is on, as one short line: "SMB · NFS · SFTP". */
 function protocolsOf(share: Share) {
-    return [share.smb ? "SMB" : "", share.nfs ? "NFS" : ""].filter(Boolean).join(" · ");
+    return [share.smb ? "SMB" : "", share.nfs ? "NFS" : "", share.sftp ? "SFTP" : ""]
+        .filter(Boolean).join(" · ");
 }
 
 /** Where to reach a share from another machine, per protocol it is on. */
@@ -241,7 +242,8 @@ const FolderIcon = () => (
 
 /** One share's panel: how to reach it, which ways it is shared, and its settings. */
 function SharePanel({ share, lan, busy, toggle, onDone }: {
-    share: Share; lan: string; busy: boolean; toggle: (share: Share, protocol: "nfs" | "smb") => void;
+    share: Share; lan: string; busy: boolean;
+    toggle: (share: Share, protocol: "nfs" | "smb" | "sftp") => void;
     onDone: () => void;
 }) {
     const lines = connectLines(share);
@@ -266,6 +268,11 @@ function SharePanel({ share, lan, busy, toggle, onDone }: {
                     <span>NFS{share.nfs && share.nfs_options.clients.length
                         ? ` (${share.nfs_options.clients.length} chosen computers)` : ""}</span>
                 </label>
+                <label class="check">
+                    <input type="checkbox" checked={share.sftp} disabled={busy || share.readonly}
+                           onChange={() => toggle(share, "sftp")} />
+                    <span>SFTP</span>
+                </label>
             </div>
             {share.readonly
                 ? <p class="muted small">This share is on a read-only pool, so it can't be changed.</p>
@@ -282,7 +289,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
     const [deleting, setDeleting] = useState<{ name: string; phrase: string; lost: string[] } | null>(null);
     const action = useAction(reload);
     const deleteAction = useAction(reload);
-    const toggle = (share: Share, protocol: "nfs" | "smb") =>
+    const toggle = (share: Share, protocol: "nfs" | "smb" | "sftp") =>
         action.run(() => fnas(["share", "set", share.name, `--${protocol}`, share[protocol] ? "off" : "on"]));
     const choose = (name: string) => { setMenu(null); setOpen(open === name ? null : name); };
 

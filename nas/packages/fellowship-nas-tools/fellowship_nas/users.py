@@ -9,9 +9,14 @@ from .common import ACCOUNT_NAME, FnasError, run
 
 
 ADMIN_GROUP = "nas-admins"
+SSH_GROUP = "nas-ssh"
+SFTP_GROUP = "nas-sftp"
 FIRST_ID, LAST_ID = 1000, 60000
+# The shell an account with no terminal gets: for SFTP it is a script that
+# refuses, which sshd never runs because internal-sftp is forced instead
+SFTP_SHELL = "/usr/local/lib/fellowship-nas/sftp-only"
 # What an account may do besides using shares
-KINDS = {"shares": "/usr/sbin/nologin", "ssh": "/bin/bash"}
+KINDS = {"shares": "/usr/sbin/nologin", "sftp": SFTP_SHELL, "ssh": "/bin/bash"}
 FULL_NAME = re.compile(r"^[^:,\n\x00]{0,64}$")
 # Accounts in the people range that belong to the NAS itself
 SERVICE_ACCOUNTS = {"nas-share"}
@@ -20,6 +25,19 @@ SERVICE_ACCOUNTS = {"nas-share"}
 def is_person(account):
     return (FIRST_ID <= account.pw_uid < LAST_ID and ACCOUNT_NAME.match(account.pw_name)
             and account.pw_name not in SERVICE_ACCOUNTS)
+
+
+def kind_of(account):
+    """What an account may do besides using shares, read from its shell: the sftp
+    one refuses, and it is the only thing that tells Files over SFTP apart from
+    shares alone."""
+    for kind, shell in KINDS.items():
+        if account.pw_shell == shell:
+            return kind
+    # An account whose shell refuses is one that may only use shares
+    if account.pw_shell.endswith(("nologin", "false")):
+        return "shares"
+    return "ssh"
 
 
 def smb_accounts():
@@ -112,7 +130,7 @@ def list_users():
             continue
         name = account.pw_name
         found.append({"name": name, "uid": account.pw_uid, "full_name": account.pw_gecos.split(",")[0],
-                      "kind": "shares" if account.pw_shell.endswith(("nologin", "false")) else "ssh",
+                      "kind": kind_of(account),
                       "admin": name in admin_names,
                       "groups": sorted(g.gr_name for g in grp.getgrall() if name in g.gr_mem and g.gr_name in mine),
                       "password": passwords.get(name, {}).get("password", False),

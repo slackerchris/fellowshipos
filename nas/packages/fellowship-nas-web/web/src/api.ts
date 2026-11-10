@@ -251,8 +251,9 @@ export interface Share {
     access: Access;
     nfs: boolean;
     smb: boolean;
-    // Reachable over HTTPS as a WebDAV drive. Off unless it was asked for
+    // Reachable over HTTPS as a WebDAV drive, and over SFTP. Off unless asked for
     webdav: boolean;
+    sftp: boolean;
     policy: Policy;
     smb_options: SmbOptions;
     nfs_options: NfsOptions;
@@ -264,7 +265,7 @@ export interface User {
     uid: number;
     full_name: string;
     // shares: shares only, no SSH; ssh: shares and SSH
-    kind: "shares" | "ssh";
+    kind: "shares" | "sftp" | "ssh";
     admin: boolean;
     groups: string[];
     // Whether the account has a password at all, and one for SMB

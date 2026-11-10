@@ -32,7 +32,7 @@ ACCESS_LEVELS = ("read", "write")
 # Fixed so that files on a moved pool keep their owner
 SHARE_ACCOUNT = "nas-share"
 SHARE_ID = 3000
-SETTING_KEYS = ("mode", "access", "nfs", "smb", "webdav", "policy", "smb_options", "nfs_options")
+SETTING_KEYS = ("mode", "access", "nfs", "smb", "webdav", "sftp", "policy", "smb_options", "nfs_options")
 DEFAULT_SMB = {"readonly": False, "hidden": False, "guest": False, "recycle": False, "recycle_days": 30,
                "timemachine": False, "timemachine_size": 0, "previous_versions": True}
 # An empty client list means the home network, read-write, following the LAN subnet
@@ -149,6 +149,9 @@ def check_settings(name, settings):
             # Off unless it is asked for: a share reached over HTTPS is a new way in,
             # so turning it on is a decision rather than a default
             "webdav": settings.get("webdav") is True,
+            # The same for SFTP, which is the only way in that comes with a login
+            # of its own rather than a drive the desktop hands out
+            "sftp": settings.get("sftp") is True,
             "policy": {period: policy[period] if isinstance(policy.get(period), int)
                        and 0 <= policy[period] <= snapshots.MAX_KEPT else kept
                        for period, kept in snapshots.DEFAULT_POLICY.items()},
@@ -498,15 +501,15 @@ def apply_access(share):
             "{}", "+")
 
 
-def new_settings(mode, access, nfs, smb, webdav=False):
+def new_settings(mode, access, nfs, smb, webdav=False, sftp=False):
     return {"mode": mode, "access": access, "nfs": nfs, "smb": smb, "webdav": webdav,
-            "policy": dict(snapshots.DEFAULT_POLICY),
+            "sftp": sftp, "policy": dict(snapshots.DEFAULT_POLICY),
             "smb_options": dict(DEFAULT_SMB), "nfs_options": dict(DEFAULT_NFS)}
 
 
-def create_share(name, pool, everyone, access, nfs, smb, webdav=False):
-    if not nfs and not smb and not webdav:
-        raise FnasError("choose at least one of --nfs, --smb and --webdav")
+def create_share(name, pool, everyone, access, nfs, smb, webdav=False, sftp=False):
+    if not nfs and not smb and not webdav and not sftp:
+        raise FnasError("choose at least one of --nfs, --smb, --webdav and --sftp")
     if smb and not os.path.isdir(SMB_DIR):
         raise FnasError("SMB needs the fellowship-nas-smb package")
     if everyone and (access["users"] or access["groups"]):
@@ -522,15 +525,15 @@ def create_share(name, pool, everyone, access, nfs, smb, webdav=False):
 
     path = pools.ENGINES[found["engine"]].create_volume(pool, name)
     share = {"name": name, "path": path,
-             **new_settings("everyone" if everyone else "chosen", access, nfs, smb, webdav)}
+             **new_settings("everyone" if everyone else "chosen", access, nfs, smb, webdav, sftp)}
     apply_access(share)
     save_settings(pool, share)
     write_config()
 
 
-def set_share(name, nfs, smb, webdav=None):
-    if nfs is None and smb is None and webdav is None:
-        raise FnasError("nothing to change: pass --nfs, --smb or --webdav")
+def set_share(name, nfs, smb, webdav=None, sftp=None):
+    if nfs is None and smb is None and webdav is None and sftp is None:
+        raise FnasError("nothing to change: pass --nfs, --smb, --webdav or --sftp")
     share = find_share(name)
     if smb == "on" and not os.path.isdir(SMB_DIR):
         raise FnasError("SMB needs the fellowship-nas-smb package")
@@ -540,6 +543,8 @@ def set_share(name, nfs, smb, webdav=None):
         share["smb"] = smb == "on"
     if webdav is not None:
         share["webdav"] = webdav == "on"
+    if sftp is not None:
+        share["sftp"] = sftp == "on"
     save_settings(share["pool"], share)
     write_config()
 
@@ -681,7 +686,7 @@ def roots_of(user):
             continue
         found.append({"share": share["name"], "path": share["path"], "level": used["level"],
                       "through": used["through"], "snapshots": share["snapshots"],
-                      "webdav": share["webdav"]})
+                      "webdav": share["webdav"], "sftp": share["sftp"]})
     return found
 
 

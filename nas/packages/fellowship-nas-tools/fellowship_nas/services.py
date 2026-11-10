@@ -10,7 +10,8 @@ from . import shares, ssh
 PROTOCOLS = [
     ("smb", "SMB", "Windows, Mac and phones", "smbd.service", None),
     ("nfs", "NFS", "Linux computers, Proxmox and other servers", "nfs-server.service", None),
-    ("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", None, 13),
+    ("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps",
+     "ssh.service", None),
     ("ftp", "FTP", "Cameras, scanners and older devices", None, 13),
     # Served by the desktop's own web server, so there is no unit of its own
     ("webdav", "WebDAV", "A network drive over HTTPS, and phone apps",

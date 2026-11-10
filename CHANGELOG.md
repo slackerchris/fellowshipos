@@ -14,6 +14,14 @@ bump.
 
 ### Added
 
+- Sharing, SFTP: a share can be shared over SFTP with its own checkbox, off
+  until it is asked for, and an account can be set to Files over SFTP. Such an
+  account is chrooted to a folder of bind mounts holding just the shares it may
+  use and only those shared that way, so it sees its shares and nothing else of
+  the NAS. It gets the sftp server instead of a shell, and no forwarding, agent
+  forwarding, X11 or tunnels, so a client that asks for any of those is turned
+  away. What it may read and write is decided by its own account, as in Files.
+  Admins keep their normal SSH login.
 - Sharing, a WebDAV lock belongs to the account that took it. Writing through
   the lock, renewing it and releasing it now need that account as well as the
   token, so a token replayed by someone else on the same share gets nowhere, and

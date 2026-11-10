@@ -7,7 +7,8 @@ import sys
 import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
-from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, snapshots, ssh, system, usage, users
+from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, sftp, snapshots, \
+    ssh, system, usage, users
 from . import storage_checks
 from .engines import mdadm
 
@@ -157,14 +158,15 @@ def print_shares(shares):
     if not shares:
         print("No shares")
     for share in shares:
-        protocols = [p for p in ("nfs", "smb", "webdav") if share[p]]
+        protocols = [p for p in ("nfs", "smb", "sftp", "webdav") if share[p]]
         print(f"{share['name']}  {' '.join(protocols).upper() or 'not shared'}  {share['path']}")
         print(f"    for {describe_access(share)}")
 
 
 def print_users(found):
     for user in found:
-        extras = [user["kind"] == "ssh" and "SSH", user["admin"] and "administrator",
+        extras = [user["kind"] == "ssh" and "SSH", user["kind"] == "sftp" and "SFTP only",
+                  user["admin"] and "administrator",
                   not user["password"] and "no password yet",
                   user["password"] and not user["smb_password"] and "no SMB password", not user["enabled"] and "turned off"]
         print(f"{user['name']}  {user['full_name']}  " + ", ".join(e for e in extras if e))
@@ -413,6 +415,7 @@ def build_parser():
     create.add_argument("--nfs", action="store_true", help="share over NFS")
     create.add_argument("--smb", action="store_true", help="share over SMB")
     create.add_argument("--webdav", action="store_true", help="share over HTTPS as a WebDAV drive")
+    create.add_argument("--sftp", action="store_true", help="share over SFTP, for scripts and phones")
     access = share.add_parser("access", help="change who can use a share, for every file in it")
     access.add_argument("name")
     add_access_arguments(access)
@@ -441,6 +444,7 @@ def build_parser():
     change.add_argument("--nfs", choices=("on", "off"))
     change.add_argument("--smb", choices=("on", "off"))
     change.add_argument("--webdav", choices=("on", "off"))
+    change.add_argument("--sftp", choices=("on", "off"))
     share.add_parser("refresh", help="rewrite the NFS and Samba settings from each pool")
     share.add_parser("services", help="list every way to share files and whether each is running")
     delete = share.add_parser("delete", help="destroy a share, its data and its snapshots")
@@ -808,6 +812,7 @@ def dispatch_user(args, show):
     dispatch_user_action(args, show)
     if args.action in ("create", "set", "remove"):
         ssh.sync_members()
+        sftp.sync_accounts()
 
 
 def dispatch_user_action(args, show):
@@ -902,7 +907,7 @@ def dispatch_share(args, show):
             f"{args.user} can't use any shares"))
     elif args.action == "create":
         shares.create_share(args.name, args.pool, args.everyone, access_from(args), args.nfs, args.smb,
-                            args.webdav)
+                            args.webdav, args.sftp)
         print(f"Created share {args.name}")
     elif args.action == "access":
         shares.set_access(args.name, args.everyone, access_from(args))
@@ -920,7 +925,7 @@ def dispatch_share(args, show):
                                switch(args.async_writes))
         print(f"Updated NFS settings for {args.name}")
     elif args.action == "set":
-        shares.set_share(args.name, args.nfs, args.smb, args.webdav)
+        shares.set_share(args.name, args.nfs, args.smb, args.webdav, args.sftp)
         print(f"Updated share {args.name}")
     elif args.action == "refresh":
         shares.migrate()

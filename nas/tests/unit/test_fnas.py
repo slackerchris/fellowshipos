@@ -908,8 +908,8 @@ class Sharing(Base):
                                           '(rw,sync,no_subtree_check,all_squash,anonuid=3000,anongid=3000)'])
         self.assertEqual(self.settings(), {"media": {
             "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": False,
-            # A new share is never reachable over HTTPS until it is asked for
-            "webdav": False, "policy": fnas.DEFAULT_POLICY,
+            # A new share is never reachable over HTTPS or SFTP until it is asked for
+            "webdav": False, "sftp": False, "policy": fnas.DEFAULT_POLICY,
             "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS}})
         self.assertIn(("chown", "-R", "3000:3000", "/tank/shares/media"), fake.calls)
         self.chmod.assert_called_once_with("/tank/shares/media", 0o2775)
@@ -1030,7 +1030,7 @@ class Sharing(Base):
         self.assertEqual(fnas.list_shares(), [{
             "name": "media", "pool": "tank", "engine": "zfs", "snapshots": True, "dataset": "tank/shares/media",
             "path": "/tank/shares/media", "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": True,
-            "webdav": False, "policy": fnas.DEFAULT_POLICY,
+            "webdav": False, "sftp": False, "policy": fnas.DEFAULT_POLICY,
             "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS,
             "readonly": False}])
 
@@ -1210,8 +1210,18 @@ class Sharing(Base):
 
     def test_a_share_needs_at_least_one_way_in(self):
         self.fake(volume_line("photos"))
-        with self.assertRaisesRegex(fnas.FnasError, "at least one of --nfs, --smb and --webdav"):
+        with self.assertRaisesRegex(fnas.FnasError, "at least one of --nfs, --smb, --webdav and --sftp"):
             fnas.create_share("photos", "tank", True, self.everyone(), False, False)
+
+    def test_a_share_can_be_shared_over_sftp_alone(self):
+        fake = self.fake()
+        fnas.create_share("photos", "tank", True, self.everyone(), False, False, False, True)
+        self.assertIn(("zfs", "create", "-p", "tank/shares/photos"), fake.calls)
+        self.assertEqual({key: self.settings()["photos"][key] for key in ("nfs", "smb", "webdav", "sftp")},
+                         {"nfs": False, "smb": False, "webdav": False, "sftp": True})
+        # And it can be turned off again without disturbing anything else
+        fnas.set_share("photos", None, None, None, "off")
+        self.assertFalse(self.settings()["photos"]["sftp"])
 
     def test_webdav_is_off_until_it_is_asked_for(self):
         self.write_settings(media={"mode": "everyone", "nfs": True, "smb": True})
@@ -3012,14 +3022,18 @@ class Ssh(unittest.TestCase):
         def run(*command, check=True, stdin=None):
             self.calls.append(command)
             return SimpleNamespace(stdout="256 SHA256:abc kim@laptop (ED25519)\n", stderr="", returncode=0)
+        sftp = {module.__name__: module for module in MODULES}["fellowship_nas.sftp"]
         for patcher in (patch("run", run), patch("SETTINGS_FILE", os.path.join(self.dir, "ssh.json")),
-                        patch("DROP_IN", os.path.join(self.dir, "fellowship.conf"))):
+                        patch("DROP_IN", os.path.join(self.dir, "fellowship.conf")),
+                        # The SFTP views are built by their own module and tested there
+                        mock.patch.object(sftp, "sync", lambda: None)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def test_only_nas_ssh_and_never_root(self):
         text = fnas.drop_in({"enabled": True, "passwords": False})
-        self.assertIn("AllowGroups nas-ssh\n", text)
+        # SFTP accounts come in through sshd too, but into internal-sftp
+        self.assertIn("AllowGroups nas-ssh nas-sftp\n", text)
         self.assertIn("PermitRootLogin no\n", text)
         self.assertIn("PasswordAuthentication no\n", text)
 
@@ -3123,11 +3137,11 @@ class FileRoots(unittest.TestCase):
 
     shares = [
         {"name": "media", "path": "/mnt/tank/shares/media", "snapshots": True, "mode": "chosen",
-         "webdav": True, "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
+         "webdav": True, "sftp": True, "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
         {"name": "docs", "path": "/mnt/tank/shares/docs", "snapshots": False, "mode": "chosen",
-         "webdav": False, "access": {"users": {}, "groups": {"family": "read"}}},
+         "webdav": False, "sftp": False, "access": {"users": {}, "groups": {"family": "read"}}},
         {"name": "private", "path": "/mnt/tank/shares/private", "snapshots": True, "mode": "chosen",
-         "webdav": True, "access": {"users": {"tester": "write"}, "groups": {}}},
+         "webdav": True, "sftp": False, "access": {"users": {"tester": "write"}, "groups": {}}},
     ]
 
     def setUp(self):
@@ -3140,10 +3154,115 @@ class FileRoots(unittest.TestCase):
     def test_a_person_gets_their_shares_with_where_each_one_is(self):
         self.assertEqual(fnas.roots_of("kim"), [
             {"share": "media", "path": "/mnt/tank/shares/media", "level": "write",
-             "through": "own", "snapshots": True, "webdav": True},
+             "through": "own", "snapshots": True, "webdav": True, "sftp": True},
             {"share": "docs", "path": "/mnt/tank/shares/docs", "level": "read",
-             "through": "group family", "snapshots": False, "webdav": False},
+             "through": "group family", "snapshots": False, "webdav": False, "sftp": False},
         ])
 
     def test_a_share_someone_cannot_use_is_not_a_root(self):
         self.assertEqual([root["share"] for root in fnas.roots_of("tester")], ["private"])
+
+
+class SftpViews(unittest.TestCase):
+    """Files over SFTP: an account that gets files and nothing else.
+
+    What it may reach is a folder of bind mounts built from the shares it can
+    already use, and of those only the ones shared that way."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = directory.name
+        self.paths = {}
+        for name in ("media", "docs", "private"):
+            self.paths[name] = os.path.join(self.root, "shares", name)
+            os.makedirs(self.paths[name])
+        self.shares = [
+            {"name": "media", "path": self.paths["media"], "sftp": True, "mode": "everyone",
+             "access": {"users": {}, "groups": {}}},
+            # Shared over SMB, but nobody agreed it should be reachable over SFTP
+            {"name": "docs", "path": self.paths["docs"], "sftp": False, "mode": "everyone",
+             "access": {"users": {}, "groups": {}}},
+            {"name": "private", "path": self.paths["private"], "sftp": True, "mode": "chosen",
+             "access": {"users": {"kim": "read"}, "groups": {}}},
+        ]
+        self.calls = []
+
+        def run(*command, check=True, stdin=None):
+            self.calls.append(command)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+        self.sftp = {module.__name__: module for module in MODULES}["fellowship_nas.sftp"]
+        for patcher in (patch("run", run), patch("list_shares", lambda: self.shares),
+                        mock.patch.object(self.sftp, "VIEW_ROOT", os.path.join(self.root, "view")),
+                        mock.patch.object(self.sftp, "shell", lambda: os.path.join(self.root, "sftp-only")),
+                        mock.patch.object(fnas.os, "chown"), mock.patch.object(fnas.os, "chmod")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_an_account_sees_only_the_shares_shared_that_way_and_theirs(self):
+        self.assertEqual([one["share"] for one in self.sftp.view("kim")], ["media", "private"])
+        self.assertEqual([one["share"] for one in self.sftp.view("sam")], ["media"])
+        self.assertEqual(self.sftp.view("kim")[1]["level"], "read")
+
+    def test_a_view_is_one_bind_mount_per_share_in_a_folder_of_root(self):
+        self.sftp.sync_view("kim", self.sftp.view("kim"))
+        home = os.path.join(self.root, "view", "kim")
+        self.assertEqual(os.stat(home).st_mode & 0o777, 0o755)
+        self.assertIn(("mount", "--bind", self.paths["media"], os.path.join(home, "media")), self.calls)
+        self.assertIn(("mount", "--bind", self.paths["private"], os.path.join(home, "private")), self.calls)
+        # The share that isn't shared over SFTP is nowhere in the view
+        self.assertFalse(os.path.exists(os.path.join(home, "docs")))
+
+    def test_a_pool_that_is_not_mounted_shows_nothing(self):
+        self.shares[0]["path"] = os.path.join(self.root, "gone")
+        self.sftp.sync_view("kim", self.sftp.view("kim"))
+        home = os.path.join(self.root, "view", "kim")
+        self.assertFalse(os.path.exists(os.path.join(home, "media")))
+        self.assertFalse([c for c in self.calls if c[:2] == ("mount", "--bind") and "media" in c[2]])
+
+    def test_a_share_taken_out_of_the_view_is_unmounted_and_emptied(self):
+        home = os.path.join(self.root, "view", "kim")
+        os.makedirs(os.path.join(home, "old"))
+        with mock.patch.object(self.sftp, "mounts", lambda: {os.path.join(home, "old")}):
+            self.sftp.sync_view("kim", [one for one in self.sftp.view("kim") if one["share"] == "media"])
+        self.assertIn(("umount", os.path.join(home, "old")), self.calls)
+        self.assertFalse(os.path.exists(os.path.join(home, "old")))
+
+    def test_an_account_no_longer_set_to_sftp_loses_its_view(self):
+        os.makedirs(os.path.join(self.root, "view", "sam"))
+        with mock.patch.object(self.sftp, "accounts", lambda: []):
+            self.sftp.sync_views()
+        self.assertFalse(os.path.exists(os.path.join(self.root, "view", "sam")))
+
+    def test_the_shell_an_sftp_account_carries_refuses(self):
+        self.sftp.ensure_shell()
+        shell = self.sftp.shell()
+        with open(shell) as file:
+            text = file.read()
+        self.assertIn("exit 1", text)
+        self.assertTrue(os.access(shell, os.X_OK))
+        # A second run leaves it alone
+        self.sftp.ensure_shell()
+        self.assertTrue(os.path.exists(shell))
+
+    def test_the_group_holds_exactly_the_accounts_set_to_files_over_sftp(self):
+        people = [{"name": "kim", "kind": "sftp"}, {"name": "sam", "kind": "shares"},
+                  {"name": "ada", "kind": "sftp"}]
+        with mock.patch.object(fnas.users, "list_users", lambda: people):
+            self.sftp.sync_accounts()
+        self.assertIn(("gpasswd", "-M", "ada,kim", "nas-sftp"), self.calls)
+
+    def test_an_account_kind_comes_from_its_shell(self):
+        for shell, kind in (("/bin/bash", "ssh"), ("/usr/sbin/nologin", "shares"),
+                            (fnas.users.SFTP_SHELL, "sftp")):
+            with self.subTest(shell), \
+                    mock.patch.object(fnas.users, "KINDS", dict(fnas.users.KINDS)):
+                self.assertEqual(fnas.users.kind_of(SimpleNamespace(pw_shell=shell)), kind)
+
+    def test_sshd_gives_an_sftp_account_a_chroot_and_no_shell(self):
+        text = fnas.drop_in({"enabled": True, "passwords": True})
+        self.assertIn("Match Group nas-sftp\n", text)
+        self.assertIn("    ChrootDirectory /var/lib/fellowship-nas/sftp/%u\n", text)
+        self.assertIn("    ForceCommand internal-sftp\n", text)
+        self.assertIn("    AllowTcpForwarding no\n", text)
+        self.assertIn("    PermitTunnel no\n", text)

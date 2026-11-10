@@ -143,8 +143,10 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
     const [access, setAccess] = useState<Access>({ users: {}, groups: {} });
     const [nfs, setNfs] = useState(true);
     const [smb, setSmb] = useState(true);
-    // Off to begin with: a share is not reachable over HTTPS until asked for
+    // Off to begin with: a share is not reachable over HTTPS or SFTP until asked
+    // for, since either is a new way in
     const [webdav, setWebdav] = useState(false);
+    const [sftp, setSftp] = useState(false);
     const action = useAction();
 
     return (
@@ -155,7 +157,7 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
                 const chosenPool = pool || writable[0]?.name || "";
                 const problem = noPool ? "Shares need a pool. Create or import one on the Storage page first."
                     : !SHARE_NAME.test(name) ? "Use letters, numbers, - and _, up to 32 characters."
-                    : !nfs && !smb && !webdav ? "Choose at least one way to share it."
+                    : !nfs && !smb && !webdav && !sftp ? "Choose at least one way to share it."
                     : !everyone && nobody(access) ? "Choose at least one person or group, or make it for everyone."
                     : "";
                 return (
@@ -164,7 +166,8 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
                         action.run(async () => {
                             const output = await fnas(["share", "create", name, chosenPool, ...accessArgs(everyone, access),
                                                        ...(nfs ? ["--nfs"] : []), ...(smb ? ["--smb"] : []),
-                                                       ...(webdav ? ["--webdav"] : [])]);
+                                                       ...(webdav ? ["--webdav"] : []),
+                                                       ...(sftp ? ["--sftp"] : [])]);
                             onCreated(name);
                             setName("");
                             return output;
@@ -199,12 +202,15 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
                                        onChange={event => setWebdav(event.currentTarget.checked)} />
                                 <span>A phone app or a mapped drive (WebDAV, read only for now)</span>
                             </label>
-                            {["SFTP", "FTP"].map(later => (
-                                <label class="check disabled" key={later}>
-                                    <input type="checkbox" disabled />
-                                    <span>{later} <span class="muted small">(not built yet)</span></span>
-                                </label>
-                            ))}
+                            <label class="check">
+                                <input type="checkbox" checked={sftp}
+                                       onChange={event => setSftp(event.currentTarget.checked)} />
+                                <span>File transfer over SFTP, for scripts and phones</span>
+                            </label>
+                            <label class="check disabled">
+                                <input type="checkbox" disabled />
+                                <span>FTP <span class="muted small">(not built yet)</span></span>
+                            </label>
                         </div>
                         <p class="muted small">Each share's SMB and NFS settings, such as read-only, guests, the recycle bin,
                             Time Machine and which computers can mount it, are under Settings once it exists.</p>
