@@ -35,7 +35,7 @@ const (
 	davRealm = `Basic realm="FellowshipNAS", charset="UTF-8"`
 	// What a client is told it may do. A write is answered with the same list,
 	// so a client learns the shape of this share rather than guessing.
-	davAllow = "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE, COPY"
+	davAllow = "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK"
 	// How long a client's session is kept once its password has been checked, so
 	// a folder of fifty thumbnails costs one check rather than fifty.
 	davKeep     = 30 * time.Minute
@@ -135,7 +135,11 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 		s.davDelete(w, r, token, where)
 	case "MOVE", "COPY":
 		s.davMoveCopy(w, r, token, where)
-	case "LOCK", "UNLOCK", "PROPPATCH", "POST", "PATCH":
+	case "LOCK":
+		s.davLock(w, r, token, where)
+	case "UNLOCK":
+		s.davUnlock(w, r, token, where)
+	case "PROPPATCH", "POST", "PATCH":
 		davAllowHeaders(w)
 		writeError(w, http.StatusMethodNotAllowed, davReadOnly)
 	default:
@@ -146,7 +150,9 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 
 func davAllowHeaders(w http.ResponseWriter) {
 	header := w.Header()
-	header.Set("DAV", "1")
+	// Class 2 means locking is offered, which is how a client decides to take a
+	// lock before saving rather than guessing
+	header.Set("DAV", "1, 2")
 	header.Set("MS-Author-Via", "DAV")
 	header.Set("Allow", davAllow)
 }
@@ -328,10 +334,10 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token strin
 	var body strings.Builder
 	body.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n" + `<D:multistatus xmlns:D="DAV:">` + "\n")
 	if where.Share == "" {
-		davWriteFolder(&body, "/dav/", "dav", "")
+		s.davWriteFolder(&body, "", "", "/dav/", "dav")
 		if depth == "1" {
 			for _, one := range shared {
-				davWriteFolder(&body, "/dav/"+davEscape(one.Share)+"/", one.Share, "")
+				s.davWriteFolder(&body, one.Share, "", "/dav/"+davEscape(one.Share)+"/", one.Share)
 			}
 		}
 		body.WriteString("</D:multistatus>")
@@ -358,10 +364,10 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token strin
 			davRefuse(w, said)
 			return
 		}
-		davWriteFolder(&body, davHref(where, true), where.Share, "")
+		s.davWriteFolder(&body, where.Share, where.Inside, davHref(where, true), where.Share)
 		if depth == "1" {
 			for _, entry := range folder.Entries {
-				davWriteEntry(&body, where, entry)
+				s.davWriteEntry(&body, davChild(where, entry.Name), entry)
 			}
 		}
 		body.WriteString("</D:multistatus>")
@@ -378,7 +384,7 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token strin
 		return
 	}
 	if !entry.Dir {
-		davWriteEntry(&body, where, entry)
+		s.davWriteEntry(&body, where, entry)
 		body.WriteString("</D:multistatus>")
 		davSend(w, body.String())
 		return
@@ -388,10 +394,10 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, token strin
 		davRefuse(w, said)
 		return
 	}
-	davWriteEntry(&body, where, entry)
+	s.davWriteEntry(&body, where, entry)
 	if depth == "1" {
 		for _, one := range folder.Entries {
-			davWriteEntry(&body, where, one)
+			s.davWriteEntry(&body, davChild(where, one.Name), one)
 		}
 	}
 	body.WriteString("</D:multistatus>")
@@ -494,21 +500,18 @@ func davSend(w http.ResponseWriter, text string) {
 }
 
 // davWriteFolder writes one response for a folder.
-func davWriteFolder(body *strings.Builder, href, name, tag string) {
+func (s *Server) davWriteFolder(body *strings.Builder, share, inside, href, name string) {
 	body.WriteString("<D:response><D:href>" + davEscape(href) + "</D:href><D:propstat><D:prop>")
 	body.WriteString("<D:displayname>" + xmlEscape(name) + "</D:displayname>")
 	body.WriteString("<D:resourcetype><D:collection/></D:resourcetype>")
-	if tag != "" {
-		body.WriteString("<D:getetag>" + xmlEscape(tag) + "</D:getetag>")
-	}
+	body.WriteString(s.davLockProps(share, inside))
 	body.WriteString("</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n")
 }
 
-// davWriteEntry writes one response for a name in a folder: where is the folder.
-func davWriteEntry(body *strings.Builder, folder davWhere, entry davEntry) {
-	here := davWhere{Share: folder.Share, Inside: path.Join(folder.Inside, entry.Name)}
+// davWriteEntry writes one response for one name, at its own address.
+func (s *Server) davWriteEntry(body *strings.Builder, here davWhere, entry davEntry) {
 	if entry.Dir {
-		davWriteFolder(body, davHref(here, true), entry.Name, "")
+		s.davWriteFolder(body, here.Share, here.Inside, davHref(here, true), entry.Name)
 		return
 	}
 	body.WriteString("<D:response><D:href>" + davEscape(davHref(here, false)) + "</D:href><D:propstat><D:prop>")
@@ -522,7 +525,13 @@ func davWriteEntry(body *strings.Builder, folder davWhere, entry davEntry) {
 	if entry.Tag != "" {
 		body.WriteString("<D:getetag>" + xmlEscape(davTag(entry.Tag)) + "</D:getetag>")
 	}
+	body.WriteString(s.davLockProps(here.Share, here.Inside))
 	body.WriteString("</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n")
+}
+
+// davChild is the address of a name inside a folder.
+func davChild(folder davWhere, name string) davWhere {
+	return davWhere{Share: folder.Share, Inside: path.Join(folder.Inside, name)}
 }
 
 // davHref is where a share or a path inside it is found, escaped a segment at a

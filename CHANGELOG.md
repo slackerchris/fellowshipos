@@ -14,6 +14,13 @@ bump.
 
 ### Added
 
+- Sharing, WebDAV takes locks, which is what a word processor insists on before
+  it will save to a network drive: `LOCK` and `UNLOCK`, an exclusive lock on a
+  file or on a folder and everything in it, renewed by its holder and running out
+  on its own. While a lock is held, every change needs its token or is told 423.
+  A lock may be taken on a name that isn't there yet, which is how a mounted drive
+  saves a new file, and it doesn't create that file itself. The desktop says
+  `DAV: 1, 2` and offers locking in `PROPFIND`, so a client knows it may lock.
 - Sharing, WebDAV can now be written to as well as read: `PUT`, `MKCOL`,
   `DELETE`, `MOVE` and `COPY`, all carried out by the helper as the person, so the
   kernel decides what may be written exactly as it does in Files. A folder made,

@@ -62,6 +62,8 @@ type Server struct {
 	JobPoll time.Duration
 	// WebDAV clients' sessions, so a folder of pictures costs one password check
 	davKept davSessions
+	// WebDAV locks, which a word processor takes before it will save
+	davLocks davLocks
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string)

@@ -69,6 +69,11 @@ func (s *Server) davPut(w http.ResponseWriter, r *http.Request, token string, wh
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
+	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked,
+			"that is locked by someone else: "+held.token)
+		return
+	}
 	if r.Header.Get("Content-Range") != "" {
 		// A part of a file would mean writing into the middle of what is there,
 		// which the helper's write does not do: it makes the file, then renames it
@@ -208,6 +213,10 @@ func (s *Server) davMkcol(w http.ResponseWriter, r *http.Request, token string, 
 	if _, ok := s.davOpen(w, token, where.Share, where.Inside, true); !ok {
 		return
 	}
+	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked, "that is locked by someone else: "+held.token)
+		return
+	}
 	_, exists, said := s.davEntryAt(token, where.Share, where.Inside)
 	if said != "" {
 		davRefuse(w, said)
@@ -249,6 +258,10 @@ func (s *Server) davDelete(w http.ResponseWriter, r *http.Request, token string,
 	}
 	if !exists {
 		writeError(w, http.StatusNotFound, davNoSuch)
+		return
+	}
+	if held, blocked := s.davBlockedBy(r, where.Share, where.Inside); blocked {
+		writeError(w, http.StatusLocked, "that is locked by someone else: "+held.token)
 		return
 	}
 	if entry.Dir && r.Header.Get("Depth") == "0" {
@@ -310,6 +323,15 @@ func (s *Server) davMoveCopy(w http.ResponseWriter, r *http.Request, token strin
 		writeError(w, http.StatusPreconditionFailed,
 			"there is already something at that address; delete it first if you mean to replace it")
 		return
+	}
+	// A lock at either end has to be named, or two clients would work on the same
+	// file without knowing about each other
+	for _, end := range []davWhere{where, dest} {
+		if held, blocked := s.davBlockedBy(r, end.Share, end.Inside); blocked {
+			writeError(w, http.StatusLocked,
+				"that is locked by someone else: "+held.token)
+			return
+		}
 	}
 	// A move only needs the folders, so the kernel alone would let a person shift
 	// a file they cannot even open. Over WebDAV the source has to be theirs to

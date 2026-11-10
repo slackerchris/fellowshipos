@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"fellowship-nas-web/internal/protocol"
 )
@@ -194,7 +195,13 @@ func davSetup(t *testing.T, scheme string) (*davHelper, http.Handler) {
 
 // davAsk sends one WebDAV request as a person, with Basic credentials.
 func davAsk(handler http.Handler, method, path, password string, headers http.Header) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "https://nas.local"+path, nil)
+	return davAskBody(handler, method, path, password, "", headers)
+}
+
+// davAskBody is davAsk with something to send.
+func davAskBody(handler http.Handler, method, path, password, body string,
+	headers http.Header) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "https://nas.local"+path, strings.NewReader(body))
 	for name, values := range headers {
 		req.Header[name] = values
 	}
@@ -280,7 +287,7 @@ func TestWebDAVWillNotReachAnotherPersonsShare(t *testing.T) {
 }
 
 func TestWebDAVStillRefusesWhatItDoesNotDo(t *testing.T) {
-	for _, method := range []string{"PROPPATCH", "LOCK", "UNLOCK", "POST", "PATCH"} {
+	for _, method := range []string{"PROPPATCH", "POST", "PATCH"} {
 		t.Run(method, func(t *testing.T) {
 			d, handler := davSetup(t, "https")
 			answer := davAsk(handler, method, "/dav/media/notes.txt", "right", nil)
@@ -290,7 +297,7 @@ func TestWebDAVStillRefusesWhatItDoesNotDo(t *testing.T) {
 			// What is offered has to be what is really done, or a client treats a
 			// lock as held and then loses the write
 			allow := answer.Header().Get("Allow")
-			for _, offered := range []string{"PUT", "MKCOL", "DELETE", "MOVE", "COPY"} {
+			for _, offered := range []string{"PUT", "MKCOL", "DELETE", "MOVE", "COPY", "LOCK", "UNLOCK"} {
 				if !strings.Contains(allow, offered) {
 					t.Errorf("%s is not offered in Allow %q", offered, allow)
 				}
@@ -546,6 +553,178 @@ func TestWebDAVWillNotTouchTheSnapshots(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A lock is what a word processor takes before it will save, so the token it is
+// given has to be the only way in until it lets go.
+func TestWebDAVLockKeepsOthersOutUntilItIsLetGo(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	locked := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", http.Header{
+		"Timeout":      {"Second-600"},
+		"Content-Type": {"application/xml"},
+	})
+	if locked.Code != http.StatusOK {
+		t.Fatalf("LOCK answered %d %q", locked.Code, locked.Body.String())
+	}
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	if token == "" {
+		t.Fatalf("no lock token came back")
+	}
+	if !strings.Contains(locked.Body.String(), "<D:exclusive/>") ||
+		!strings.Contains(locked.Body.String(), token) {
+		t.Errorf("the answer doesn't describe the lock it took: %s", locked.Body.String())
+	}
+	// Somebody else, holding no token, is turned away from every change
+	for _, c := range []struct {
+		method  string
+		path    string
+		headers http.Header
+	}{
+		{"PUT", "/dav/media/notes.txt", nil},
+		{"DELETE", "/dav/media/notes.txt", nil},
+		{"MOVE", "/dav/media/notes.txt", http.Header{"Destination": {"/dav/media/moved.txt"}}},
+		{"COPY", "/dav/media/notes.txt", http.Header{"Destination": {"/dav/media/copied.txt"}}},
+	} {
+		answer := davAsk(handler, c.method, c.path, "right", c.headers)
+		if answer.Code != http.StatusLocked {
+			t.Errorf("%s of a locked file answered %d %q", c.method, answer.Code, answer.Body.String())
+		}
+	}
+	// A second lock from another client is refused while the first holds it
+	second := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", nil)
+	if second.Code != http.StatusLocked {
+		t.Errorf("a second LOCK answered %d", second.Code)
+	}
+	// With the token, the same client may write
+	allowed := davAsk(handler, "PUT", "/dav/media/notes.txt", "right",
+		http.Header{"If": {"(<" + token + ">)"}})
+	if allowed.Code != http.StatusNoContent {
+		t.Errorf("a write holding the token answered %d %q", allowed.Code, allowed.Body.String())
+	}
+	// A token nobody holds is not the way in either
+	wrong := davAsk(handler, "PUT", "/dav/media/notes.txt", "right",
+		http.Header{"If": {"(<opaquelocktoken:nobody>)"}})
+	if wrong.Code != http.StatusLocked {
+		t.Errorf("a made-up token answered %d", wrong.Code)
+	}
+	// And once it is let go, the file is free again
+	unlocked := davAsk(handler, "UNLOCK", "/dav/media/notes.txt", "right",
+		http.Header{"Lock-Token": {"<" + token + ">"}})
+	if unlocked.Code != http.StatusNoContent {
+		t.Fatalf("UNLOCK answered %d %q", unlocked.Code, unlocked.Body.String())
+	}
+	free := davAsk(handler, "PUT", "/dav/media/notes.txt", "right", nil)
+	if free.Code != http.StatusNoContent {
+		t.Errorf("a write after unlocking answered %d %q", free.Code, free.Body.String())
+	}
+	_ = d
+}
+
+func TestWebDAVUnlockNeedsTheToken(t *testing.T) {
+	_, handler := davSetup(t, "https")
+	locked := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", nil)
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	none := davAsk(handler, "UNLOCK", "/dav/media/notes.txt", "right", nil)
+	if none.Code != http.StatusBadRequest {
+		t.Errorf("UNLOCK with no token answered %d", none.Code)
+	}
+	wrong := davAsk(handler, "UNLOCK", "/dav/media/notes.txt", "right",
+		http.Header{"Lock-Token": {"<opaquelocktoken:nobody>"}})
+	if wrong.Code != http.StatusConflict {
+		t.Errorf("UNLOCK with a token nobody holds answered %d", wrong.Code)
+	}
+	if again := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", nil); again.Code != http.StatusLocked {
+		t.Errorf("the lock was let go by a wrong token: %d", again.Code)
+	}
+	_ = token
+}
+
+func TestWebDAVLockOnANameThatIsNotThereLetsTheClientMakeIt(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	// A mounted drive locks the name, then writes it with If-None-Match: * because
+	// it believes the file is not there. A lock must not make that file first, or
+	// the client's own create would be refused.
+	locked := davAsk(handler, "LOCK", "/dav/media/offered.docx", "right", nil)
+	if locked.Code != http.StatusOK {
+		t.Fatalf("locking a new name answered %d %q", locked.Code, locked.Body.String())
+	}
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	if _, made := d.files["media/offered.docx"]; made {
+		t.Errorf("the lock made the file itself, which breaks the write that follows")
+	}
+	// Another client still can't slip in and create it
+	other := davAsk(handler, "PUT", "/dav/media/offered.docx", "right", nil)
+	if other.Code != http.StatusLocked {
+		t.Errorf("a create by someone else answered %d", other.Code)
+	}
+	wrote := davAskBody(handler, "PUT", "/dav/media/offered.docx", "right", "the document",
+		http.Header{"If": {"(<" + token + ">)"}, "If-None-Match": {"*"}})
+	if wrote.Code != http.StatusCreated {
+		t.Fatalf("the holder's create answered %d %q", wrote.Code, wrote.Body.String())
+	}
+	if got := d.files["media/offered.docx"]; got != "the document" {
+		t.Errorf("the file holds %q", got)
+	}
+	if gone := davAsk(handler, "UNLOCK", "/dav/media/offered.docx", "right",
+		http.Header{"Lock-Token": {"<" + token + ">"}}); gone.Code != http.StatusNoContent {
+		t.Fatalf("UNLOCK answered %d", gone.Code)
+	}
+	if d.files["media/offered.docx"] != "the document" {
+		t.Errorf("the file written under the lock was taken away with it")
+	}
+}
+
+func TestWebDAVLockCanBeRenewedAndRunsOut(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	server := &Server{Call: d.call, Stream: d.stream, Send: d.send, Scheme: "https",
+		Static: fstest.MapFS{"index.html": {Data: []byte("<!doctype html>desktop")}}}
+	server.davLocks.now = func() time.Time { return now }
+	handler = server.Handler()
+
+	locked := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right",
+		http.Header{"Timeout": {"Second-60"}})
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	// The client asks for more time, which is what a word processor does while it
+	// is still working
+	now = now.Add(30 * time.Second)
+	renewed := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right",
+		http.Header{"If": {"(<" + token + ">)"}, "Timeout": {"Second-600"}})
+	if renewed.Code != http.StatusOK {
+		t.Fatalf("renewing answered %d %q", renewed.Code, renewed.Body.String())
+	}
+	// Past the first deadline but inside the renewed one
+	now = now.Add(60 * time.Second)
+	if wrote := davAsk(handler, "PUT", "/dav/media/notes.txt", "right", nil); wrote.Code != http.StatusLocked {
+		t.Fatalf("a lock that was renewed had gone: %d", wrote.Code)
+	}
+	// Past the renewed one, nobody holds it
+	now = now.Add(11 * time.Minute)
+	if wrote := davAsk(handler, "PUT", "/dav/media/notes.txt", "right", nil); wrote.Code != http.StatusNoContent {
+		t.Errorf("a lock that ran out still kept the file: %d %q", wrote.Code, wrote.Body.String())
+	}
+}
+
+func TestWebDAVTellsClientsItCanLock(t *testing.T) {
+	_, handler := davSetup(t, "https")
+	answer := davAsk(handler, "OPTIONS", "/dav/media/", "right", nil)
+	if got := answer.Header().Get("DAV"); got != "1, 2" {
+		t.Errorf("the DAV header was %q, and a client that sees only class 1 never takes a lock", got)
+	}
+}
+
+func TestWebDAVSaysWhichLocksAreHeld(t *testing.T) {
+	_, handler := davSetup(t, "https")
+	before := davAsk(handler, "PROPFIND", "/dav/media/notes.txt", "right", nil).Body.String()
+	if !strings.Contains(before, "<D:supportedlock>") {
+		t.Errorf("a client is never told it may lock: %s", before)
+	}
+	locked := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", nil)
+	token := davUnquoteToken(locked.Header().Get("Lock-Token"))
+	after := davAsk(handler, "PROPFIND", "/dav/media/notes.txt", "right", nil).Body.String()
+	if !strings.Contains(after, "<D:lockdiscovery>") || !strings.Contains(after, token) {
+		t.Errorf("the lock is not shown by PROPFIND: %s", after)
 	}
 }
 
