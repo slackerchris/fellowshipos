@@ -3046,3 +3046,35 @@ class LookTests(unittest.TestCase):
         self.assertEqual(self.look.show("kim")["mode"], "system")
         # Forgetting someone who never chose is not an error
         self.look.forget_look("kim")
+
+
+class FileRoots(unittest.TestCase):
+    """Where Files may look: the shares a person can use, by path, so neither the
+    desktop nor WebDAV works out a path for itself."""
+
+    shares = [
+        {"name": "media", "path": "/mnt/tank/shares/media", "snapshots": True, "mode": "chosen",
+         "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
+        {"name": "docs", "path": "/mnt/tank/shares/docs", "snapshots": False, "mode": "chosen",
+         "access": {"users": {}, "groups": {"family": "read"}}},
+        {"name": "private", "path": "/mnt/tank/shares/private", "snapshots": True, "mode": "chosen",
+         "access": {"users": {"tester": "write"}, "groups": {}}},
+    ]
+
+    def setUp(self):
+        family = SimpleNamespace(gr_name="family", gr_mem=["kim"])
+        for patcher in (patch("list_shares", lambda: self.shares),
+                        mock.patch.object(fnas.grp, "getgrall", lambda: [family])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_person_gets_their_shares_with_where_each_one_is(self):
+        self.assertEqual(fnas.roots_of("kim"), [
+            {"share": "media", "path": "/mnt/tank/shares/media", "level": "write",
+             "through": "own", "snapshots": True},
+            {"share": "docs", "path": "/mnt/tank/shares/docs", "level": "read",
+             "through": "group family", "snapshots": False},
+        ])
+
+    def test_a_share_someone_cannot_use_is_not_a_root(self):
+        self.assertEqual([root["share"] for root in fnas.roots_of("tester")], ["private"])

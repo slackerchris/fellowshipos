@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -40,7 +41,12 @@ func main() {
 	flag.Parse()
 	log.SetFlags(0)
 	server := &front.Server{
-		Call:   func(request protocol.Request) (protocol.Response, error) { return protocol.Call(*socket, request) },
+		Call: func(request protocol.Request) (protocol.Response, error) {
+			return protocol.Call(*socket, request)
+		},
+		Stream: func(request protocol.Request) (protocol.Response, io.ReadCloser, error) {
+			return protocol.Stream(*socket, request)
+		},
 		Static: os.DirFS(*static),
 		Passwd: "/etc/passwd",
 	}

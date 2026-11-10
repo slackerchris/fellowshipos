@@ -404,6 +404,8 @@ def build_parser():
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
+    share_roots = share.add_parser("roots", help="the shares a person can use, and where each one is")
+    share_roots.add_argument("user")
     create = share.add_parser("create", help="create a share in POOL/shares")
     create.add_argument("name")
     create.add_argument("pool")
@@ -891,6 +893,11 @@ def dispatch_sharing(args, show):
 def dispatch_share(args, show):
     if args.action == "list":
         show(shares.list_shares(), print_shares)
+    elif args.action == "roots":
+        users.find_user(args.user)
+        show(shares.roots_of(args.user), lambda found: print("\n".join(
+            f"{root['share']}: {root['level']} at {root['path']}" for root in found) or
+            f"{args.user} can't use any shares"))
     elif args.action == "create":
         shares.create_share(args.name, args.pool, args.everyone, access_from(args), args.nfs, args.smb)
         print(f"Created share {args.name}")

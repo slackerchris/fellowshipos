@@ -645,11 +645,12 @@ def rename(kind, old, new):
     write_config()
 
 
-def shares_of(user):
-    """The shares a user can use, and how, through their own entry, a group, or everyone."""
+def shares_of(user, known=None):
+    """The shares a user can use, and how, through their own entry, a group, or
+    everyone. known is list_shares() when the caller already has it."""
     groups = {g.gr_name for g in grp.getgrall() if user in g.gr_mem}
     found = []
-    for share in list_shares():
+    for share in (list_shares() if known is None else known):
         if share["mode"] == "everyone":
             found.append({"name": share["name"], "level": "write", "through": "everyone"})
             continue
@@ -658,6 +659,21 @@ def shares_of(user):
         if levels:
             level, through = max(levels, key=lambda found: found[0] == "write")
             found.append({"name": share["name"], "level": level, "through": through})
+    return found
+
+
+def roots_of(user):
+    """The shares a person can use, where each one is on disk, and whether it has
+    snapshots. Files and WebDAV both ask this rather than working out paths."""
+    known = list_shares()
+    by_name = {share["name"]: share for share in known}
+    found = []
+    for used in shares_of(user, known):
+        share = by_name.get(used["name"])
+        if not share:
+            continue
+        found.append({"share": share["name"], "path": share["path"], "level": used["level"],
+                      "through": used["through"], "snapshots": share["snapshots"]})
     return found
 
 

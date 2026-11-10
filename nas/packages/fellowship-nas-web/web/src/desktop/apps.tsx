@@ -1,6 +1,7 @@
 import { FunctionComponent } from "preact";
 import { Alerts } from "../alerts";
 import { Backups } from "../backups";
+import { Files } from "../files";
 import { Health } from "../health";
 import { Settings } from "../settings";
 import { Setup } from "../setup";
@@ -22,6 +23,8 @@ export interface App {
 }
 
 export const APPS: Record<AppIconName, App> = {
+    // Everyone has Files: it shows the shares their own account can use
+    files: { title: "Files", blurb: "Browse your shares, and open a file", admin: false, width: 900, height: 640, body: Files },
     setup: { title: "Setup", blurb: "Pools, shares and alerts, step by step", admin: true, width: 820, height: 640, body: Setup },
     storage: { title: "Storage", blurb: "Pools and disks", admin: true, width: 900, height: 640, body: Storage },
     users: { title: "Users", blurb: "People, their passwords, and groups", admin: true, width: 900, height: 640, body: Users },

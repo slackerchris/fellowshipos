@@ -625,6 +625,35 @@ export function when(stamp: number): string {
     return new Date(stamp * 1000).toLocaleString();
 }
 
+/** A share the signed-in person can browse, and what they may do in it. Where it
+    is on disk is the helper's business, so it never reaches the browser. */
+export interface FileShare {
+    share: string;
+    level: "read" | "write";
+    through: string;
+    snapshots: boolean;
+}
+
+export interface FileEntry {
+    name: string;
+    dir: boolean;
+    size: number;
+    modified: string;
+}
+
+export const fileShares = () => request<{ shares: FileShare[] }>("GET", "/api/files");
+
+export const folderIn = (share: string, path: string) =>
+    request<{ share: string; path: string; folder: { entries: FileEntry[] } }>(
+        "GET", `/api/files?share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`);
+
+/** Where the browser asks for a file's bytes. Inline previews and downloads use
+    the same answer; save asks for it as a download rather than showing it. */
+export function fileUrl(share: string, path: string, save = false): string {
+    const query = `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`;
+    return `/api/files/download?${query}${save ? "&save=1" : ""}`;
+}
+
 export function diskName(disk: { by_id: string | null; path: string }): string {
     return (disk.by_id || disk.path).replace("/dev/disk/by-id/", "");
 }

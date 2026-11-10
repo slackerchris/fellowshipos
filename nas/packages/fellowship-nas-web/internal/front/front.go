@@ -11,13 +11,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +48,9 @@ const (
 type Caller func(protocol.Request) (protocol.Response, error)
 
 type Server struct {
-	Call   Caller
+	Call Caller
+	// Stream is Call for an answer that carries a file after it
+	Stream func(protocol.Request) (protocol.Response, io.ReadCloser, error)
 	Static fs.FS
 	// Read for the list of people's accounts
 	Passwd string
@@ -67,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.withSession(false, s.sessions))
 	mux.HandleFunc("POST /api/sessions/end", s.withSession(true, s.endSession))
 	mux.HandleFunc("GET /api/jobs/events", s.withSession(false, s.jobEvents))
+	mux.HandleFunc("GET /api/files", s.withSession(false, s.files))
+	mux.HandleFunc("GET /api/files/download", s.withSession(false, s.download))
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }
@@ -298,6 +305,144 @@ func (s *Server) endSession(w http.ResponseWriter, r *http.Request, session *pro
 	if _, ok := s.call(w, protocol.Request{Op: protocol.OpEndSession, Session: token, Target: body.ID}); ok {
 		writeJSON(w, http.StatusOK, map[string]string{})
 	}
+}
+
+// files lists what the person can browse, or what one folder holds. The helper
+// decides both, from the session's own user.
+func (s *Server) files(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	response, ok := s.call(w, protocol.Request{Op: protocol.OpFileList, Session: token,
+		Share: query.Get("share"), Path: query.Get("path")})
+	if !ok {
+		return
+	}
+	if query.Get("share") == "" {
+		writeJSON(w, http.StatusOK, json.RawMessage(`{"shares":`+response.Output+`}`))
+		return
+	}
+	entries := response.Output
+	if entries == "" {
+		entries = "{}"
+	}
+	writeJSON(w, http.StatusOK, json.RawMessage(`{"share":`+quote(query.Get("share"))+
+		`,"path":`+quote(query.Get("path"))+`,"folder":`+entries+`}`))
+}
+
+func quote(text string) string {
+	out, _ := json.Marshal(text)
+	return string(out)
+}
+
+// download sends a file's bytes, or the part a video player asked for. A big
+// file doesn't fit the server's 60 second cover, so this answer owns its own
+// deadline the way the jobs stream does.
+func (s *Server) download(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	share, inside := query.Get("share"), query.Get("path")
+	if share == "" || inside == "" {
+		writeError(w, http.StatusBadRequest, "say which file: share and path")
+		return
+	}
+	controller := http.NewResponseController(w)
+	controller.SetReadDeadline(time.Time{})
+	controller.SetWriteDeadline(time.Time{})
+	request := protocol.Request{Op: protocol.OpFileRead, Session: token, Share: share, Path: inside}
+	if start, length, ok := byteRange(r.Header.Get("Range")); ok {
+		request.Start, request.Length = start, length
+	}
+	stream := s.Stream
+	if stream == nil {
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	response, body, err := stream(request)
+	if err != nil {
+		log.Printf("helper: %v", err)
+		writeError(w, http.StatusServiceUnavailable, noHelper)
+		return
+	}
+	if body != nil {
+		defer body.Close()
+	}
+	if response.Code != "" {
+		writeFailure(w, response)
+		return
+	}
+	header := w.Header()
+	header.Set(contentType, contentTypeOf(inside))
+	header.Set("Accept-Ranges", "bytes")
+	disposition := "inline"
+	if query.Get("save") != "" {
+		disposition = "attachment"
+	}
+	header.Set("Content-Disposition", disposition+`; filename="`+safeName(inside)+`"`)
+	status := http.StatusOK
+	if request.Start > 0 || request.Length > 0 {
+		status = http.StatusPartialContent
+		header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", request.Start,
+			request.Start+response.Length-1, response.Size))
+	}
+	header.Set("Content-Length", strconv.FormatInt(response.Length, 10))
+	w.WriteHeader(status)
+	if r.Method == http.MethodHead || body == nil {
+		return
+	}
+	if _, err := io.Copy(w, body); err != nil {
+		log.Printf("sending %s: %v", inside, err)
+	}
+}
+
+// byteRange reads the one range a media player asks for. Anything else asks for
+// the whole file, which is what a browser does when it has no opinion.
+func byteRange(header string) (start, length int64, ok bool) {
+	rest, found := strings.CutPrefix(header, "bytes=")
+	if !found || strings.ContainsRune(rest, ',') {
+		return 0, 0, false
+	}
+	first, last, found := strings.Cut(strings.TrimSpace(rest), "-")
+	if !found {
+		return 0, 0, false
+	}
+	start, err := strconv.ParseInt(first, 10, 64)
+	if err != nil || start < 0 {
+		return 0, 0, false
+	}
+	if last == "" {
+		return start, 0, true
+	}
+	end, err := strconv.ParseInt(last, 10, 64)
+	if err != nil || end < start {
+		return start, 0, true
+	}
+	return start, end - start + 1, true
+}
+
+// contentTypeOf names a file for the browser. Only what the desktop previews is
+// named; everything else is an opaque download.
+func contentTypeOf(path string) string {
+	shown := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	switch {
+	case shown == "":
+		return "application/octet-stream"
+	case strings.HasPrefix(shown, "image/"), strings.HasPrefix(shown, "video/"),
+		strings.HasPrefix(shown, "audio/"), strings.HasPrefix(shown, "text/"):
+		return shown
+	case shown == "application/pdf":
+		return shown
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// safeName keeps a file name from breaking the header it goes in.
+func safeName(path string) string {
+	name := filepath.Base(path)
+	return strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, name)
 }
 
 // static serves the desktop's files, and nothing else: no directory listings

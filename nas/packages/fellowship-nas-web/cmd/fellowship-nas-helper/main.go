@@ -19,6 +19,7 @@ import (
 	"strings"
 	"syscall"
 
+	"fellowship-nas-web/internal/filechild"
 	"fellowship-nas-web/internal/helper"
 	"fellowship-nas-web/internal/pam"
 	"fellowship-nas-web/internal/protocol"
@@ -70,12 +71,64 @@ func lookup(name string) (helper.Account, error) {
 		return helper.Account{}, err
 	}
 	uid, _ := strconv.Atoi(account.Uid)
-	groups, err := account.GroupIds()
+	gid, _ := strconv.Atoi(account.Gid)
+	ids, err := account.GroupIds()
 	if err != nil {
 		return helper.Account{}, err
 	}
+	groups := make([]uint32, 0, len(ids))
+	for _, id := range ids {
+		number, err := strconv.Atoi(id)
+		if err != nil {
+			continue
+		}
+		groups = append(groups, uint32(number))
+	}
 	admins, err := user.LookupGroup(*adminGroup)
-	return helper.Account{UID: uid, Admin: err == nil && slices.Contains(groups, admins.Gid)}, nil
+	return helper.Account{UID: uid, GID: gid, Groups: groups,
+		Admin: err == nil && slices.Contains(ids, admins.Gid)}, nil
+}
+
+// runChild runs one file operation in a child of this binary, already set to the
+// person's uid, gid and groups. The kernel does the permission checking, so a
+// mistake in the path check can't reach a file the person couldn't open
+// themselves.
+func runChild(account helper.Account, op, path string, start, length int64) (io.ReadCloser, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"file-child", op, path}
+	if op == "read" {
+		args = append(args, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
+	}
+	command := exec.Command(self, args...)
+	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
+	command.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: uint32(account.UID), Gid: uint32(account.GID),
+			Groups: account.Groups, NoSetGroups: len(account.Groups) == 0},
+	}
+	out, err := command.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	// The child is reaped by the same reader finishing, so a half-read file
+	// still ends the process rather than leaving it behind
+	return &childOut{ReadCloser: out, command: command}, nil
+}
+
+type childOut struct {
+	io.ReadCloser
+	command *exec.Cmd
+}
+
+func (c *childOut) Close() error {
+	c.command.Process.Kill()
+	c.command.Wait()
+	return c.ReadCloser.Close()
 }
 
 func authenticate(name, password string) error {
@@ -120,10 +173,22 @@ func serve(h *helper.Helper, conn *net.UnixConn, allowed int) {
 	if err := json.NewDecoder(io.LimitReader(conn, protocol.MaxMessage)).Decode(&request); err != nil {
 		return
 	}
-	json.NewEncoder(conn).Encode(h.Handle(request))
+	response, body := h.Stream(request)
+	if err := json.NewEncoder(conn).Encode(response); err != nil {
+		return
+	}
+	if body != nil {
+		defer body.Close()
+		io.Copy(conn, body)
+	}
 }
 
 func main() {
+	// The helper re-executes itself, already running as the person, for file
+	// work. This is that second life: no flags, no socket, just the one job.
+	if len(os.Args) > 1 && os.Args[1] == "file-child" {
+		os.Exit(filechild.Run(os.Args[2:]))
+	}
 	flag.Parse()
 	log.SetFlags(0)
 	front, err := user.Lookup(*frontUser)
@@ -150,7 +215,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	h := helper.New(helper.Config{Authenticate: authenticate, Lookup: lookup, Fnas: runFnas, Alert: alert})
+	h := helper.New(helper.Config{Authenticate: authenticate, Lookup: lookup, Fnas: runFnas,
+		Child: runChild, Alert: alert})
 	log.Printf("listening on %s", *socket)
 	for {
 		conn, err := listener.AcceptUnix()

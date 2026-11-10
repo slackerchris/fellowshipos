@@ -3,6 +3,10 @@ import { JSX } from "preact";
 
 const GLYPHS = {
     setup: <path d="M13 17l3 3 5-6M26 17h9M13 30l3 3 5-6M26 31h9" />,
+    files: <>
+        <path d="M12 13h9l4 4v18a1.5 1.5 0 0 1-1.5 1.5h-16A1.5 1.5 0 0 1 6 35V15a2 2 0 0 1 2-2h4z" />
+        <path d="M21 13v5h4" />
+    </>,
     storage: <>
         <ellipse cx="24" cy="15" rx="10" ry="4" />
         <path d="M14 15v18c0 2.2 4.5 4 10 4s10-1.8 10-4V15M14 24c0 2.2 4.5 4 10 4s10-1.8 10-4" />

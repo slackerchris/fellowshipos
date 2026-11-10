@@ -14,8 +14,8 @@ picking work back up, not a fourth source of truth.
 | Storage engines built | ZFS, traditional RAID (mdadm), Unraid-style (mergerfs + SnapRAID) |
 | Storage engines left | Btrfs (Phase 14) |
 | Phases done | 1 to 11, with the gates recorded in the plan |
-| Next phase | 12, the Files app, which now comes before more ways to share. Started: the path resolver comes first |
-| Tests | 259 Python unit tests pass locally, and CI is green on every push |
+| Next phase | 12, the Files app, which now comes before more ways to share. Slices 1 and 2 built: the resolver, then browsing, downloading and previewing |
+| Tests | 261 Python unit tests pass locally, the Go tests cover the resolver, the file ops and the stream, and CI is green on every push |
 | Docs baseline | The overview describes `059a150`, and the plan's Files section records the Phase 12 decisions |
 
 ## 2. What the docs get right, and what drifted
@@ -105,12 +105,10 @@ Done in this pass:
 
 Left, in order:
 
-3. Phase 12's first slice: the path resolver and its refusal tests, before any
-   file is served.
-4. Then list, download and preview; then upload, rename, move and delete; then
-   snapshots on ZFS only; phone work last, so the gate can still pass on desktop
-   if the installable-app work runs long.
-5. The catch-up gate on real disks for both engines, which section 3 lists item
+3. Phase 12's remaining slices: upload, rename, move and delete; then snapshots
+   on ZFS only; then the phone work, so the gate can still pass on desktop if the
+   installable-app work runs long. Browsing, downloading and previewing are built.
+4. The catch-up gate on real disks for both engines, which section 3 lists item
    by item.
 
 ## 6. Notes for the UI work

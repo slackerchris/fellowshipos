@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"regexp"
 	"slices"
@@ -67,8 +68,12 @@ var commands = map[string][]string{
 }
 
 type Account struct {
-	UID   int
-	Admin bool
+	UID int
+	GID int
+	// The groups the person is in, since a file op runs as them and needs the
+	// same permissions the shell would give them
+	Groups []uint32
+	Admin  bool
 }
 
 type Config struct {
@@ -76,7 +81,9 @@ type Config struct {
 	Authenticate func(user, password string) error
 	Lookup       func(user string) (Account, error)
 	// Runs fnas, returning what it printed and whether it succeeded
-	Fnas  func(args []string, input string) (stdout, stderr string, err error)
+	Fnas func(args []string, input string) (stdout, stderr string, err error)
+	// Runs one file operation as the person, returning what it printed
+	Child func(account Account, op, path string, start, length int64) (io.ReadCloser, error)
 	Alert func(title, message string)
 	Now   func() time.Time
 }
@@ -125,6 +132,15 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 		return protocol.Response{}
 	case protocol.OpFnas:
 		return h.fnas(request)
+	case protocol.OpFileList:
+		found := h.find(request.Session, request.Touch)
+		if found == nil {
+			return failure(protocol.CodeUnauthenticated, signedOut)
+		}
+		if request.Share == "" {
+			return h.listShares(found.user)
+		}
+		return h.fileList(found.user, request)
 	case protocol.OpSessions:
 		return h.list(request)
 	case protocol.OpEndSession:

@@ -4,6 +4,7 @@
 package protocol
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ const (
 	OpCheck      = "check"
 	OpLogout     = "logout"
 	OpFnas       = "fnas"
+	OpFileList   = "file-list"
+	OpFileRead   = "file-read"
 	OpSessions   = "sessions"
 	OpEndSession = "end-session"
 )
@@ -46,6 +49,12 @@ type Request struct {
 	Input    string   `json:"input,omitempty"`
 	// The public ID of a session to end
 	Target string `json:"target,omitempty"`
+	// A file request: the share as the desktop names it, a path inside it, and
+	// the part of the file wanted, for a video that is being seeked
+	Share  string `json:"share,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Start  int64  `json:"start,omitempty"`
+	Length int64  `json:"length,omitempty"`
 }
 
 type Session struct {
@@ -67,6 +76,46 @@ type Response struct {
 	Session    *Session  `json:"session,omitempty"`
 	Sessions   []Session `json:"sessions,omitempty"`
 	Output     string    `json:"output,omitempty"`
+	// A file's bytes follow this answer: Length of them, out of a file of Size
+	Size   int64 `json:"size,omitempty"`
+	Length int64 `json:"length,omitempty"`
+}
+
+// Stream is Call for an answer that carries a file after it. The caller must
+// close the reader.
+func Stream(socket string, request Request) (Response, io.ReadCloser, error) {
+	var response Response
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return response, nil, err
+	}
+	conn.SetDeadline(time.Now().Add(6 * time.Hour))
+	if err := json.NewEncoder(conn).Encode(request); err != nil {
+		conn.Close()
+		return response, nil, err
+	}
+	conn.(*net.UnixConn).CloseWrite()
+	// The answer is one line of JSON and the file follows it, so the head is read
+	// as a line: a JSON decoder would swallow the start of the file, and leave
+	// the newline that ended the head at the front of it
+	reader := bufio.NewReaderSize(conn, 64<<10)
+	head, err := reader.ReadBytes('\n')
+	if err != nil {
+		conn.Close()
+		return response, nil, fmt.Errorf("reading the helper's answer: %w", err)
+	}
+	if err := json.Unmarshal(head, &response); err != nil {
+		conn.Close()
+		return response, nil, fmt.Errorf("reading the helper's answer: %w", err)
+	}
+	if response.Code != "" || response.Length == 0 {
+		conn.Close()
+		return response, nil, nil
+	}
+	return response, struct {
+		io.Reader
+		io.Closer
+	}{io.LimitReader(reader, response.Length), conn}, nil
 }
 
 // Call sends one request to the helper listening on socket and waits for

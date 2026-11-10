@@ -27,6 +27,18 @@ docker run --rm -it -p 127.0.0.1:8080:80 -v "$PWD:/src:ro" debian:trixie bash -c
     useradd -m -s /bin/bash guest
     echo admin:fellowship-admin | chpasswd
     echo guest:fellowship-guest | chpasswd
+    # Two shares with real permissions, so Files is refused by the kernel as well
+    # as by fnas: media is for both people, family only for nas-admins
+    groupadd --system media
+    usermod -aG media admin
+    usermod -aG media guest
+    python3 /src/dev/sample-files.py /mnt/tank/shares
+    chown -R root:media /mnt/tank/shares/media
+    chown -R root:nas-admins /mnt/tank/shares/family
+    find /mnt/tank/shares -type d -exec chmod 2750 {} +
+    find /mnt/tank/shares -type f -exec chmod 0640 {} +
+    # People walk through the pools folders to reach their share
+    chmod 755 /mnt/tank /mnt/tank/shares
     /usr/lib/fellowship-nas-web/fellowship-nas-helper &
     sleep 1
     echo "Open http://localhost:8080"

@@ -124,8 +124,9 @@ DEFAULT = {
          "mode": "everyone", "access": {"users": {}, "groups": {}}, "nfs": True, "smb": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
+        # Granted to admin alone, so the harness can show someone being refused it
         {"name": "family", "pool": "tank", "dataset": "tank/shares/family", "path": "/mnt/tank/shares/family",
-         "mode": "chosen", "access": {"users": {"tester": "write"}, "groups": {"family": "read"}}, "nfs": False,
+         "mode": "chosen", "access": {"users": {"admin": "write"}, "groups": {}}, "nfs": False,
          "smb": True, "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
     ],
@@ -312,6 +313,25 @@ def main(args):
             if flag in rest:
                 saved[key] = rest[rest.index(flag) + 1]
         out = {"user": rest[0], **saved}
+    elif area == "share" and action == "roots":
+        # fnas answers with the shares a person can use, and where each one is
+        who = rest[0] if rest else ""
+        groups = {g["name"] for g in state["groups"] if who in g.get("members", [])}
+        out = []
+        for share in state["shares"]:
+            access = share.get("access") or {"users": {}, "groups": {}}
+            level, through = None, ""
+            if share.get("mode") == "everyone":
+                level, through = "write", "everyone"
+            else:
+                levels = [(lv, "own") for name, lv in access.get("users", {}).items() if name == who]
+                levels += [(lv, f"group {name}") for name, lv in access.get("groups", {}).items()
+                           if name in groups]
+                if levels:
+                    level, through = max(levels, key=lambda found: found[0] == "write")
+            if level:
+                out.append({"share": share["name"], "path": share["path"], "level": level,
+                            "through": through, "snapshots": share.get("snapshots", False)})
     elif area == "group" and action == "list":
         # fnas lists the machine's own groups only when asked
         # fnas sorts by name, and lists the machine's own groups only when asked

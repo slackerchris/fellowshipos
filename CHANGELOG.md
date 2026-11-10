@@ -14,6 +14,18 @@ bump.
 
 ### Added
 
+- Phase 12's Files app, first two slices: browse the shares your account can use,
+  open a folder, and preview an image, video, audio file, PDF or text file, with
+  download. The helper does the work as you: it asks `fnas share roots USER` where
+  your shares are, resolves the path, then re-executes itself as your account, so
+  the kernel decides what you can open as well as fnas. A share you can't use is
+  refused with "family isn't a share you can use", and a path that climbs out of a
+  share is refused before any file work. Downloads and previews answer `Range`, so
+  a video can be seeked.
+- `fnas share roots USER`: the shares a person can use, where each one is on disk
+  and whether it keeps snapshots. Files asks this instead of working out paths, and
+  WebDAV will ask the same.
+
 - Each person's look follows them: light, dark or automatic and the theme are
   kept on the NAS per user name (`/etc/fellowshipos/nas-look.json`, `fnas look
   show` and `fnas look set`) and applied as they sign in, so the same account
