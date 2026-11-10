@@ -96,6 +96,10 @@ bump.
 
 ### Changed
 
+- The Users app is two tabs, People and Groups. Each person is one line with what
+  they can do, their groups and whether they have a password, and Change, Turn off
+  and Remove move into a menu on the row. **Add someone** opens the form under the
+  list, and the group list takes the same shape with **New group**.
 - The Shares app is two tabs. **Shared folders** lists each share on one line with
   who can use it and which protocols it is on, and **Connect** opens that share's
   paths and its SMB and NFS switches under the row. A menu on each row holds its

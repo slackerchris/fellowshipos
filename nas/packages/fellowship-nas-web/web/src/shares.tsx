@@ -289,7 +289,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
     return (
         <Card title="Shared folders"
               actions={<Button kind="primary" onClick={() => setCreating(!creating)}>+ New share</Button>}>
-            <p class="muted small share-intro">Manage access and connect from another device.</p>
+            <p class="muted small row-intro">Manage access and connect from another device.</p>
             {creating && <CreateShare onCreated={() => { setCreating(false); reload(); }} />}
             {!shares.length && <p class="muted">No shares yet. Use New share to make the first one.</p>}
             {shares.length > 0 && (
@@ -308,7 +308,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
                                         <td class="small">
                                             {protocolsOf(share) || <span class="muted">Not shared</span>}
                                         </td>
-                                        <td class="share-actions">
+                                        <td class="row-actions">
                                             <button type="button" class="link-button" aria-expanded={open === share.name}
                                                     onClick={() => choose(share.name)}>Connect</button>
                                             <span class="menu-wrap">
@@ -316,7 +316,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
                                                         aria-expanded={menu === share.name} aria-label={`More for ${share.name}`}
                                                         onClick={() => setMenu(menu === share.name ? null : share.name)}>⋯</button>
                                                 {menu === share.name && (
-                                                    <span class="share-menu" role="menu">
+                                                    <span class="row-menu" role="menu">
                                                         <button type="button" role="menuitem"
                                                                 onClick={() => choose(share.name)}>Settings…</button>
                                                         {!share.readonly && (
@@ -398,7 +398,7 @@ export function Shares() {
     const reload = () => { shares.reload(); protocols.reload(); };
     return (
         <Page>
-            <div class="segmented share-tabs" role="tablist">
+            <div class="segmented page-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={tab === "folders"} class={tab === "folders" ? "current" : ""}
                         onClick={() => setTab("folders")}>Shared folders</button>
                 <button type="button" role="tab" aria-selected={tab === "settings"} class={tab === "settings" ? "current" : ""}

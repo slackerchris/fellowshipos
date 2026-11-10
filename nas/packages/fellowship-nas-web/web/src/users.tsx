@@ -227,15 +227,27 @@ async function removalTerms(name: string): Promise<{ phrase: string; lost: strin
     throw new FnasError("fnas didn't ask for confirmation");
 }
 
-function UserList({ users, groups, reload }: { users: User[]; groups: Group[]; reload: () => void }) {
+function UserList({ users, groups, reload, adding, setAdding }: {
+    users: User[]; groups: Group[]; reload: () => void; adding: boolean; setAdding: (open: boolean) => void;
+}) {
     const { user: me } = useContext(SessionContext);
     const [editing, setEditing] = useState<string | null>(null);
+    const [menu, setMenu] = useState<string | null>(null);
     const [removing, setRemoving] = useState<{ name: string; phrase: string; lost: string[] } | null>(null);
     const [keepHome, setKeepHome] = useState(true);
     const action = useAction(reload);
     const admins = users.filter(user => user.admin).length;
+    const locked = (user: User) => user.name === me || (user.admin && admins === 1);
+    const why = (user: User) => user.name === me ? "You can't change this for yourself"
+        : user.admin && admins === 1 ? "The only administrator has to stay" : undefined;
     return (
-        <Card title="People">
+        <Card title="People" actions={<Button kind="primary" onClick={() => setAdding(!adding)}>+ Add someone</Button>}>
+            <p class="muted small row-intro">Each person has one password, for this desktop and every way to share.</p>
+            {adding && (
+                <div class="create-block">
+                    <AddUser onAdded={() => { setAdding(false); reload(); }} />
+                </div>
+            )}
             <div class="table-wrap">
                 <table>
                     <thead><tr><th>Person</th><th>Can</th><th>Groups</th><th>Password</th><th /></tr></thead>
@@ -243,7 +255,9 @@ function UserList({ users, groups, reload }: { users: User[]; groups: Group[]; r
                         {users.map(user => (
                             <Fragment key={user.name}>
                                 <tr>
-                                    <td><strong>{user.name}</strong>{user.name === me && <span class="muted small"> (you)</span>}
+                                    <td><span class="share-name">{user.name === me
+                                        ? <strong>{user.name}</strong> : <strong>{user.name}</strong>}
+                                        {user.name === me && <span class="muted small">(you)</span>}</span>
                                         {user.full_name && <><br /><span class="small muted">{user.full_name}</span></>}</td>
                                     <td>
                                         <span class="small">{KINDS[user.kind].title}</span>{" "}
@@ -253,19 +267,26 @@ function UserList({ users, groups, reload }: { users: User[]; groups: Group[]; r
                                     <td class="small">{user.groups.join(", ") || <span class="muted">none</span>}</td>
                                     <td class="small">{!user.password ? <Badge kind="warning">No password yet</Badge>
                                         : user.smb_password ? "Set" : <Badge kind="warning">Not set for shares</Badge>}</td>
-                                    <td class="actions">
-                                        <div class="row row-end">
-                                            <Button onClick={() => setEditing(editing === user.name ? null : user.name)}>
-                                                {editing === user.name ? "Close" : "Change"}</Button>
-                                            <Button busy={action.busy} disabled={user.name === me || (user.admin && admins === 1)}
-                                                    onClick={() => action.run(() => fnas(["user", "set", user.name, "--enabled",
-                                                                                          onOff(!user.enabled)]))}>
-                                                {user.enabled ? "Turn off" : "Turn on"}</Button>
-                                            <Button disabled={user.name === me || (user.admin && admins === 1)}
-                                                    onClick={() => action.run(async () => {
-                                                        setRemoving({ name: user.name, ...await removalTerms(user.name) });
-                                                    })}>Remove</Button>
-                                        </div>
+                                    <td class="row-actions">
+                                        <span class="menu-wrap">
+                                            <button type="button" class="kebab" aria-haspopup="menu"
+                                                    aria-expanded={menu === user.name} aria-label={`More for ${user.name}`}
+                                                    onClick={() => setMenu(menu === user.name ? null : user.name)}>⋯</button>
+                                            {menu === user.name && (
+                                                <span class="row-menu" role="menu">
+                                                    <button type="button" role="menuitem"
+                                                            onClick={() => { setMenu(null); setEditing(editing === user.name ? null : user.name); }}>Change…</button>
+                                                    <button type="button" role="menuitem" disabled={locked(user)} title={why(user)}
+                                                            onClick={() => { setMenu(null); action.run(() => fnas(["user", "set", user.name, "--enabled",
+                                                                                                                   onOff(!user.enabled)])); }}>
+                                                        {user.enabled ? "Turn off" : "Turn on"}</button>
+                                                    <button type="button" role="menuitem" class="danger-text" disabled={locked(user)} title={why(user)}
+                                                            onClick={() => { setMenu(null); action.run(async () => {
+                                                                setRemoving({ name: user.name, ...await removalTerms(user.name) });
+                                                            }); }}>Remove…</button>
+                                                </span>
+                                            )}
+                                        </span>
                                     </td>
                                 </tr>
                                 {editing === user.name && (
@@ -307,10 +328,13 @@ function UserList({ users, groups, reload }: { users: User[]; groups: Group[]; r
     );
 }
 
-function Groups({ groups, users, reload }: { groups: Group[]; users: User[]; reload: () => void }) {
+function Groups({ groups, users, reload, creating, setCreating }: {
+    groups: Group[]; users: User[]; reload: () => void; creating: boolean; setCreating: (open: boolean) => void;
+}) {
     const [name, setName] = useState("");
     const [members, setMembers] = useState<string[]>([]);
     const [editing, setEditing] = useState<string | null>(null);
+    const [menu, setMenu] = useState<string | null>(null);
     const [edited, setEdited] = useState<string[]>([]);
     const [newName, setNewName] = useState("");
     const action = useAction(reload);
@@ -327,54 +351,83 @@ function Groups({ groups, users, reload }: { groups: Group[]; users: User[]; rel
         </div>
     );
     return (
-        <Card title="Groups">
-            <p class="muted small">A group lets you give a share to several people at once, such as family.</p>
-            {!groups.length && <p class="muted">No groups yet.</p>}
-            {groups.map(group => (
-                <div class="stack" key={group.name}>
-                    <div class="row">
-                        <strong>{group.name}</strong>
-                        <span class="small muted">{group.members.join(", ") || "no members"}</span>
-                        <Button onClick={() => { setEditing(editing === group.name ? null : group.name); setEdited(group.members);
-                                                 setNewName(group.name); }}>{editing === group.name ? "Close" : "Change"}</Button>
-                        <Button busy={action.busy} onClick={() => action.run(() => fnas(["group", "remove", group.name]))}>
-                            Remove</Button>
-                    </div>
-                    {editing === group.name && (
-                        <div class="stack">
-                            {memberChoices(edited, setEdited)}
-                            <div class="row">
-                                <Button kind="primary" busy={action.busy}
-                                        onClick={() => action.run(() => fnas(["group", "members", group.name, edited.join(",")]))}>
-                                    Save members</Button>
-                            </div>
-                            <div class="pick-row">
-                                <input aria-label="New name" value={newName} onInput={event => setNewName(event.currentTarget.value)} />
-                                <Button busy={action.busy} disabled={newName === group.name || !USER_NAME.test(newName)}
-                                        onClick={() => action.run(async () => {
-                                            const output = await fnas(["group", "rename", group.name, newName]);
-                                            setEditing(null);
-                                            return output;
-                                        })}>Rename</Button>
-                            </div>
-                        </div>
-                    )}
+        <Card title="Groups" actions={<Button kind="primary" onClick={() => setCreating(!creating)}>+ New group</Button>}>
+            <p class="muted small row-intro">A group lets you give a share to several people at once, such as family.</p>
+            {creating && (
+                <form class="stack create-block" onSubmit={event => {
+                    event.preventDefault();
+                    action.run(async () => {
+                        const output = await fnas(["group", "create", name, "--members", members.join(",")]);
+                        setName(""); setMembers([]); setCreating(false);
+                        return output;
+                    });
+                }}>
+                    <Field label="New group">
+                        <input value={name} placeholder="family" onInput={event => setName(event.currentTarget.value)} />
+                    </Field>
+                    {memberChoices(members, setMembers)}
+                    <div class="row"><Button kind="primary" type="submit" busy={action.busy}
+                                             disabled={!USER_NAME.test(name)}>Add group</Button></div>
+                </form>
+            )}
+            {!groups.length && <p class="muted">No groups yet. Use New group to make the first one.</p>}
+            {groups.length > 0 && (
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Group</th><th>Members</th><th /></tr></thead>
+                        <tbody>
+                            {groups.map(group => (
+                                <Fragment key={group.name}>
+                                    <tr>
+                                        <td><strong>{group.name}</strong></td>
+                                        <td class="small">{group.members.join(", ") || <span class="muted">no members</span>}</td>
+                                        <td class="row-actions">
+                                            <span class="menu-wrap">
+                                                <button type="button" class="kebab" aria-haspopup="menu"
+                                                        aria-expanded={menu === group.name} aria-label={`More for ${group.name}`}
+                                                        onClick={() => setMenu(menu === group.name ? null : group.name)}>⋯</button>
+                                                {menu === group.name && (
+                                                    <span class="row-menu" role="menu">
+                                                        <button type="button" role="menuitem"
+                                                                onClick={() => { setMenu(null); setEditing(editing === group.name ? null : group.name);
+                                                                                 setEdited(group.members); setNewName(group.name); }}>Change…</button>
+                                                        <button type="button" role="menuitem" class="danger-text"
+                                                                onClick={() => { setMenu(null); action.run(() => fnas(["group", "remove", group.name])); }}>Remove…</button>
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {editing === group.name && (
+                                        <tr class="share-open"><td colSpan={3}>
+                                            <div class="stack share-panel">
+                                                <span class="field-label">Members of {group.name}</span>
+                                                {memberChoices(edited, setEdited)}
+                                                <div class="row">
+                                                    <Button kind="primary" busy={action.busy}
+                                                            onClick={() => action.run(() => fnas(["group", "members", group.name, edited.join(",")]))}>
+                                                        Save members</Button>
+                                                </div>
+                                                <div class="pick-row">
+                                                    <input aria-label="New name" value={newName}
+                                                           onInput={event => setNewName(event.currentTarget.value)} />
+                                                    <Button busy={action.busy}
+                                                            disabled={newName === group.name || !USER_NAME.test(newName)}
+                                                            onClick={() => action.run(async () => {
+                                                                const output = await fnas(["group", "rename", group.name, newName]);
+                                                                setEditing(null);
+                                                                return output;
+                                                            })}>Rename</Button>
+                                                </div>
+                                            </div>
+                                        </td></tr>
+                                    )}
+                                </Fragment>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
-            ))}
-            <form class="stack" onSubmit={event => {
-                event.preventDefault();
-                action.run(async () => {
-                    const output = await fnas(["group", "create", name, "--members", members.join(",")]);
-                    setName(""); setMembers([]);
-                    return output;
-                });
-            }}>
-                <Field label="New group">
-                    <input value={name} placeholder="family" onInput={event => setName(event.currentTarget.value)} />
-                </Field>
-                {memberChoices(members, setMembers)}
-                <div class="row"><Button type="submit" busy={action.busy} disabled={!USER_NAME.test(name)}>Add group</Button></div>
-            </form>
+            )}
             <p class="muted small">Removing a group takes it off every share; its members keep their accounts.</p>
             <Result outcome={action.outcome} />
         </Card>
@@ -384,14 +437,23 @@ function Groups({ groups, users, reload }: { groups: Group[]; users: User[]; rel
 export function Users() {
     const users = useLoad(() => fnasJson<User[]>(["user", "list"]));
     const groups = useLoad(() => fnasJson<Group[]>(["group", "list"]));
+    const [tab, setTab] = useState<"people" | "groups">("people");
+    const [adding, setAdding] = useState(false);
+    const [creating, setCreating] = useState(false);
     const reload = () => { users.reload(); groups.reload(); };
     return (
-        <Page intro="Everyone who uses this NAS. Each person has one password, for this desktop and every way to share.">
-            <Loading loaded={users}>{() => <Loading loaded={groups}>{() => <>
-                <UserList users={users.data!} groups={groups.data!} reload={reload} />
-                <AddUser onAdded={reload} />
-                <Groups groups={groups.data!} users={users.data!} reload={reload} />
-            </>}</Loading>}</Loading>
+        <Page>
+            <div class="segmented page-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={tab === "people"} class={tab === "people" ? "current" : ""}
+                        onClick={() => setTab("people")}>People</button>
+                <button type="button" role="tab" aria-selected={tab === "groups"} class={tab === "groups" ? "current" : ""}
+                        onClick={() => setTab("groups")}>Groups</button>
+            </div>
+            <Loading loaded={users}>{() => <Loading loaded={groups}>{() => tab === "people"
+                ? <UserList users={users.data!} groups={groups.data!} reload={reload}
+                            adding={adding} setAdding={setAdding} />
+                : <Groups groups={groups.data!} users={users.data!} reload={reload}
+                          creating={creating} setCreating={setCreating} />}</Loading>}</Loading>
         </Page>
     );
 }

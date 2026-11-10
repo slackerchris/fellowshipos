@@ -461,7 +461,10 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
 
 ## Users and groups (Phase 9)
 
-- **The Users app** lists every person's account with its groups, whether it is an admin, whether it has a password for shares, and which shares it can reach and how.
+- **The Users app** has two tabs, People and Groups. People lists every account on one
+  line: its groups, whether it is an admin, whether it has a password for shares, and
+  which shares it can reach and how. A row's menu holds Change, Turn off and Remove, and
+  **Add someone** opens the form under the list.
 - **Adding someone:** name, full name, password twice, and what they may do:
   - **Shares only** (the default): uses shares and, later, Files; no SSH login (`/usr/sbin/nologin`).
   - **Shares and SSH**.
