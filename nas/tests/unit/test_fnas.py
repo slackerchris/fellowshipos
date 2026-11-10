@@ -2982,3 +2982,67 @@ class Ssh(unittest.TestCase):
                 fnas.refresh()
         with open(fnas.DROP_IN) as file:
             self.assertEqual(file.read(), "old\n")
+
+
+class LookTests(unittest.TestCase):
+    """A person's light or dark and theme are kept on the NAS, not in the browser
+    they happened to choose them in."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.look = importlib.import_module("fellowship_nas.look")
+        people = {"kim", "tester"}
+
+        def known(name):
+            if name not in people:
+                raise fnas.FnasError(f"no such user: {name}")
+            return {"name": name}
+        for patcher in (mock.patch.object(self.look, "LOOK_FILE", os.path.join(self.dir, "look.json")),
+                        mock.patch.object(self.look, "LOOK_LOCK", os.path.join(self.dir, "look.lock")),
+                        mock.patch.object(self.look, "check_user", known)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_person_who_has_not_chosen_gets_the_desktop_as_it_ships(self):
+        self.assertEqual(self.look.show("kim"),
+                         {"user": "kim", "mode": "system", "palette": "fellowship"})
+
+    def test_one_change_keeps_the_other(self):
+        self.look.set_look("kim", palette="highwatch")
+        expected = {"user": "kim", "mode": "system", "palette": "highwatch"}
+        self.assertEqual(self.look.show("kim"), expected)
+        self.look.set_look("kim", mode="dark")
+        self.assertEqual(self.look.show("kim"), {**expected, "mode": "dark"})
+
+    def test_each_person_keeps_their_own(self):
+        self.look.set_look("kim", mode="light", palette="silverwater")
+        self.assertEqual(self.look.show("tester")["mode"], "system")
+        self.assertEqual(self.look.show("kim")["palette"], "silverwater")
+
+    def test_only_a_real_mode_or_theme_name_is_kept(self):
+        for mode in ("bright", "", "Dark"):
+            with self.subTest(mode), self.assertRaisesRegex(fnas.FnasError, "mode must be"):
+                self.look.set_look("kim", mode=mode)
+        for palette in ("../../etc/passwd", "High Watch", "", "-rf"):
+            with self.subTest(palette), self.assertRaisesRegex(fnas.FnasError, "theme name"):
+                self.look.set_look("kim", palette=palette)
+
+    def test_nothing_to_change_is_refused(self):
+        with self.assertRaisesRegex(fnas.FnasError, "nothing to change"):
+            self.look.set_look("kim")
+
+    def test_a_stranger_has_no_look_to_read_or_write(self):
+        with self.assertRaisesRegex(fnas.FnasError, "no such user"):
+            self.look.show("sam")
+        with self.assertRaisesRegex(fnas.FnasError, "no such user"):
+            self.look.set_look("sam", mode="dark")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "look.json")))
+
+    def test_a_removed_person_leaves_nothing_behind(self):
+        self.look.set_look("kim", mode="dark", palette="hearthfield")
+        self.look.forget_look("kim")
+        self.assertEqual(self.look.show("kim")["mode"], "system")
+        # Forgetting someone who never chose is not an error
+        self.look.forget_look("kim")

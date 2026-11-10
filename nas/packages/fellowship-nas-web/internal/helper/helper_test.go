@@ -199,6 +199,18 @@ func TestAllowed(t *testing.T) {
 		{[]string{"user", "password", "sam", "--password-stdin"}, false, false},
 		{[]string{"user", "create", "sam", "--password-stdin"}, false, false},
 		{[]string{"user", "create", "sam", "--password-stdin"}, true, true},
+		// A look is each person's own, so a non-admin may only touch their own
+		{[]string{"--json", "look", "show", "kim"}, false, true},
+		{[]string{"look", "set", "kim", "--mode", "dark"}, false, true},
+		{[]string{"look", "set", "kim", "--palette", "highwatch"}, false, true},
+		{[]string{"look", "show", "sam"}, false, false},
+		{[]string{"look", "set", "sam", "--mode", "dark"}, false, false},
+		{[]string{"look", "show"}, false, false},
+		// The shape is right, so fnas answers that there is nothing to change
+		{[]string{"look", "set", "kim"}, false, true},
+		{[]string{"look", "remove", "kim"}, false, false},
+		{[]string{"look", "show", "kim"}, true, true},
+		{[]string{"--json", "look", "set", "sam", "--mode", "dark"}, true, true},
 		{[]string{"group", "create", "family"}, true, true},
 		{[]string{"sharing", "nfs", "--v3", "on"}, true, true},
 		{[]string{"share", "access", "docs", "--everyone"}, true, true},

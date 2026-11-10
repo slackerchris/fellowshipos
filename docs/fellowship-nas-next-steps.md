@@ -107,7 +107,9 @@ What is true in the desktop today, so changes have a reference point:
 - Three appearances sit beside the default: Silverwater, Hearthfield and
   Highwatch, chosen in Settings → Appearance (`docs/fellowship-nas-plan.md`,
   desktop section). The account menu keeps only the light, dark or automatic
-  toggle, and both are remembered in the browser rather than on the NAS.
+  toggle. The choice is kept on the NAS per person (`fnas look show`, `fnas look
+  set`), so it follows them to another browser; this browser holds a copy so the
+  page paints the right one before the server answers.
 - Severity has one scale everywhere: green good, yellow low, orange medium, red
   high, purple critical.
 - Features that cannot work are shown disabled with the reason rather than hidden.

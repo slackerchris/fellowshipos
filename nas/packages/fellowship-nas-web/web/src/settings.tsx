@@ -4,7 +4,7 @@ import {
     CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, jobStarted,
     onOff, sessions, when,
 } from "./api";
-import { Mode, PALETTES, useAppearance } from "./appearance";
+import { MODES, PALETTES, useAppearance } from "./appearance";
 import { DesktopContext } from "./desktop/context";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
@@ -460,11 +460,11 @@ function Look() {
     const look = useAppearance();
     return (
         <Card title="Appearance">
-            <p class="muted small">Kept in this browser, so another computer or browser starts on Auto with the
-                Fellowship theme.</p>
+            <p class="muted small">Saved with your account on this NAS, so it comes with you to another computer
+                or browser. Auto follows the device.</p>
             <Field label="Light or dark">
                 <div class="segmented look-mode" role="group" aria-label="Mode">
-                    {(["system", "light", "dark"] as Mode[]).map(option => (
+                    {MODES.map(option => (
                         <button key={option} type="button" class={look.mode === option ? "current" : ""}
                                 aria-pressed={look.mode === option}
                                 onClick={() => look.setMode(option)}>

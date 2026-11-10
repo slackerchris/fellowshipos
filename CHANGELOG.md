@@ -14,6 +14,13 @@ bump.
 
 ### Added
 
+- Each person's look follows them: light, dark or automatic and the theme are
+  kept on the NAS per user name (`/etc/fellowshipos/nas-look.json`, `fnas look
+  show` and `fnas look set`) and applied as they sign in, so the same account
+  wears the same desktop on any computer or browser. The browser keeps a copy so
+  a reload paints the right look before the server answers. A non-admin can
+  change their own and no one else's, and removing a person forgets theirs.
+
 - Every group on the machine is offered where groups are chosen, with nothing
   filtered out: the packages' groups such as video and docker, the groups of accounts
   fnas doesn't manage, `nas-admins`, and each account's own group, marked as such. The
@@ -110,8 +117,7 @@ bump.
 - The theme choice moved out of the account menu into **Settings → Appearance**,
   beside the light, dark or automatic setting, because the look is a preference
   and the menu is for identity and signing out. The menu keeps the three-way
-  toggle, since that is a frequent one-click change. Both are still remembered in
-  the browser rather than on the NAS.
+  toggle, since that is a frequent one-click change.
 - The Users app is two tabs, People and Groups. Each person is one line with what
   they can do, their groups and whether they have a password, and Change, Turn off
   and Remove move into a menu on the row. **Add someone** opens the form under the

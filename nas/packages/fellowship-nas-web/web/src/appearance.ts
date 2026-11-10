@@ -1,9 +1,13 @@
-// The desktop's look: light, dark or the system's, and which theme. Both are
-// remembered in this browser and put on the page before it first draws, so a
-// reload never flashes the wrong one.
+// The desktop's look: light, dark or the system's, and which theme. The choice
+// is the person's, kept on the NAS so it follows them to another computer, and
+// copied into this browser so the page paints the right one before the server
+// answers.
 import { useState } from "preact/hooks";
+import { fnasJson } from "./api";
 
 export type Mode = "system" | "light" | "dark";
+
+export const MODES: readonly Mode[] = ["system", "light", "dark"];
 
 /** The themes, with the colours their choice shows: the dark window and the accent.
     The full palettes live in themes.mjs, which builds themes.css. */
@@ -48,8 +52,46 @@ export function apply(mode: Mode, palette: Palette) {
     }
 }
 
-export const savedMode = () => read<Mode>("fellowship-theme", "system", ["system", "light", "dark"]);
-export const savedPalette = () => read<Palette>("fellowship-palette", "fellowship", PALETTES.map(p => p.id));
+const MODE_KEY = "fellowship-theme";
+const PALETTE_KEY = "fellowship-palette";
+
+export const savedMode = () => read<Mode>(MODE_KEY, "system", MODES);
+export const savedPalette = () => read<Palette>(PALETTE_KEY, "fellowship", PALETTES.map(p => p.id));
+
+// Whose look this browser is showing, so a change is saved for the right person
+let owner = "";
+
+function known<T extends string>(value: unknown, allowed: readonly string[], fallback: T): T {
+    return typeof value === "string" && allowed.includes(value) ? value as T : fallback;
+}
+
+/** Show the look the NAS remembers for this person. The browser's copy has
+    already painted something, so this only puts it right. */
+export async function loadLook(user: string) {
+    owner = user;
+    const saved = await fnasJson<{ mode?: string; palette?: string }>(["look", "show", user]);
+    const mode = known(saved.mode, MODES, "system");
+    const palette = known(saved.palette, PALETTES.map(p => p.id), "fellowship");
+    remember(MODE_KEY, mode);
+    remember(PALETTE_KEY, palette);
+    apply(mode, palette);
+}
+
+/** Save a change for whoever is signed in. It is already on the page, so a NAS
+    that can't keep it only means this browser remembers it alone. */
+function saveLook(change: { mode?: Mode; palette?: Palette }) {
+    if (!owner) {
+        return;
+    }
+    const args = ["look", "set", owner];
+    if (change.mode) {
+        args.push("--mode", change.mode);
+    }
+    if (change.palette) {
+        args.push("--palette", change.palette);
+    }
+    fnasJson(args).catch(() => {});
+}
 
 /** The current mode and theme, and setters that show and remember a change at once. */
 export function useAppearance() {
@@ -57,7 +99,11 @@ export function useAppearance() {
     const [palette, setPalette] = useState<Palette>(savedPalette);
     return {
         mode, palette,
-        setMode: (next: Mode) => { setMode(next); remember("fellowship-theme", next); apply(next, palette); },
-        setPalette: (next: Palette) => { setPalette(next); remember("fellowship-palette", next); apply(mode, next); },
+        setMode: (next: Mode) => {
+            setMode(next); remember(MODE_KEY, next); apply(next, palette); saveLook({ mode: next });
+        },
+        setPalette: (next: Palette) => {
+            setPalette(next); remember(PALETTE_KEY, next); apply(mode, next); saveLook({ palette: next });
+        },
     };
 }

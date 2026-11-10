@@ -50,6 +50,7 @@ var commands = map[string][]string{
 	"share":    {"list", "create", "set", "access", "smb", "nfs", "refresh", "services", "delete"},
 	"sharing":  {"show", "smb", "nfs"},
 	"user":     {"list", "shares", "create", "set", "password", "smb-password", "keys", "remove"},
+	"look":     {"show", "set"},
 	"ssh":      {"show", "set"},
 	"group":    {"list", "create", "members", "rename", "remove"},
 	"lan":      {"show", "set"},
@@ -262,9 +263,18 @@ func Allowed(args []string, user string, admin bool) bool {
 		}
 	}
 	if !admin {
-		// Everyone may set their own password, and nothing else
-		return slices.Equal(args, []string{"user", "password", user, "--password-stdin"}) ||
-			slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"})
+		// Everyone may set their own password and choose their own look, and
+		// nothing else
+		if slices.Equal(args, []string{"user", "password", user, "--password-stdin"}) ||
+			slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"}) {
+			return true
+		}
+		rest := args
+		if len(rest) > 0 && rest[0] == "--json" {
+			rest = rest[1:]
+		}
+		return len(rest) >= 3 && rest[0] == "look" &&
+			(rest[1] == "show" || rest[1] == "set") && rest[2] == user
 	}
 	rest := args
 	if len(rest) > 0 && rest[0] == "--json" {

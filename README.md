@@ -69,7 +69,7 @@ Create the referenced users and groups before assigning them to a share. Shares 
 
 ### Accounts and SSH
 
-Desktop administrators belong to `nas-admins`. Regular users can change their own password in **Settings → Your account**. Desktop and SSH permissions are separate. SSH accepts **Shares and SSH** accounts through `nas-ssh`, and root SSH login is disabled.
+Desktop administrators belong to `nas-admins`. Regular users can change their own password in **Settings → Your account**, and their own light or dark and theme in **Settings → Appearance**, which the NAS keeps with the account so it follows them to another browser. Desktop and SSH permissions are separate. SSH accepts **Shares and SSH** accounts through `nas-ssh`, and root SSH login is disabled.
 
 Manage public keys under **Users → Change**, and control the service and password authentication from **Settings → SSH**. Add a key for an enabled administrator with SSH access before turning off password authentication.
 
@@ -78,6 +78,7 @@ sudo fnas user create sam --kind shares --password-stdin
 sudo fnas user set sam --kind ssh --admin on
 sudo fnas user keys sam --set-stdin < ~/.ssh/id_ed25519.pub
 sudo fnas ssh show
+sudo fnas look show sam
 ```
 
 The network-facing `fellowship-nas-web` process runs as an unprivileged account. A separate local helper authenticates with PAM and runs approved `fnas` commands for authorized users.

@@ -2,7 +2,7 @@
 import { useContext, useEffect, useState } from "preact/hooks";
 import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
-import { Mode, useAppearance } from "../appearance";
+import { MODES, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
@@ -286,7 +286,7 @@ function UserMenu({ open, onSignOut }: { open: (app: AppId) => void; onSignOut: 
         <div class="panel panel-right panel-small" role="menu" aria-label="Account">
             <p><strong>{user}</strong><br /><span class="small muted">{admin ? "Administrator" : "User"}</span></p>
             <div class="segmented" role="group" aria-label="Light or dark">
-                {(["system", "light", "dark"] as Mode[]).map(option => (
+                {MODES.map(option => (
                     <button key={option} type="button" class={look.mode === option ? "current" : ""} aria-pressed={look.mode === option}
                             onClick={() => look.setMode(option)}>{option === "system" ? "Auto" : option[0].toUpperCase() + option.slice(1)}</button>
                 ))}

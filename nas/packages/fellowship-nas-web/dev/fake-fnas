@@ -7,6 +7,7 @@ import sys
 import time
 
 STATE = "/tmp/fake-fnas.json"
+LOOK_DEFAULT = {"mode": "system", "palette": "fellowship"}
 GB = 10 ** 9
 NOW = int(time.time())
 
@@ -302,6 +303,15 @@ def main(args):
         if "--password-stdin" in rest:
             sys.stdin.read()
         out = f"Done for {rest[0]}"
+    elif area == "look" and action == "show":
+        out = {"user": rest[0], **LOOK_DEFAULT, **state.get("looks", {}).get(rest[0], {})}
+    elif area == "look":
+        # A person's own light or dark and theme, kept as fnas keeps them
+        saved = state.setdefault("looks", {}).setdefault(rest[0], dict(LOOK_DEFAULT))
+        for flag, key in (("--mode", "mode"), ("--palette", "palette")):
+            if flag in rest:
+                saved[key] = rest[rest.index(flag) + 1]
+        out = {"user": rest[0], **saved}
     elif area == "group" and action == "list":
         # fnas lists the machine's own groups only when asked
         # fnas sorts by name, and lists the machine's own groups only when asked

@@ -7,7 +7,7 @@ import sys
 import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
-from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, ssh, system, usage, users
+from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, snapshots, ssh, system, usage, users
 from . import storage_checks
 from .engines import mdadm
 
@@ -498,6 +498,15 @@ def build_parser():
     ssh_set.add_argument("--passwords", choices=ON_OFF, help="off: keys only, once an administrator has one")
     ssh_.add_parser("refresh", help="rewrite sshd's settings and who is in nas-ssh")
 
+    look_ = area.add_parser("look", help="how a person likes the desktop: light, dark and the theme"
+                            ).add_subparsers(dest="action", required=True)
+    look_.add_parser("show", help="a person's light or dark and theme").add_argument("user")
+    look_set = look_.add_parser("set", help="remember a person's light or dark and theme")
+    look_set.add_argument("user")
+    look_set.add_argument("--mode", choices=look.MODES,
+                          help="light, dark, or system to follow the device")
+    look_set.add_argument("--palette", help="a theme's name, such as fellowship or highwatch")
+
     group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
     group_list = group.add_parser("list", help="list groups and their members")
     group_list.add_argument("--system", action="store_true",
@@ -637,6 +646,8 @@ def dispatch(args):
             show(ssh.set_settings(switch(args.enabled), switch(args.passwords)), print_ssh)
         else:
             ssh.refresh()
+    elif args.area == "look":
+        dispatch_look(args, show)
     elif args.area == "sharing":
         dispatch_sharing(args, show)
     elif args.area == "lan":
@@ -824,7 +835,19 @@ def dispatch_user_action(args, show):
         lost = [s["name"] for s in shares.shares_of(args.name) if s["through"] == "own"]
         users.remove_user(args.name, args.keep_home, args.confirm, lost)
         shares.forget("users", args.name)
+        look.forget_look(args.name)
         print(f"Removed {args.name}" + (", keeping the home folder" if args.keep_home else ""))
+
+
+def print_look(chosen):
+    print(f"{chosen['user']}: {chosen['mode']}, {chosen['palette']} theme")
+
+
+def dispatch_look(args, show):
+    if args.action == "show":
+        show(look.show(args.user), print_look)
+    else:
+        show(look.set_look(args.user, args.mode, args.palette), print_look)
 
 
 def print_ssh(status):
@@ -982,7 +1005,8 @@ def main():
         if os.geteuid() != 0:
             raise FnasError("run as root: sudo fnas ...")
         dispatch(args)
-        if args.area not in ("check", "health", "system", "job", "setup") and args.action not in READ_ONLY_ACTIONS:
+        if args.area not in ("check", "health", "system", "job", "setup", "look") and \
+                args.action not in READ_ONLY_ACTIONS:
             config.after_change()
     except FnasError as error:
         print(f"fnas: {error}", file=sys.stderr)
