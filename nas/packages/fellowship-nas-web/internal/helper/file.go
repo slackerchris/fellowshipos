@@ -246,7 +246,8 @@ func headed(out io.ReadCloser, failed string) (protocol.Response, io.ReadCloser)
 		out.Close()
 		return failure(protocol.CodeFailed, head.Error), nil
 	}
-	return protocol.Response{Size: head.Size, Length: head.Length, Modified: head.Modified},
+	return protocol.Response{Size: head.Size, Length: head.Length, Modified: head.Modified,
+			Tag: head.Tag},
 		struct {
 			io.Reader
 			io.Closer
@@ -312,6 +313,10 @@ func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader
 		path, err = files.ResolveNew([]files.Root{root}, request.Share, request.Path)
 	}
 	if err != nil {
+		if request.New && strings.Contains(err.Error(), "already here") {
+			// The client asked to create a file and something is already there
+			return failure(protocol.CodePrecondition, "there is already something with that name")
+		}
 		return failure(protocol.CodeForbidden, err.Error())
 	}
 	if body == nil {
@@ -325,7 +330,10 @@ func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader
 	counting := &counted{reader: io.LimitReader(body, MaxUpload+1)}
 	var extra []string
 	if request.Replace {
-		extra = []string{"replace"}
+		extra = append(extra, "replace")
+	}
+	if request.IfMatch != "" {
+		extra = append(extra, "if-match", request.IfMatch)
 	}
 	out, err := h.child(account, counting, "write", root, path, 0, 0, extra...)
 	if err != nil {
@@ -333,13 +341,21 @@ func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader
 		return failure(protocol.CodeFailed, "that file can't be written right now")
 	}
 	defer out.Close()
-	if answer := childSaid(out); answer != "" {
-		return failure(protocol.CodeFailed, answer)
+	said, code, tag := childAnswer(out)
+	if said != "" {
+		if code == "" {
+			code = protocol.CodeFailed
+		}
+		if request.New && strings.Contains(said, "already here") {
+			// Same as above, but the child found the name taken as it committed
+			code = protocol.CodePrecondition
+		}
+		return failure(code, said)
 	}
 	if counting.wrote > MaxUpload {
 		return failure(protocol.CodeBadRequest, "that file is larger than the 10 GB this allows")
 	}
-	return protocol.Response{Size: counting.wrote}
+	return protocol.Response{Size: counting.wrote, Tag: tag}
 }
 
 // counted remembers how much went through it, so a file over the cap is caught
@@ -580,11 +596,21 @@ func (h *Helper) child(account Account, body io.Reader, op string, root files.Ro
 // Every child that finishes says so, so no answer at all means it stopped part
 // way, which is reported rather than taken for success.
 func childSaid(out io.Reader) string {
+	said, _, _ := childAnswer(out)
+	return said
+}
+
+// childAnswer reads the child's one line: what went wrong, why in machine
+// terms when the reason is more than a sentence, and the version of the file
+// it wrote.
+func childAnswer(out io.Reader) (said, code, tag string) {
 	var answer struct {
 		Error string `json:"error"`
+		Code  string `json:"code"`
+		Tag   string `json:"tag"`
 	}
 	if err := json.NewDecoder(io.LimitReader(out, 64<<10)).Decode(&answer); err != nil {
-		return "that stopped before it finished"
+		return "that stopped before it finished", "", ""
 	}
-	return answer.Error
+	return answer.Error, answer.Code, answer.Tag
 }

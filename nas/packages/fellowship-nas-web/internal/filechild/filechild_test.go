@@ -6,10 +6,12 @@ package filechild
 import (
 	"archive/zip"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -100,6 +102,110 @@ func TestAFolderIsListedThroughItsOwnDescriptor(t *testing.T) {
 	}
 }
 
+func TestAWriteOnlyReplacesTheVersionItRead(t *testing.T) {
+	root, dir := share(t)
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("as it was"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	read, err := tagAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second writer replaces the file after the first one read it, which is the
+	// case a stale If-Match has to catch
+	if err := os.WriteFile(path, []byte("someone else's"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	target, release, err := named(root, "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, err = write(target, strings.NewReader("my version"), true, read)
+	var refused staleError
+	if !errors.As(err, &refused) {
+		t.Fatalf("a stale write came back with %v", err)
+	}
+	held, _ := os.ReadFile(path)
+	if string(held) != "someone else's" {
+		t.Errorf("the file was overwritten anyway: %q", held)
+	}
+}
+
+func TestAWriteThatNamesTheCurrentVersionGoesThrough(t *testing.T) {
+	root, dir := share(t)
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("as it was"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	read, err := tagAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, release, err := named(root, "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := write(target, strings.NewReader("my version"), true, read); err != nil {
+		t.Fatalf("a write naming the current version was refused: %v", err)
+	}
+	held, _ := os.ReadFile(path)
+	if string(held) != "my version" {
+		t.Errorf("the file holds %q", held)
+	}
+	// And the version it now has is different from the one it had
+	now, err := tagAt(path)
+	if err != nil || now == read {
+		t.Errorf("the version did not change: %q then %q, %v", read, now, err)
+	}
+}
+
+func TestTwoWritersNamingTheSameVersionDoNotBothWin(t *testing.T) {
+	root, dir := share(t)
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("as it was"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	read, err := tagAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both children read the same version, then both try to commit it. Exactly
+	// one may win: the check and the rename are one step under the folder's lock.
+	var wg sync.WaitGroup
+	results := make([]error, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			target, release, err := named(root, "notes.txt")
+			if err != nil {
+				results[i] = err
+				return
+			}
+			defer release()
+			_, results[i] = write(target, strings.NewReader(fmt.Sprintf("writer %d", i)), true, read)
+		}(i)
+	}
+	wg.Wait()
+	won := 0
+	for _, result := range results {
+		if result == nil {
+			won++
+			continue
+		}
+		var refused staleError
+		if !errors.As(result, &refused) {
+			t.Errorf("a loser came back with %v", result)
+		}
+	}
+	if won != 1 {
+		t.Errorf("%d writers won, and only one may", won)
+	}
+}
+
 func TestANameIsReachedInsideItsOpenFolder(t *testing.T) {
 	root, dir := share(t)
 	target, release, err := named(root, "photos/dog.png")
@@ -107,7 +213,7 @@ func TestANameIsReachedInsideItsOpenFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, err := write(target, strings.NewReader("dog"), false); err != nil {
+	if _, err := write(target, strings.NewReader("dog"), false, ""); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "photos", "dog.png"))

@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -34,13 +35,16 @@ const (
 	davRealm = `Basic realm="FellowshipNAS", charset="UTF-8"`
 	// What a client is told it may do. A write is answered with the same list,
 	// so a client learns the shape of this share rather than guessing.
-	davAllow = "OPTIONS, GET, HEAD, PROPFIND"
+	davAllow = "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE, COPY"
 	// How long a client's session is kept once its password has been checked, so
 	// a folder of fifty thumbnails costs one check rather than fifty.
 	davKeep     = 30 * time.Minute
 	davNoTLS    = "WebDAV sends the password with every request, so it is only served over HTTPS."
 	davNoSuch   = "There is no WebDAV folder at that address."
-	davReadOnly = "This share is read only over WebDAV for now. Change it in the desktop's Files app."
+	davReadOnly = "That isn't something this share allows over WebDAV."
+	davNoShare  = "There is no WebDAV folder at that address."
+	davHidden   = "That folder isn't served over WebDAV."
+	davNoTarget = "A write has to name a file, not the share itself."
 )
 
 // davToken is one client's session, kept so its password isn't checked again.
@@ -62,6 +66,7 @@ type davEntry struct {
 	Name     string `json:"name"`
 	Dir      bool   `json:"dir"`
 	Size     int64  `json:"size"`
+	Tag      string `json:"tag"`
 	Modified string `json:"modified"`
 }
 
@@ -107,7 +112,11 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 	}
 	where, err := davPath(r.URL.EscapedPath())
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		if errors.Is(err, errHidden) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	switch r.Method {
@@ -118,6 +127,17 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 		s.davPropfind(w, r, token, where)
 	case http.MethodGet, http.MethodHead:
 		s.davGet(w, r, token, where)
+	case http.MethodPut:
+		s.davPut(w, r, token, where)
+	case "MKCOL":
+		s.davMkcol(w, r, token, where)
+	case http.MethodDelete:
+		s.davDelete(w, r, token, where)
+	case "MOVE", "COPY":
+		s.davMoveCopy(w, r, token, where)
+	case "LOCK", "UNLOCK", "PROPPATCH", "POST", "PATCH":
+		davAllowHeaders(w)
+		writeError(w, http.StatusMethodNotAllowed, davReadOnly)
 	default:
 		davAllowHeaders(w)
 		writeError(w, http.StatusMethodNotAllowed, davReadOnly)
@@ -173,24 +193,50 @@ func davPath(escaped string) (davWhere, error) {
 		return davWhere{}, fmt.Errorf("not a WebDAV address")
 	}
 	rest = strings.TrimPrefix(rest, "/")
-	rest = strings.TrimSuffix(rest, "/")
+	parts := strings.Split(strings.TrimSuffix(rest, "/"), "/")
 	if rest == "" {
 		return davWhere{}, nil
 	}
-	parts := strings.Split(rest, "/")
 	clean := make([]string, 0, len(parts))
 	for _, part := range parts {
 		name, err := url.PathUnescape(part)
 		if err != nil {
 			return davWhere{}, fmt.Errorf("that address can't be read")
 		}
+		clean = append(clean, name)
+	}
+	return davWhereFrom(clean)
+}
+
+// davWhereOf is the same for an address that is already read, like a
+// Destination header.
+func davWhereOf(decoded string) (davWhere, error) {
+	rest, found := strings.CutPrefix(decoded, "/dav")
+	if !found {
+		return davWhere{}, fmt.Errorf("not a WebDAV address")
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	if rest == "" {
+		return davWhere{}, nil
+	}
+	return davWhereFrom(strings.Split(strings.TrimSuffix(rest, "/"), "/"))
+}
+
+// davWhereFrom is where both of those end, so an address means the same thing
+// however it arrived.
+func davWhereFrom(parts []string) (davWhere, error) {
+	for _, name := range parts {
 		if name == "" || name == "." || name == ".." || strings.ContainsRune(name, '/') ||
 			strings.ContainsRune(name, 0) {
 			return davWhere{}, fmt.Errorf("that address can't be used")
 		}
-		clean = append(clean, name)
+		if name == ".zfs" {
+			// ZFS keeps its snapshots there, and they are read only through the
+			// desktop, never written to by a client
+			return davWhere{}, errHidden
+		}
 	}
-	return davWhere{Share: clean[0], Inside: strings.Join(clean[1:], "/")}, nil
+	return davWhere{Share: parts[0], Inside: strings.Join(parts[1:], "/")}, nil
 }
 
 // davShares asks the helper which shares this person may use and which of them
@@ -409,7 +455,9 @@ func (s *Server) davGet(w http.ResponseWriter, r *http.Request, token string, wh
 	header.Set(contentType, kind)
 	downloadPolicy(header, kind)
 	header.Set("Accept-Ranges", "bytes")
-	header.Set("ETag", davTag(response.Size, response.Modified, where.Inside))
+	if response.Tag != "" {
+		header.Set("ETag", davTag(response.Tag))
+	}
 	status := http.StatusOK
 	if request.Start > 0 || request.Length > 0 {
 		status = http.StatusPartialContent
@@ -459,7 +507,6 @@ func davWriteFolder(body *strings.Builder, href, name, tag string) {
 // davWriteEntry writes one response for a name in a folder: where is the folder.
 func davWriteEntry(body *strings.Builder, folder davWhere, entry davEntry) {
 	here := davWhere{Share: folder.Share, Inside: path.Join(folder.Inside, entry.Name)}
-	inside := here.Inside
 	if entry.Dir {
 		davWriteFolder(body, davHref(here, true), entry.Name, "")
 		return
@@ -469,12 +516,12 @@ func davWriteEntry(body *strings.Builder, folder davWhere, entry davEntry) {
 	body.WriteString("<D:resourcetype/>")
 	body.WriteString("<D:getcontentlength>" + strconv.FormatInt(entry.Size, 10) + "</D:getcontentlength>")
 	body.WriteString("<D:getcontenttype>" + xmlEscape(contentTypeOf(entry.Name)) + "</D:getcontenttype>")
-	var changed int64
 	if when, err := time.Parse(time.RFC3339Nano, entry.Modified); err == nil && !when.IsZero() {
-		changed = when.Unix()
 		body.WriteString("<D:getlastmodified>" + when.UTC().Format(http.TimeFormat) + "</D:getlastmodified>")
 	}
-	body.WriteString("<D:getetag>" + xmlEscape(davTag(entry.Size, changed, inside)) + "</D:getetag>")
+	if entry.Tag != "" {
+		body.WriteString("<D:getetag>" + xmlEscape(davTag(entry.Tag)) + "</D:getetag>")
+	}
 	body.WriteString("</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n")
 }
 
@@ -491,13 +538,6 @@ func davHref(where davWhere, folder bool) string {
 		href += "/"
 	}
 	return href
-}
-
-// davTag is a weak tag from a file's name, size and last change. It never comes
-// from how many bytes a particular answer holds, or a range and a whole read of
-// the same file would disagree and a client would keep fetching it again.
-func davTag(size, modified int64, inside string) string {
-	return fmt.Sprintf(`W/"%x-%d-%d"`, path.Base(inside), size, modified)
 }
 
 // davEscape escapes one path segment, leaving the slashes of a whole href.

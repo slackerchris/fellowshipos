@@ -49,7 +49,10 @@ const (
 	CodeForbidden       = "forbidden"
 	CodeThrottled       = "throttled"
 	CodeBadRequest      = "bad-request"
-	CodeFailed          = "failed"
+	// A write was refused because the file was no longer the version the writer
+	// had read, which is a 412 to a WebDAV client
+	CodePrecondition = "precondition"
+	CodeFailed       = "failed"
 )
 
 type Request struct {
@@ -75,6 +78,11 @@ type Request struct {
 	// A rename's new name, and whether a write may replace what is there
 	To      string `json:"to,omitempty"`
 	Replace bool   `json:"replace,omitempty"`
+	// A write that only goes through if the file is still this version, so two
+	// people saving the same file can't both win
+	IfMatch string `json:"if_match,omitempty"`
+	// A write that only goes through if there is nothing there yet
+	New bool `json:"new,omitempty"`
 	// A folder delete that takes what is inside with it
 	Recursive bool `json:"recursive,omitempty"`
 	// Several things in the folder Path names, by name alone, as a zip downloads them
@@ -108,6 +116,8 @@ type Response struct {
 	Length int64 `json:"length,omitempty"`
 	// When the file behind it last changed, for an ETag
 	Modified int64 `json:"modified,omitempty"`
+	// The version of the file, as a write answered with it
+	Tag string `json:"tag,omitempty"`
 }
 
 // Send is Call for a request that carries bytes after it, such as an upload.

@@ -47,9 +47,12 @@ type openHow struct {
 
 // Entry is one thing in a folder, as the desktop lists it.
 type Entry struct {
-	Name     string    `json:"name"`
-	Dir      bool      `json:"dir"`
-	Size     int64     `json:"size"`
+	Name string `json:"name"`
+	Dir  bool   `json:"dir"`
+	Size int64  `json:"size"`
+	// A value that changes whenever the file does, so a client can say which
+	// version it is replacing without any doubt about which one it read
+	Tag      string    `json:"tag,omitempty"`
 	Modified time.Time `json:"modified"`
 	// Who may do what, so the desktop can say why something can't be changed:
 	// permissions as ls writes them, the owner and group by name, whether an
@@ -73,12 +76,34 @@ type Folder struct {
 type Head struct {
 	Size   int64 `json:"size"`
 	Length int64 `json:"length"`
+	// The version of the file these bytes came from, and for a write the version
+	// the new file now has
+	Tag string `json:"tag,omitempty"`
 	// When the file last changed, so a reader can tell one version from another
 	Modified int64 `json:"modified,omitempty"`
 }
 
 type problem struct {
 	Error string `json:"error"`
+	// Why, when the answer isn't only a sentence for a person: a version that
+	// doesn't match the one the writer expected
+	Code string `json:"code,omitempty"`
+}
+
+// tagOf names one version of a file from what makes it that file: which inode it
+// is, how big, and when it last changed, to the nanosecond. A write makes a new
+// inode, so no two versions share a tag.
+func tagOf(stat *syscall.Stat_t, size int64, modified time.Time) string {
+	return fmt.Sprintf("%x-%x-%x", stat.Ino, uint64(size), modified.UnixNano())
+}
+
+// tagAt is tagOf for a name, without following a link that sits on it.
+func tagAt(path string) (string, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Lstat(path, &stat); err != nil {
+		return "", explain(err)
+	}
+	return tagOf(&stat, stat.Size, time.Unix(0, stat.Mtim.Nano())), nil
 }
 
 // Run does one file operation and returns the exit status. Its arguments are
@@ -148,11 +173,31 @@ func Run(args []string) int {
 			return say(out, err.Error())
 		}
 		defer release()
-		wrote, err := write(target, os.Stdin, len(rest) > 0 && rest[0] == "replace")
+		replace, match := false, ""
+		for i := 0; i < len(rest); i++ {
+			switch rest[i] {
+			case "replace":
+				replace = true
+			case "if-match":
+				if i+1 < len(rest) {
+					match = rest[i+1]
+					i++
+				}
+			}
+		}
+		wrote, err := write(target, os.Stdin, replace, match)
 		if err != nil {
+			var refused staleError
+			if errors.As(err, &refused) {
+				return sayStale(out, err.Error())
+			}
 			return say(out, err.Error())
 		}
-		if err := out.Encode(Head{Size: wrote, Length: wrote}); err != nil {
+		answer := Head{Size: wrote, Length: wrote}
+		if tag, err := tagAt(target); err == nil {
+			answer.Tag = tag
+		}
+		if err := out.Encode(answer); err != nil {
 			return 1
 		}
 		return 0
@@ -283,7 +328,7 @@ func folder(root int, inside string) ([]Entry, Entry, error) {
 	var self Entry
 	var own syscall.Stat_t
 	if syscall.Fstat(fd, &own) == nil {
-		self = Entry{Dir: true}
+		self = Entry{Dir: true, Tag: tagOf(&own, own.Size, time.Unix(0, own.Mtim.Nano()))}
 		names.fill(&self, &own, fd, ".", through(fd))
 	}
 	entries := make([]Entry, 0, len(found))
@@ -292,6 +337,9 @@ func folder(root int, inside string) ([]Entry, Entry, error) {
 		if info, err := item.Info(); err == nil {
 			entry.Size = info.Size()
 			entry.Modified = info.ModTime()
+			if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+				entry.Tag = tagOf(stat, info.Size(), info.ModTime())
+			}
 			if stat, ok := info.Sys().(*syscall.Stat_t); ok && item.Type()&fs.ModeSymlink == 0 {
 				names.fill(&entry, stat, fd, item.Name(), filepath.Join(through(fd), item.Name()))
 			}
@@ -402,6 +450,9 @@ func read(out *json.Encoder, root int, inside string, start, length int64) error
 	if !info.ModTime().IsZero() {
 		head.Modified = info.ModTime().Unix()
 	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		head.Tag = tagOf(stat, info.Size(), info.ModTime())
+	}
 	if err := out.Encode(head); err != nil {
 		return err
 	}
@@ -415,7 +466,7 @@ func read(out *json.Encoder, root int, inside string, start, length int64) error
 // write puts what it reads where it was told, through a temporary name in the
 // same folder, so a stalled upload never leaves half a file in place. A name
 // that is already there is refused unless replacing was asked for.
-func write(path string, body io.Reader, replace bool) (int64, error) {
+func write(path string, body io.Reader, replace bool, match string) (int64, error) {
 	folder := filepath.Dir(path)
 	temp, err := os.CreateTemp(folder, ".fnas-upload-*")
 	if err != nil {
@@ -438,7 +489,21 @@ func write(path string, body io.Reader, replace bool) (int64, error) {
 	if err := os.Chmod(temp.Name(), 0o664); err != nil {
 		return 0, explain(err)
 	}
-	if !replace {
+	// From here to the rename is the commit: the folder is locked, so two writers
+	// who both read the same version take turns, and the second one sees the first
+	// one's file instead of replacing it. The version check is made against what
+	// is on disk at the moment of the rename, not when the upload started.
+	held, err := lockFolder(folder)
+	if err != nil {
+		return 0, explain(err)
+	}
+	defer held.Close()
+	if match != "" {
+		current, err := tagAt(path)
+		if err != nil || match != current {
+			return 0, stale("that file has changed since it was read")
+		}
+	} else if !replace {
 		if _, err := os.Lstat(path); err == nil {
 			return 0, errors.New("something with that name is already here")
 		}
@@ -448,6 +513,29 @@ func write(path string, body io.Reader, replace bool) (int64, error) {
 		return 0, explain(err)
 	}
 	return wrote, nil
+}
+
+// staleError says a write was refused because the file was no longer the
+// version the writer had read.
+type staleError struct{ said string }
+
+func (s staleError) Error() string { return s.said }
+
+func stale(said string) error { return staleError{said: said} }
+
+// lockFolder holds a folder for the length of a commit. Every write on the NAS
+// arrives as a child of this helper, so an advisory lock on the folder is
+// enough for them to take turns.
+func lockFolder(path string) (*os.File, error) {
+	folder, err := os.OpenFile(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(folder.Fd()), syscall.LOCK_EX); err != nil {
+		folder.Close()
+		return nil, err
+	}
+	return folder, nil
 }
 
 // Temporary names this child makes while it works, which nothing else should show
@@ -906,5 +994,11 @@ func explain(err error) error {
 
 func say(out *json.Encoder, text string) int {
 	out.Encode(problem{Error: text})
+	return 1
+}
+
+// sayStale says a write lost the race: the file is not the version it read.
+func sayStale(out *json.Encoder, text string) int {
+	out.Encode(problem{Error: text, Code: "precondition"})
 	return 1
 }

@@ -455,7 +455,14 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
     - Every write — `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY`, `PROPPATCH`, `LOCK`, `POST` — answers 405 with `Allow: OPTIONS, GET, HEAD, PROPFIND`, so a client learns the shape of the share instead of failing mysteriously. `Depth: infinity` is refused with `propfind-finite-depth`, since walking a whole share is a way to tie up the disks.
     - A client's password is checked once and the session kept for 30 minutes, so a folder of fifty pictures costs one check rather than fifty.
     - `ETag` is the file's name, size and last change, so the answer to a range and to a whole read of the same file agree. The child's read now says when the file last changed, which is what that tag is made from.
-  - **Still to come in this phase:** writes (so a share can be mounted and saved to), `LOCK`/`UNLOCK` for Office, SFTP and FTP.
+    - **Writing** (Nov 10): `PUT`, `MKCOL`, `DELETE`, `MOVE` and `COPY`, every one of them carried out by the helper as the person through the ops Files already uses, so the kernel decides what may be written exactly as it does there.
+      - `PUT` creates with 201 or replaces with 204, and answers the new `ETag`, which is a strong one: the child names each version by its inode, size and last change in nanoseconds.
+      - `If-Match` is checked twice: once here so a stale client hears about it early, and again by the child as it commits, under a lock on the folder. Two clients holding the same version take turns, the second is told 412, and the first client's file is what stays on disk. `If-None-Match: *` means "only if new", and a weak `If-Match` is refused since a write can't rest on a loose comparison.
+      - `MOVE` and `COPY` check both ends: the source has to exist and be theirs to read (a move only needs the folders, so the kernel alone would let someone shift a file they cannot open), the share has to be theirs to write, and the address they are going to has to be free — an existing name answers 412 rather than being replaced, since overwriting is what the desktop makes people type a name for. A move between shares answers 502 rather than being guessed at.
+      - Nothing reaches into `.zfs`: any address with that as a step answers 403, on every method, so a client can't write into or over a snapshot.
+      - A refusal the kernel makes reads as 403, not as a server error.
+    - Walked with two regular accounts: a stale client got 412 and the first client's text stayed on disk; two clients PUTting the same version at the same instant left exactly one 204 and one 412; a read-only account could browse (207) and read (200) but every write was 403 "archive is read only for you"; a copy or move whose source was root's unreadable file was refused 403 and left it where it was; one into a root-owned folder was refused the same way; and every method against `.zfs` answered 403. rclone, as a real client, uploaded, read, renamed and deleted a file.
+  - **Still to come in this phase:** `LOCK`/`UNLOCK` for Office, SFTP and FTP.
 
 ## Pool details and SSH (Chris, Nov 9, built between Phases 9 and 10)
 

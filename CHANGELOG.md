@@ -14,6 +14,17 @@ bump.
 
 ### Added
 
+- Sharing, WebDAV can now be written to as well as read: `PUT`, `MKCOL`,
+  `DELETE`, `MOVE` and `COPY`, all carried out by the helper as the person, so the
+  kernel decides what may be written exactly as it does in Files. A folder made,
+  a file renamed, copied or deleted from a phone's file app lands the same way it
+  would from the desktop.
+- Files and WebDAV now give each version of a file a strong `ETag`, named from the
+  file's inode, size and last change. A client that sends `If-Match` has it
+  checked as the write commits, under a lock on the folder, so two people saving
+  the same file can't both win: the second is told 412 and the first one's file
+  stays. A move or copy checks the source as well as the destination, and nothing
+  may reach into a share's snapshots over WebDAV.
 - Sharing, Phase 13 starts with WebDAV: a share can be shared over HTTPS as a
   drive, with a checkbox of its own that is off until it is asked for. A client
   signs in with the NAS user name and password (only accepted over HTTPS) and sees

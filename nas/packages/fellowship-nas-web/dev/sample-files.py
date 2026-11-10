@@ -29,7 +29,17 @@ def main(root):
     for folder in (media, photos, family, archive, private):
         os.makedirs(folder, exist_ok=True)
     with open(os.path.join(private, "diary.txt"), "w") as file:
-        file.write("Only dana's account can read this share.\n")
+        file.write("Only dana's account can read this share of her own.\n")
+    # A folder inside a share the person may write, but that is not theirs to
+    # write in: the kernel is what refuses, not the desktop
+    locked = os.path.join(media, "locked")
+    os.makedirs(locked, exist_ok=True)
+    with open(os.path.join(locked, "read-only.txt"), "w") as file:
+        file.write("This folder belongs to root, so nobody else can add to it.\n")
+    # A file only root can read, so a copy whose source is not theirs is refused
+    # for that reason rather than because the share is theirs to change
+    with open(os.path.join(media, "secret.txt"), "w") as file:
+        file.write("Only root reads this, whoever asks.\n")
     with open(os.path.join(media, "notes.txt"), "w") as file:
         file.write("Things for the weekend\n\n"
                    "- ring the boat yard\n"

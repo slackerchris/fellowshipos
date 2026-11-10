@@ -124,7 +124,7 @@ DEFAULT = {
         # the kernel having to be the one to say no
         {"name": "archive", "pool": "tank", "dataset": "tank/shares/archive", "path": "/mnt/tank/shares/archive",
          "mode": "chosen", "access": {"users": {"guest": "read", "admin": "write"}, "groups": {}}, "nfs": False,
-         "smb": True, "webdav": False,
+         "smb": True, "webdav": True,
          "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "smb_options": SMB, "nfs_options": NFS,
          "engine": "zfs", "snapshots": True, "readonly": False},
         {"name": "media", "pool": "tank", "dataset": "tank/shares/media", "path": "/mnt/tank/shares/media",

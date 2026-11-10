@@ -60,6 +60,13 @@ docker run --rm -it $PUBLISH -e FELLOWSHIP_DEV_TLS -e FELLOWSHIP_DEV_TLS_PORT="$
     find /mnt/tank/shares -type f -exec chmod 0660 {} +
     # People walk through the pools folders to reach their share
     chmod 755 /mnt/tank /mnt/tank/shares
+    # One folder inside media that belongs to root, so a write into it is refused
+    # by the kernel while the share itself may be written
+    chown root:root /mnt/tank/shares/media/locked
+    chmod 755 /mnt/tank/shares/media/locked
+    # And one file only root can read, for a copy whose source is not theirs
+    chown root:root /mnt/tank/shares/media/secret.txt
+    chmod 600 /mnt/tank/shares/media/secret.txt
     # Snapshots are root only here, exactly as ZFS leaves .zfs on a real NAS, so
     # the helper has to be the one that opens an earlier version
     find /mnt/tank/shares -type d -name .zfs -exec chmod 700 {} +

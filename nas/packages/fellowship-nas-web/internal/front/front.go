@@ -137,6 +137,8 @@ func writeFailure(w http.ResponseWriter, response protocol.Response) {
 		status = http.StatusBadRequest
 	case protocol.CodeFailed:
 		status = http.StatusUnprocessableEntity
+	case protocol.CodePrecondition:
+		status = http.StatusPreconditionFailed
 	}
 	writeError(w, status, response.Error)
 }

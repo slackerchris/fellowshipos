@@ -223,6 +223,71 @@ func TestWritingNeedsAShareThePersonCanChange(t *testing.T) {
 	}
 }
 
+// A WebDAV client names the version it is replacing, and the child is the one
+// that checks it, as it commits.
+func TestAWriteHandsTheVersionToTheChild(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	f.body = `{"size":5,"length":5,"tag":"3-5-9"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("as it was"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	token := login(t, h, "kim").Token
+	response, body := h.Stream(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+		Share: "media", Path: "notes.txt", Replace: true, IfMatch: "1-98-7"}, strings.NewReader("hello"))
+	if body != nil {
+		body.Close()
+	}
+	if response.Code != "" {
+		t.Fatalf("the write answered %q %q", response.Code, response.Error)
+	}
+	want := "write notes.txt replace if-match 1-98-7"
+	if len(f.childed) != 1 || f.childed[0] != want {
+		t.Errorf("the child was asked for %v, want %q", f.childed, want)
+	}
+	// The version the file now has comes back, so the client can send it next time
+	if response.Tag != "3-5-9" {
+		t.Errorf("the answer named the version %q", response.Tag)
+	}
+}
+
+func TestAStaleWriteIsAPrecondition(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	// The child is the last word, and it says the file is not that version any more
+	f.body = `{"error":"that file has changed since it was read","code":"precondition"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("as it was"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	token := login(t, h, "kim").Token
+	response, body := h.Stream(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+		Share: "media", Path: "notes.txt", Replace: true, IfMatch: "1-98-7"}, strings.NewReader("hello"))
+	if body != nil {
+		body.Close()
+	}
+	if response.Code != protocol.CodePrecondition {
+		t.Fatalf("a stale write answered %q %q", response.Code, response.Error)
+	}
+}
+
+func TestACreateOnlyWriteSaysPreconditionWhenTheNameIsTaken(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("already"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	token := login(t, h, "kim").Token
+	response, body := h.Stream(protocol.Request{Op: protocol.OpFileWrite, Session: token,
+		Share: "media", Path: "notes.txt", New: true}, strings.NewReader("hello"))
+	if body != nil {
+		body.Close()
+	}
+	if response.Code != protocol.CodePrecondition {
+		t.Fatalf("a create-only write over an existing name answered %q %q",
+			response.Code, response.Error)
+	}
+}
+
 func TestUploadArrivesAsThePersonsChild(t *testing.T) {
 	f, h, dir := newFileFake(t)
 	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
