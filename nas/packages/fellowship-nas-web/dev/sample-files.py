@@ -38,6 +38,15 @@ def main(root):
         file.write("Kept for the record.\n")
     with open(os.path.join(family, "private.txt"), "w") as file:
         file.write("Only the people this share is for can read this.\n")
+    # Two earlier versions of notes.txt, laid out the way ZFS keeps snapshots on
+    # a real share. They hold genuinely different text, so a restore can be
+    # checked by reading the copy rather than trusting the reply.
+    for name, words in (("autosnap_hourly_1", "Things for the weekend\n\n- ring the boat yard\n"),
+                        ("autosnap_hourly_2", "Things to do\n\n- ring the boat yard\n- order coal\n")):
+        earlier = os.path.join(media, ".zfs", "snapshot", name)
+        os.makedirs(earlier, exist_ok=True)
+        with open(os.path.join(earlier, "notes.txt"), "w") as file:
+            file.write(words)
     with open(os.path.join(media, "holiday.png"), "wb") as file:
         file.write(png(320, 200, lambda x, y: bytes(
             (40 + x * 60 // 320, 90 + y * 90 // 200, 120 + (x + y) * 60 // 520))))

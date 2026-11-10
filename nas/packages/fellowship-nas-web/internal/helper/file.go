@@ -152,6 +152,9 @@ func (h *Helper) fileList(user string, request protocol.Request) protocol.Respon
 
 // fileRead answers with the head of the file, leaving the bytes to follow.
 func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Response, io.ReadCloser) {
+	if request.Snapshot != "" {
+		return h.readSnapshot(user, request)
+	}
 	root, err := h.fileRoots(user, request.Share)
 	if err != nil {
 		return failure(protocol.CodeForbidden, err.Error()), nil

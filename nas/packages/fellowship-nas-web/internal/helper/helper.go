@@ -160,6 +160,16 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 			return h.fileRename(found.user, request)
 		}
 		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileSnapshots:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileSnapshots(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileRestore:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileRestore(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	case protocol.OpFileDelete:
 		if found := h.find(request.Session, request.Touch); found != nil {
 			return h.fileDelete(found.user, request)

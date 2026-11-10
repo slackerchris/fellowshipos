@@ -3,8 +3,9 @@
 // can be done with several at once.
 import { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { FileEntry, FileHit, FileShare, copyFile, deleteFile, fileShares, fileUrl, folderIn, folderTree, humanSize,
-    makeFolder, renameFile, searchShare, uploadFile, zipUrl } from "./api";
+import { EarlierVersion, FileEntry, FileHit, FileShare, copyFile, deleteFile, earlierVersions, fileShares,
+    fileUrl, folderIn, folderTree, humanSize, makeFolder, renameFile, restoreVersion, searchShare,
+    uploadFile, zipUrl } from "./api";
 import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const IMAGE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"];
@@ -183,7 +184,7 @@ export function Files() {
 }
 
 type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entries: FileEntry[] }
-    | { kind: "move"; entries: FileEntry[] } | null;
+    | { kind: "move"; entries: FileEntry[] } | { kind: "versions"; entry: FileEntry } | null;
 
 /** How a click picks: on its own, added to or taken from the rest, or everything since the last click. */
 type Picking = { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean };
@@ -714,6 +715,15 @@ function Browser({ share, view, setView, clip, setClip, columns, setColumns }: {
                                                                     onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "rename", entry }); }}>
                                                                     Rename…
                                                                 </button>}
+                                                                {!entry.dir && (
+                                                                    <button type="button" role="menuitem"
+                                                                            disabled={!share.snapshots}
+                                                                            title={share.snapshots ? ""
+                                                                                : "This pool doesn't support snapshots"}
+                                                                            onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "versions", entry }); }}>
+                                                                        Earlier versions…
+                                                                    </button>
+                                                                )}
                                                                 {changing && <button type="button" role="menuitem" class="danger-text"
                                                                     onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "delete", entries: [entry] }); }}>
                                                                     Delete…
@@ -760,6 +770,11 @@ function Browser({ share, view, setView, clip, setClip, columns, setColumns }: {
                                     : folderWhy ? `You can't change things here. ${folderWhy}` : ""}</span>
                             </p>
                         </div>
+                        {doing && doing.kind === "versions" && (
+                            <EarlierVersions share={share} entry={doing.entry} folder={here}
+                                             changing={changing} onClose={() => { setDoing(null); setTrouble(null); }}
+                                             onRestored={again} />
+                        )}
                         {chosen && !chosen.dir && (
                             <Preview share={share} entry={chosen} path={join(here, chosen.name)}
                                      onClose={forget} />
@@ -912,6 +927,74 @@ function MovePicker({ share, here, entries, onCancel, onMove }: {
             </div>
         </div>
     );
+}
+
+/** What one file looked like before: pick a version to look at, or bring a copy
+    back beside it. Restoring writes a new file, so nothing is replaced. */
+function EarlierVersions({ share, entry, folder, changing, onClose, onRestored }: {
+    share: FileShare; entry: FileEntry; folder: string; changing: boolean;
+    onClose: () => void; onRestored: () => void;
+}) {
+    const path = join(folder, entry.name);
+    const versions = useLoad(() => earlierVersions(share.share, path), [path]);
+    const [restoring, setRestoring] = useState<string | null>(null);
+    const [trouble, setTrouble] = useState<string | null>(null);
+    const [done, setDone] = useState<string | null>(null);
+    const bringBack = async (version: EarlierVersion) => {
+        setRestoring(version.name);
+        setTrouble(null);
+        setDone(null);
+        try {
+            const copy = copyName(entry.name, version.created);
+            await restoreVersion(share.share, path, version.name, join(folder, copy));
+            setDone(`Put back as ${copy}`);
+            onRestored();
+        } catch (error) {
+            setTrouble((error as Error).message);
+        } finally {
+            setRestoring(null);
+        }
+    };
+    return (
+        <div class="files-versions" aria-label={`Earlier versions of ${entry.name}`}>
+            <div class="preview-head">
+                <Icon of="again" />
+                <strong title={entry.name}>Earlier versions</strong>
+                <button type="button" class="tool" title="Close" aria-label="Close earlier versions" onClick={onClose}>
+                    <Icon of="close" size={14} />
+                </button>
+            </div>
+            <div class="versions-body">
+                <Loading loaded={versions}>
+                    {() => versions.data!.versions.length === 0 ? (
+                        <p class="muted small">No snapshot holds an earlier {entry.name}.</p>
+                    ) : (
+                        <ul class="version-list">
+                            {versions.data!.versions.map(version => (
+                                <li key={version.name}>
+                                    <span class="version-when">{new Date(version.created * 1000).toLocaleString()}</span>
+                                    <span class="small muted">{humanSize(version.size)}</span>
+                                    <a class="link-button" href={fileUrl(share.share, path, false, version.name)}
+                                       target="_blank" rel="noreferrer">Look</a>
+                                    {changing && <Button busy={restoring === version.name}
+                                                         onClick={() => bringBack(version)}>Put back a copy</Button>}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Loading>
+                <Result outcome={trouble ? { kind: "error", text: trouble } : null} />
+                <Result outcome={done ? { kind: "done", text: done } : null} />
+            </div>
+        </div>
+    );
+}
+
+/** The name a restored copy is given, so it never lands on the file it came from. */
+function copyName(name: string, created: number): string {
+    const when = new Date(created * 1000).toLocaleDateString().replace(/\//g, "-");
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? `${name.slice(0, dot)} (from ${when})${name.slice(dot)}` : `${name} (from ${when})`;
 }
 
 /** One name, typed: a new folder's, or what something should be called. */

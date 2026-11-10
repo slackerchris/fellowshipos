@@ -1,15 +1,17 @@
 # FellowshipNAS: what Files still needs
 
 A work plan for the rest of Phase 12, written November 10, 2026 against
-`nas-edition` at `0e08f77`, and brought up to date at `f1f0228` with slices A to D built. It sits under [the plan](fellowship-nas-plan.md) and
+`nas-edition` at `0e08f77`, and brought up to date at `f1f0228` with slices A to D
+built and again with slice E built. It sits under [the plan](fellowship-nas-plan.md) and
 [the brief](fellowship-nas-next-steps.md), and covers only the Files app and the
 gate it carries; everything else stays where the plan puts it.
 
 What is built, so the gaps are clear: browse, download and preview as the person;
 upload, new folder, rename, move by dragging, delete, and a filter box; the path
 resolver and its refusal tests; the helper running file work as the signed-in
-person inside their share roots; and slices A to D below. Snapshots (E), the phone
-(F) and the gate (G) are left.
+person inside their share roots; and slices A to E below. The phone (F) is being
+kept as its own project, and the gate (G) is walked on real hardware by Chris
+rather than in the VM here.
 
 ## 1. Order, and why
 
@@ -24,9 +26,9 @@ is best done once the interactions have settled.
 | B | Copy and paste, and a "Move to…" picker (built, `9a010ec`) | Completes the operations, and gives touch a way to move without dragging |
 | C | Search across the share (built, `baee7c8`) | The filter only sees one folder; searching is what people expect next |
 | D | Kind, owner and permissions columns (built, `f1f0228`) | Answers "why can't I write this?" without a shell |
-| E | Snapshots: browse, restore a copy, replace | The last gate clause that needs server work, ZFS only |
-| F | The installable phone app | Changes layout and input, so last |
-| G | The gate, in the VM | Proves the whole thing on a real NAS |
+| E | Look at an earlier version and put one back as a copy (built) | The last gate clause that needs server work, ZFS only |
+| F | The installable phone app (its own project) | Changes layout and input, so last |
+| G | The gate, on real hardware | Proves the whole thing on a real NAS |
 
 The Phase 10 and 11 catch-up tests in the brief's section 3 are still owed by
 name and are not part of this plan. They gate the release, not this phase, but do
@@ -123,24 +125,69 @@ The question a person actually asks is "why can't I write in here?".
 
 ## 6. Slice E: snapshots, and restoring from them
 
-The plan's third answer, and the last gate clause that needs server work.
+**Built** (Nov 10), as below, with the reading done by the helper rather than by
+the person's own child. That is the one place the plan was wrong, and the reason
+matters: ZFS leaves `.zfs` reachable to root alone on many installs
+(`snapdir=hidden`, and the folder itself is `0500 root`), so asking the child to
+open a snapshot as the person would have failed on a working NAS. Three things
+keep the boundary instead:
 
-- `fnas` already lists snapshots per share (`snapshot list`). The helper needs a
-  read-only root per snapshot: `<mount>/.zfs/snapshot/<name>/…`, which the child
-  can read as the person when ZFS exposes it (it does, for people with read
-  access to the dataset).
-- **Browse**: "Earlier versions" in the file's menu lists the snapshots that hold
-  that path, newest first, with the file's size and date in each. Previewing one
-  goes through the same download route, so a picture opens from a snapshot with
-  no new machinery: `GET /api/files/download?share=…&path=…&snapshot=…`.
-- **Restore a copy** writes the saved file beside the current one as
-  `holiday (from 9 Nov).png` through the upload path, which needs no new write op.
-  **Replace** is the same write with `replace=1` after the typed confirmation.
-- On an array or an Unraid-style pool the menu item is shown disabled with "This
-  pool doesn't support snapshots", the words the desktop already uses.
-- Tests: a snapshot path is built from a name fnas gave, never from the client;
-  a snapshot name that isn't in the list is refused; restoring a copy twice makes
-  two differently named files.
+- the snapshot's name comes from `fnas snapshot list`, never from the request;
+- the path is resolved and confined against `<share>/.zfs/snapshot/<name>`
+  through the same resolver, so a climb out is refused as "that path is outside
+  media";
+- the person must be able to list the file's current folder through their own
+  child, which is the same permission that lets them see the file today. That is
+  the check that answers for reading as root, and it still works for a file that
+  has since been deleted, because it asks about the folder and not the file.
+
+Everything written back is written by the child, as the person, through the same
+door an upload takes, so a restore inherits the same refusals and the file lands
+owned by whoever asked.
+
+- `GET /api/files/snapshots?share=…&path=…` lists the versions that hold that
+  path, each with its size and the date it was taken (`file-snapshots`).
+- `GET /api/files/download?share=…&path=…&snapshot=…` reads one, honouring
+  `Range`, so a picture or a video opens from a snapshot with no new machinery.
+- **Restore a copy** (`POST /api/files/restore`) writes the saved file beside the
+  current one as `notes (from 11-10-2026).txt`, never over it, and refuses a name
+  that is already there rather than quietly replacing it. **Replace in place** is
+  deliberately not built: a copy plus the existing delete is enough, and it can
+  never lose the file the person is looking at.
+- The menu item is shown disabled with "This pool doesn't support snapshots" when
+  `share.snapshots` is false, which is how an array or an Unraid-style pool
+  answers.
+- Tests: the versions offered are only the ones that hold that path; a snapshot
+  nobody made is refused by name; a climb out is refused; a snapshot with no copy
+  of the file says "`hourly_2` has no copy of that file"; restoring writes by the
+  copy's full path as the person, and leaves the original alone; restoring onto an
+  existing name, out of the share, with no name, or into a read-only share is
+  refused before anything is written.
+
+**What was seen**, in the container as `admin` (media writable) and `guest`
+(media writable, family refused): two versions of `notes.txt` listed with their
+dates and sizes; the older one read as its own bytes, different from the file as
+it is now; `notes (from 11-10-2026).txt` written beside it, 48 bytes, owner
+`admin:media`, mode `664`, and the file itself unchanged; the same restore refused
+for an invented snapshot name, for a name already in the folder, and for a target
+outside the share; `guest` refused `family` with "isn't a share you can use" while
+its own `media` versions listed.
+
+**What was not seen**: a real ZFS snapshot. The harness writes `.zfs` trees by
+hand, so this proves the route and the refusals, not ZFS itself — and in the
+harness `.zfs` shows up in the listing, which it does not on a default install
+(`snapdir=hidden`). Restoring a version from a snapshot of a *pool* that has since
+been destroyed, and a restore of something larger than a few kilobytes, are also
+untried.
+
+**The 10 GB clause** is unchanged in the code (`MaxUpload`) but was validated at a
+smaller size on purpose: a 1 GiB file was uploaded, downloaded again, and compared
+byte for byte (same SHA-256), then read from the middle with
+`Range: bytes=900000000-900000049`, which answered `206` with
+`Content-Range: bytes 900000000-900000049/1073741824` and the right 50 bytes. That
+exercises the same path — the counter, the deadlines cleared for the upload, the
+child's temp file and rename — without waiting on ten gigabytes. The cap itself is
+still only checked by reading the code.
 
 ## 7. Slice F: the installable phone app
 

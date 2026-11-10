@@ -81,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/mkdir", s.withSession(true, s.mkdir))
 	mux.HandleFunc("POST /api/files/rename", s.withSession(true, s.rename))
 	mux.HandleFunc("POST /api/files/delete", s.withSession(true, s.remove))
+	mux.HandleFunc("GET /api/files/snapshots", s.withSession(false, s.snapshots))
+	mux.HandleFunc("POST /api/files/restore", s.withSession(true, s.restore))
 	mux.HandleFunc("POST /api/files/copy", s.withSession(true, s.copyFile))
 	mux.HandleFunc("GET /api/files/tree", s.withSession(false, s.tree))
 	mux.HandleFunc("GET /api/files/search", s.withSession(false, s.search))
@@ -357,6 +359,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, session *proto
 	controller.SetReadDeadline(time.Time{})
 	controller.SetWriteDeadline(time.Time{})
 	request := protocol.Request{Op: protocol.OpFileRead, Session: token, Share: share, Path: inside}
+	request.Snapshot = query.Get("snapshot")
 	if start, length, ok := byteRange(r.Header.Get("Range")); ok {
 		request.Start, request.Length = start, length
 	}
@@ -603,6 +606,46 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, session *protoco
 		}
 		return ""
 	})
+}
+
+// snapshots lists the earlier versions that hold one file.
+func (s *Server) snapshots(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	if query.Get("share") == "" || query.Get("path") == "" {
+		writeError(w, http.StatusBadRequest, "say which file: share and path")
+		return
+	}
+	response, ok := s.call(w, protocol.Request{Op: protocol.OpFileSnapshots, Session: token,
+		Share: query.Get("share"), Path: query.Get("path")})
+	if !ok {
+		return
+	}
+	held := response.Output
+	if held == "" {
+		held = "[]"
+	}
+	writeJSON(w, http.StatusOK, json.RawMessage(`{"versions":`+held+`}`))
+}
+
+// restore writes an earlier version back as a new file.
+func (s *Server) restore(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	var body struct {
+		Share    string `json:"share"`
+		Path     string `json:"path"`
+		Snapshot string `json:"snapshot"`
+		To       string `json:"to"`
+	}
+	if !readJSON(w, r, 1<<16, &body) {
+		return
+	}
+	if body.Share == "" || body.Path == "" || body.Snapshot == "" || body.To == "" {
+		writeError(w, http.StatusBadRequest, "say which file, which version and what to call the copy")
+		return
+	}
+	if _, ok := s.call(w, protocol.Request{Op: protocol.OpFileRestore, Session: token,
+		Share: body.Share, Path: body.Path, Snapshot: body.Snapshot, To: body.To}); ok {
+		writeJSON(w, http.StatusOK, map[string]bool{"done": true})
+	}
 }
 
 // byteRange reads the one range a media player asks for. Anything else asks for

@@ -684,6 +684,22 @@ export const folderTree = (share: string) =>
 export const deleteFile = (share: string, path: string, recursive = false) =>
     request<{ done: boolean }>("POST", "/api/files/delete", { share, path, recursive });
 
+/** One earlier version of a file, as fnas names it and what it looked like. */
+export interface EarlierVersion {
+    name: string;
+    created: number;
+    size: number;
+    changed: number;
+}
+
+export const earlierVersions = (share: string, path: string) =>
+    request<{ versions: EarlierVersion[] }>(
+        "GET", `/api/files/snapshots?share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`);
+
+/** Put an earlier version back as a copy beside the file. */
+export const restoreVersion = (share: string, path: string, snapshot: string, to: string) =>
+    request<{ done: boolean }>("POST", "/api/files/restore", { share, path, snapshot, to });
+
 /** Send one file's bytes. The server passes them to the helper, which writes them
     as the signed-in person, so a refusal comes back in the same words as any
     other. */
@@ -705,9 +721,10 @@ export async function uploadFile(share: string, path: string, name: string, file
 
 /** Where the browser asks for a file's bytes. Inline previews and downloads use
     the same answer; save asks for it as a download rather than showing it. */
-export function fileUrl(share: string, path: string, save = false): string {
+export function fileUrl(share: string, path: string, save = false, snapshot = ""): string {
     const query = `share=${encodeURIComponent(share)}&path=${encodeURIComponent(path)}`;
-    return `/api/files/download?${query}${save ? "&save=1" : ""}`;
+    return `/api/files/download?${query}${save ? "&save=1" : ""}` +
+        `${snapshot ? `&snapshot=${encodeURIComponent(snapshot)}` : ""}`;
 }
 
 /** Several things in one folder as a zip, which the NAS makes while the browser saves it. */

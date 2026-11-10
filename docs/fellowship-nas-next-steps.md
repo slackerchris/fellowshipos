@@ -12,9 +12,9 @@ picking work back up, not a fourth source of truth.
 | | |
 | --- | --- |
 | Storage engines built | ZFS, traditional RAID (mdadm), Unraid-style (mergerfs + SnapRAID) |
-| Storage engines left | Btrfs (Phase 14) |
+| Storage engines left | Btrfs (Phase 17, after office editing) |
 | Phases done | 1 to 11, with the gates recorded in the plan |
-| Next phase | 12, the Files app, which now comes before more ways to share. Built: the resolver, browsing and previewing, uploading, folders, renaming, moving and deleting, then slices A to D of the Files plan (several at once, copy and move, search, who may change what). Left: snapshots, the phone, the gate |
+| Next phase | 12, the Files app, which now comes before more ways to share. Built: the resolver, browsing and previewing, uploading, folders, renaming, moving and deleting, then slices A to E of the Files plan (several at once, copy and move, search, who may change what, earlier versions from a snapshot). Left here: the gate, walked on real hardware; the installable phone app is being kept as its own project |
 | Tests | 264 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, and CI runs on every push |
 | Docs baseline | The overview describes `f1f0228`, and the plan's Files section records each slice built and what was seen of it |
 

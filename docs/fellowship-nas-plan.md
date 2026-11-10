@@ -34,16 +34,18 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS. It replaces TrueN
 
 - Install FellowshipOS to disk from the ISO
 - One wizard option that turns an installed system into a NAS
-- Several pools at once, each on its own engine: ZFS, Unraid-style (mergerfs + SnapRAID), traditional RAID (mdadm), or Btrfs
+- Several pools at once, each on its own engine: ZFS, Unraid-style (mergerfs + SnapRAID), or traditional RAID (mdadm)
 - Any machine and any number of drives, from an old PC with one data disk to a 16-bay server behind an HBA. Nothing needs specific hardware; extras such as bay numbers and locate lights appear when the hardware supports them
 - Shares over SMB, NFS, SFTP, FTP and WebDAV, with permissions per user and group
 - Users and groups managed from the desktop
-- Snapshots (ZFS and Btrfs), parity syncs (SnapRAID), scrubs and RAID checks, SMART monitoring, health checks and alerts
+- Snapshots (ZFS), parity syncs (SnapRAID), scrubs and RAID checks, SMART monitoring, health checks and alerts
 - Scheduled backup from one pool to another
 - A desktop in the browser, served by our own web server: windows, taskbar, app launcher, notification centre, and a real file manager
 
 **Later**
 
+- Browser-based document and spreadsheet editing through Collabora Online (Phase 16)
+- Btrfs storage and snapshots (Phase 17), after office editing
 - DLNA, so TVs and consoles find media by themselves
 - iSCSI, so a slice of a pool appears as a disk on another machine
 - More alert services (Apprise covers 100+, such as Discord, Telegram, Pushover and Home Assistant)
@@ -54,7 +56,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS. It replaces TrueN
 - Kubernetes, off-site replication, clustering, directory services
 - The NAS role in the LXC template (a container can't own disks or load ZFS)
 - Btrfs RAID5/6, which is still not considered safe
-- A native mobile app: a project of its own, planned after the release (Phase 16). Until then the desktop works in a phone's browser and installs on the home screen, and WebDAV (Phase 13) puts the NAS in the phone's own file apps
+- A native mobile app: a project of its own, planned after the release (Phase 15). Until then the desktop works in a phone's browser and installs on the home screen, and WebDAV (Phase 13) puts the NAS in the phone's own file apps
 - A terminal in the browser (use SSH)
 
 **Design direction:** the feel of Synology DSM and FygoOS: a desktop in the browser with apps in windows, served by the NAS's own web server. It uses FellowshipOS's own name, icons, colours and layout; nothing is copied from either product.
@@ -337,7 +339,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **Importing:** finds fnas-made pools by their XFS labels and markers, without mounting every disk. Disks from a mergerfs + SnapRAID setup fnas didn't make aren't imported yet.
 - **Checked in the VM** (6, 10 and 12 GB data disks and a 14 GB parity disk, created from the desktop): the pool, a share over SMB and NFS with ACLs, 60 files spread across disks, a sync, and their checksums. Failing and replacing a disk, pulling more disks than parity, a second parity disk, the timers, the deleted-files limit, spin-down and a reboot were not tried in the VM; Chris called the gate on what had run.
 
-**Btrfs**
+**Btrfs (Phase 17)**
 
 - **Layouts:** single, `raid1`, `raid1c3`, `raid10`. Metadata uses at least the same redundancy as data, and RAID5/6 isn't offered.
 - **Shares and settings:** shares are subvolumes in `/mnt/NAME/shares`; settings are in `/mnt/NAME/fellowship-config`.
@@ -690,7 +692,7 @@ Chris's order (Nov 10): Files comes before more ways to share, because WebDAV in
 - The path is resolved with symlinks followed, and refused if it leaves the root or doesn't resolve. An unmounted pool, an unknown share or an unreadable root answers "no" rather than naming a disk.
 - Tests for every way out: `..` climbing out of a share, a symlink inside the share that points outside it, a dangling symlink, a NUL byte, a share the person can't use, and a root that has gone since its pool was exported.
 
-**10 GB transfers** (decided Nov 10). `ReadTimeout` covers the whole request, so a large upload cannot fit in it. The upload and download routes clear the connection's deadline through `http.ResponseController` for their own duration, as the jobs stream already avoids a `WriteTimeout`; the rest of the desktop keeps the 60 second cover. A cap on each file and on the whole request keeps one upload from filling a pool or holding a worker.
+**10 GB transfers** (decided Nov 10). `ReadTimeout` covers the whole request, so a large upload cannot fit in it. The upload and download routes clear the connection's deadline through `http.ResponseController` for their own duration, as the jobs stream already avoids a `WriteTimeout`; the rest of the desktop keeps the 60 second cover. A cap on each file and on the whole request keeps one upload from filling a pool or holding a worker. The route was walked with a 1 GiB file instead of ten, since the path is the same one: uploaded, downloaded again and compared byte for byte, then read from the middle with a `Range` that answered 206 and the right 50 bytes. Ten gigabytes itself is still only a cap in the code.
 
 **Phone.** The gate is the installable web app on top of the phone rules the shell already has: a manifest and icons, a service worker for the shell so the home-screen icon opens instead of a blank page, and the Files screens laid out with tap targets and no sideways scrolling.
 
@@ -712,9 +714,10 @@ Chris's order (Nov 10): Files comes before more ways to share, because WebDAV in
 - **Slice D** (who may change what, Nov 10): each entry in a listing, and the folder itself, carries its permissions as `ls` writes them (`rwxrws---`), owner and group by name, whether a POSIX access list is set, and whether the person may change it, which the child asks with `faccessat` as the person, so access lists count. The desktop's **Columns** control adds Kind, Owner and Permissions (off by default, kept per browser); the preview names kind, owner and permissions; and when something can't be changed, the reason is read from the permissions: only the owner, a group they aren't in, an access list, or read only for everyone. A folder they can't change hides New folder, Upload and Paste even on a share they may write. Seen in the development container: as `admin`, a root-owned file read "Only its owner, root, can change it" and a root-owned folder hid the write buttons with the same reason for the folder; as `guest`, a folder for `nas-admins` read "The nas-admins group can change this folder, and you aren't in it".
 - **Slice C** (search, Nov 10): Enter in the filter box with three or more letters runs the child's `search` op over the whole share: it reads each folder through its own descriptor, compares names in any case (a slash or `..` in the query is only text), never follows a link, and stops at 500 matches, eight deep or two seconds, answering what it found with why it stopped. The helper refuses a query shorter than two characters. Results replace the folder with the folder each is in; opening a folder goes there, and opening a file goes to its folder and picks it once loaded. Seen in the development container as `admin`: "SUN" found four names across three folders, and opening one went three folders deep and picked it; as `guest`, a share they can't use and a one-letter query were refused and `../etc` found nothing.
 - **Slice B** (copy and move, Nov 10): a clipboard in the browser holds what Copy or Cut set aside (share, folder, names); Paste in another folder of the same share renames for a cut, or runs the child's new `copy` op, which writes a file or a whole folder under a `.fnas-copy-*` name beside the destination and renames it into place, never following a link and refusing a folder into itself (the helper checks that too, before any work). **Move to…** lists the share's folders from the child's `tree` op (500 at most, eight deep, links and its own temporary names left out), with the current folder and anything being moved greyed. Same share only. Seen in the development container as `admin`: two files and a folder copied into another, a file moved with Move to… and another with Cut and Paste; through the API, a copy onto a name already there, into itself and out of the share refused, and as `guest`, a copy on the read-only share and a tree of a share they can't use refused. The walk found that new folders lost the share's setgid bit, since setting their mode cleared it, leaving what was made inside them to the person's own group; New folder and copies now keep it.
+- **Slice E** (earlier versions, Nov 10): "Earlier versions…" in a file's menu lists the snapshots that hold that path with their dates and sizes, **Look** opens one through the same download route with `snapshot=`, and **Put back a copy** writes it beside the file as `notes (from 11-10-2026).txt`, never over it. The reading is done by the helper as root, because ZFS leaves `.zfs` reachable to root alone on many installs, so the boundary is kept by three things instead: the snapshot's name comes from `fnas snapshot list`, never from the request; the path is resolved and confined against that snapshot's own folder; and the person must be able to list the file's folder through their own child, which still works for a file that has since been deleted. Everything written back goes through the ordinary write child as the person. On a pool without snapshots the item is disabled with "This pool doesn't support snapshots". Seen in the development container as `admin`: two versions listed, the older read as its own bytes, and the copy written as 48 bytes, owner `admin:media`, mode `664`, with the file itself unchanged; refused for an invented snapshot name, a name already in the folder and a target outside the share; as `guest`, `family` refused and its own `media` versions listed. Not seen: a real ZFS snapshot — the harness writes `.zfs` trees by hand, and there `.zfs` also shows in the listing, which it does not on a default install.
 - **Slice A** (several at once, Nov 10): the pick is a set, by Ctrl-click or Cmd-click, Shift-click, Shift with the arrows, and Ctrl-A; a pane for several says how many and how big, with **Delete…** and **Download as zip**. A bulk delete is one typed confirmation naming the count and the share, then one op per item, so one refusal doesn't stop the rest. A zip is `GET /api/files/zip` with the folder and the names in it, so the browser saves it as it comes; the helper checks every name before any work, and the child walks beneath the share, never following a link, adds up the size and refuses past 2 GB before sending a byte, then writes the zip as it reads. Its answer runs to the end of the connection (`ToTheEnd`), since its size isn't known first. Seen in the development container as `admin` and `guest`: four picked by click, Ctrl-click and Shift-click, zipped and read back intact; a bulk delete of four with one folder the kernel wouldn't let `admin` empty, reported as "3 deleted, 1 refused"; and as `guest`, a zip from the read-only share worked while one from a share they can't use, or with `..` in a name, was refused.
 
-**Slices, in order.** The resolver and its refusal tests, then list, download and preview, then upload, folders, rename, move and delete, then several at once, then copy and move, then search, then who may change what: the first seven are built. Snapshots on ZFS only, then the phone work, then the gate in the phase table follow; the work left is planned in [the Files plan](fellowship-nas-files-plan.md).
+**Slices, in order.** The resolver and its refusal tests, then list, download and preview, then upload, folders, rename, move and delete, then several at once, then copy and move, then search, then who may change what, then earlier versions from a snapshot: the first eight are built. The installable phone app is being kept as its own project (Chris, Nov 10) and the gate is walked on real hardware rather than in the VM here; what is left is planned in [the Files plan](fellowship-nas-files-plan.md).
 
 ## Security model
 
@@ -727,7 +730,7 @@ Built for a trusted home LAN; nothing is exposed to the internet by default.
 - **Remote access:** not built in; a VPN such as WireGuard or Tailscale is documented.
 - **Destructive actions** (destroy a pool, delete a share, roll back a snapshot, wipe disks, remove a user) need a typed confirmation that names what will be lost.
 - **Updates:** `unattended-upgrades` for Debian security updates, including the kernel, with no automatic reboot.
-- **Review:** the web server's login, session, WebDAV and helper code gets a security review before release.
+- **Review:** Phase 14 requires a security review of the release build and its installed defaults. The checklist below defines what to verify.
 
 ## Repository layout and packaging
 
@@ -775,9 +778,10 @@ No phase starts until the previous gate passes in a VM, except for items carried
 | 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync; all on real disks in the VM; writing `snapraid.conf` and the mergerfs mount twice changes nothing the second time, the check that caught `spares=1` in `mdadm.conf` || Built, with a shortened gate (Chris, Nov 10): created from the desktop on mixed disks, shared, filled and synced in the VM, which found and fixed a sync that failed whenever fnas saved settings. Not tried in the VM: failing, replacing and pulling disks, a second parity disk, the timers, the deleted-files limit, spin-down and a reboot. Also carried: RAID 6, sixteen disks and importing an array made on another machine (Phase 10), and importing disks from a mergerfs + SnapRAID setup fnas didn't make |
 | 12. Files | The Files app (Chris, Nov 10: before more ways to share), snapshot browse and restore, and the per-user file helper that WebDAV reuses; the desktop as a mobile-friendly web app that installs on the home screen | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; on a phone's browser, from the home-screen icon: browse folders, download, open a photo, play a video, upload from the photo library, rename, move and delete by tapping, and restore an earlier version, with no sideways scrolling | Decided Nov 10: the existing helper does the work, as the person, in their share roots; uploads clear the read deadline; snapshots are ZFS only (see Files). Built so far, each checked in the harness with an account that can change a share and one that can only read: the resolver with its refusal tests; browsing, downloading and previewing; uploading, folders, renaming, moving and deleting; several at once with zip downloads; copy, cut, paste and Move to…; search across a share; and who may change what. Left: snapshots (slice E), the installable phone app (F), and this gate in the VM (G) |
 | 13. More ways to share | SFTP, FTP (FTPS by default) and WebDAV, using Phase 9's users and access lists; WebDAV goes through Phase 12's file helper | Two users with different access see only their shares over SFTP, FTP and WebDAV; plain FTP stays off until turned on | |
-| 14. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
-| 15. Release | Network and updates in Settings, theme and icons, hosted signed apt repo | Set a static address from the desktop; updates arrive from the hosted repo | |
-| 16. Mobile app | A native app for iPhone and Android, a project of its own (Chris, Nov 10): automatic photo backup in the background, the phone's share sheet ("Save to NAS"), and offline copies of files, on top of what the web app does | Photos taken on a phone reach the NAS without opening the app; a file saved from another app's share sheet lands in the chosen share; an offline file opens with no network | |
+| 14. Release | Network and updates in Settings, theme and icons, hosted signed apt repo, and a security review | Set a static address from the desktop; updates arrive from the hosted repo; pass the security review below | |
+| 15. Mobile app | A native app for iPhone and Android, a project of its own (Chris, Nov 10): automatic photo backup in the background, the phone's share sheet ("Save to NAS"), and offline copies of files, on top of what the web app does | Photos taken on a phone reach the NAS without opening the app; a file saved from another app's share sheet lands in the chosen share; an offline file opens with no network | |
+| 16. Office editing | Embed Collabora Online as an optional service for LibreOffice Writer and Calc. Launch it from Files to create or edit documents and spreadsheets. FellowshipNAS authorizes reads and saves through WOPI using the existing share permissions. | Create, edit, save and reopen a document and a spreadsheet in the same share. A read-only user can open them for viewing, and a user without share access cannot open them. | |
+| 17. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
 
 **Failure tests (run in the VM before every release)**
 
@@ -789,7 +793,7 @@ Install and role:
 - [ ] Enable Secure Boot: role completes, ZFS shows as unavailable with the reason, the other engines work
 - [ ] Try the role in the LXC template: role stops with a clear message
 
-Pools, on every engine:
+Pools, on every engine in the release build:
 
 - [ ] Reinstall the OS with pools attached: the desktop offers import and restore, and no disk is offered for erasing by default
 - [ ] Reorder the disks: every pool still mounts
@@ -807,7 +811,7 @@ Updates:
 
 Data recovery:
 
-- [ ] Restore a deleted file from a snapshot in Files and through Windows Previous Versions (ZFS and Btrfs)
+- [ ] Restore a deleted file from a snapshot in Files and through Windows Previous Versions on each snapshot-capable engine in the release build
 - [ ] Restore a share from a backup job, between matching and mismatched engines
 - [ ] Restore config after a reinstall: shares, permissions, schedules and user IDs return
 
@@ -820,6 +824,17 @@ Web and access:
 - [ ] Mount from an NFS client with a mismatched user ID: a clear permission result
 - [ ] Write to a shared folder over NFS and SMB: each protocol can edit the other's files
 - [ ] An SFTP-only user can't get a shell and sees only their shares
+
+**Security review before release**
+
+- [ ] Review the authentication, session and authorization code. On a fresh VM installed from the release build, try expired and revoked sessions, cross-site requests and direct admin API calls as a regular user.
+- [ ] Test share isolation with two users and both read-only and writable shares. Try unauthorized reads and writes through Files and each enabled sharing protocol. In Files and WebDAV, include crafted paths, symlinks and file replacement during an operation. Include uploads, archive downloads and snapshot restores in the file access review.
+- [ ] Review the root helper and `fnas` for privilege escalation and command injection. Verify that each privileged operation checks authorization on the server and that file operations run with the caller's identity.
+- [ ] Check the installed system from another machine. Verify which ports listen by default, which networks can reach them, and that each enabled protocol enforces its intended authentication and encryption settings.
+- [ ] Review the upgrade path and check the actual release's Debian packages and Go and JavaScript dependencies for known vulnerabilities. Verify how a user authenticates an update before installing it.
+- [ ] Record the build reviewed, checks run and findings. Fix and retest release blockers. Block release on known exploitable issues that allow authentication bypass, privilege escalation or unauthorized access to files, and document any other findings and their impact.
+
+Use [OWASP ASVS](https://asvs.owasp.org/) for the web review and the [Debian Security Tracker](https://security-tracker.debian.org/tracker/) to check advisories against installed Debian package versions.
 
 ## Open questions and risks
 

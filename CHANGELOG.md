@@ -14,6 +14,17 @@ bump.
 
 ### Added
 
+- Files, slice E: **Earlier versions…** in a file's menu lists the snapshots that
+  hold that path, each with the date it was taken and how big the file was, and
+  **Look** opens one. **Put back a copy** writes it beside the file as
+  `notes (from 11-10-2026).txt`, never over it, and refuses a name that is already
+  there. On a pool without snapshots the item is shown disabled with "This pool
+  doesn't support snapshots". The helper reads a snapshot as root, since ZFS leaves
+  `.zfs` to root alone on many installs, so a version is only offered when the
+  person can list the file's own folder through their own child, the snapshot name
+  comes from `fnas` and not the request, and the path is confined against that
+  snapshot. Everything written back is written as the person, through the same
+  door an upload takes.
 - Files, slice D: a **Columns** control adds Kind, Owner and Permissions to the list (off
   at first, remembered by the browser), and the preview gains a line each for kind,
   owner and permissions. When the person can't change a file or the folder they are in,

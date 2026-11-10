@@ -29,12 +29,15 @@ const (
 	OpFileMkdir  = "file-mkdir"
 	OpFileRename = "file-rename"
 	OpFileDelete = "file-delete"
-	OpFileZip    = "file-zip"
-	OpFileCopy   = "file-copy"
-	OpFileTree   = "file-tree"
-	OpFileSearch = "file-search"
-	OpSessions   = "sessions"
-	OpEndSession = "end-session"
+	// One file as it was in a snapshot, and putting one of those back
+	OpFileSnapshots = "file-snapshots"
+	OpFileRestore   = "file-restore"
+	OpFileZip       = "file-zip"
+	OpFileCopy      = "file-copy"
+	OpFileTree      = "file-tree"
+	OpFileSearch    = "file-search"
+	OpSessions      = "sessions"
+	OpEndSession    = "end-session"
 )
 
 // ToTheEnd is the Length of an answer whose bytes run until the helper closes the
@@ -67,6 +70,8 @@ type Request struct {
 	Path   string `json:"path,omitempty"`
 	Start  int64  `json:"start,omitempty"`
 	Length int64  `json:"length,omitempty"`
+	// Which snapshot to read, for the ops that look back
+	Snapshot string `json:"snapshot,omitempty"`
 	// A rename's new name, and whether a write may replace what is there
 	To      string `json:"to,omitempty"`
 	Replace bool   `json:"replace,omitempty"`

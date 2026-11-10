@@ -42,6 +42,9 @@ docker run --rm -it -p 127.0.0.1:8080:80 -v "$PWD:/src:ro" debian:trixie bash -c
     find /mnt/tank/shares -type f -exec chmod 0660 {} +
     # People walk through the pools folders to reach their share
     chmod 755 /mnt/tank /mnt/tank/shares
+    # Snapshots are root only here, exactly as ZFS leaves .zfs on a real NAS, so
+    # the helper has to be the one that opens an earlier version
+    find /mnt/tank/shares -type d -name .zfs -exec chmod 700 {} +
     /usr/lib/fellowship-nas-web/fellowship-nas-helper &
     sleep 1
     echo "Open http://localhost:8080"
