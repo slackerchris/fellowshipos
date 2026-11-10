@@ -10,7 +10,7 @@ All the Open questions have since been answered; the plan's Open questions secti
 
 ## Storage
 
-1. **Agreed:** three storage engines, chosen per pool. ZFS and traditional RAID are **built** (Phase 10); Unraid-style is next:
+1. **Agreed:** three storage engines, chosen per pool. ZFS, traditional RAID (Phase 10) and Unraid-style (Phase 11) are **built**:
    - ZFS
    - Unraid-style: each disk formatted on its own, with parity disks (mergerfs + SnapRAID)
    - Traditional RAID: build RAID 1, 5, 6 or 10 with mdadm, then format it

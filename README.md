@@ -1,6 +1,6 @@
 # FellowshipOS
 
-FellowshipOS builds a Debian Trixie live ISO and a Proxmox LXC template for amd64 homelab systems. **FellowshipNAS** is its full-install NAS role. It manages disks, ZFS pools and traditional RAID arrays, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances.
+FellowshipOS builds a Debian Trixie live ISO and a Proxmox LXC template for amd64 homelab systems. **FellowshipNAS** is its full-install NAS role. It manages disks, ZFS pools and traditional RAID arrays, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, light and dark appearances, and four themes chosen in the account menu.
 
 [Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
@@ -84,7 +84,7 @@ The network-facing `fellowship-nas-web` process runs as an unprivileged account.
 
 ### Snapshots, backup, and recovery
 
-ZFS shares default to 24 hourly, 30 daily, and 6 monthly snapshots. Traditional RAID arrays have no snapshots, and the backup job covers ZFS pools only. With SMB Previous Versions enabled, Windows can expose those snapshots. The single scheduled backup job copies a source pool's shares to a second ZFS pool at 03:00 local time. A share restore leaves an existing share in place.
+ZFS shares default to 24 hourly, 30 daily, and 6 monthly snapshots. Traditional RAID arrays and Unraid-style pools have no snapshots, and the backup job covers ZFS pools only. With SMB Previous Versions enabled, Windows can expose those snapshots. The single scheduled backup job copies a source pool's shares to a second ZFS pool at 03:00 local time. A share restore leaves an existing share in place.
 
 ```bash
 sudo fnas snapshot list media

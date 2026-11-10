@@ -241,7 +241,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - The desktop follows jobs over server-sent events, and they finish even if the browser closes or the web server restarts.
   - A job whose unit vanished is marked as stopped.
   - ZED already reports finished scrubs and resilvers, so jobs only alert on failure or a finished expansion.
-  - Every engine's long jobs use the same mechanism. Today's kinds (`jobs.KINDS`) are resilver, scrub, expand and backup; Phase 11 adds a `sync` kind for SnapRAID, with an alert when a sync finishes or fails.
+  - Every engine's long jobs use the same mechanism. Its kinds (`jobs.KINDS`) are resilver, scrub, expand, sync and backup; `sync` is SnapRAID's; a failed sync alerts, a finished one records its time.
 - **Bays and identify:** disks in an enclosure that reports slots (SES) are shown by bay, in the desktop and in alerts. Identify writes the slot's `locate` file; without SES it reads from the disk for a minute so its activity light gives it away.
 - **Degraded pools:** the hourly check names each missing or failing disk by bay or by-id name.
 
@@ -305,7 +305,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 **Storage checks** (Chris, Nov 10)
 
 - **Settings → Storage checks** has one row per engine, built or not: whether its pools are checked by themselves, when, the next run, its pools, and **Check now** (the same check as Storage's button, on every healthy pool of that engine).
-- **Engines fnas schedules** (ZFS now, SnapRAID in Phase 11) run from `fellowship-nas-scrub@ENGINE.timer`, which calls `fnas pool scrub-all ENGINE`. The row sets how often (every month, or every three months), the week (first to fourth), the day and the hour; fnas writes them as the timer's `OnCalendar` in a drop-in. The defaults reproduce Debian's: the second Sunday of each month, at midnight, so an upgrade changes nothing.
+- **Engines fnas schedules** (ZFS and, since Phase 11, SnapRAID) run from `fellowship-nas-scrub@ENGINE.timer`, which calls `fnas pool scrub-all ENGINE`. The row sets how often (every month, or every three months), the week (first to fourth), the day and the hour; fnas writes them as the timer's `OnCalendar` in a drop-in. The defaults reproduce Debian's: the second Sunday of each month, at midnight, so an upgrade changes nothing.
 - **Arrays** keep Debian's `mdcheck`, which pauses each morning and carries on the next night, so their row only turns it on or off. Timing moves into fnas when, and if, fnas grows a check that spans nights.
 - **Health** reads each engine's schedule: a pool is overdue after 40 days on a monthly schedule and 100 on a quarterly one. Automatic checks turned off are a choice, shown as such, not a late check.
 - **Saved with the settings** on every pool, and brought back by a restore.
@@ -600,6 +600,7 @@ The desktop is the interface from the start. Every app opens in a window; there 
 - **Look (chosen by Chris):** a dark forest palette, with the fantasy in the atmosphere only.
   - Controls stay clean and readable: solid panels, softly rounded windows, crisp icons, gold used sparingly.
   - The theme follows the device; the light theme is the same palette in daylight.
+  - **Themes** (Chris, Nov 9): Silverwater, Hearthfield and Highwatch sit beside the default forest and gold, each with a light and a dark mode and its own wallpaper, chosen in the account menu. Each is four colours per mode in `web/themes.mjs`; the build works out the rest and stops if any text falls below WCAG AA contrast.
 
   | Element | Colour |
   | --- | --- |
