@@ -210,7 +210,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - Layouts: single, mirror, RAIDZ1, RAIDZ2, RAIDZ3, and pools of several groups ("two 6-disk RAIDZ2 groups"). Hot spares. Growing a pool by adding a group or expanding a RAIDZ group by one disk.
 - Defaults: `ashift=12`, `compression=lz4`, `atime=off`, `xattr=sa`, `acltype=posixacl`, `dnodesize=auto`.
 - Shares are datasets in `POOL/shares`; settings are saved in `POOL/fellowship-config`.
-- Snapshots by Sanoid, monthly scrub from Debian's `zfsutils-linux` job, events from `zed`.
+- Snapshots by Sanoid, monthly scrub from Debian's `zfsutils-linux` cron job (every healthy pool, on the second Sunday; the role depends on `cron` so the job runs), events from `zed`.
 - **Kernel and ZFS updates:** there's no version pin.
   - `zfs-kernel-check` runs after kernel and header installs. With no module for the new kernel, it keeps GRUB on the running kernel, and `fnas check` raises an alert.
   - `unattended-upgrades` never reboots by itself.
@@ -241,7 +241,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - The desktop follows jobs over server-sent events, and they finish even if the browser closes or the web server restarts.
   - A job whose unit vanished is marked as stopped.
   - ZED already reports finished scrubs and resilvers, so jobs only alert on failure or a finished expansion.
-  - Every engine's long jobs (reshapes, rebuilds, syncs, scrubs) use the same mechanism.
+  - Every engine's long jobs use the same mechanism. Today's kinds (`jobs.KINDS`) are resilver, scrub, expand and backup; Phase 11 adds a `sync` kind for SnapRAID, with an alert when a sync finishes or fails.
 - **Bays and identify:** disks in an enclosure that reports slots (SES) are shown by bay, in the desktop and in alerts. Identify writes the slot's `locate` file; without SES it reads from the disk for a minute so its activity light gives it away.
 - **Degraded pools:** the hourly check names each missing or failing disk by bay or by-id name.
 
@@ -254,9 +254,10 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - an internal write-intent bitmap, so a crash only resyncs what changed
   - disks partitioned first, so a replacement only needs to be the same size or larger
   - the filesystem aligned to the array's stripe
-- **Boot and alerts:** the array is recorded in `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID through a systemd mount unit. `mdadm --monitor` sends alerts through `fellowship-nas-notify`.
-- **Checks:** Debian's monthly `checkarray` runs on every array, and its mismatch count is shown in Health.
-- **Shares and settings:** shares are folders in `/mnt/NAME/shares`; settings in `/mnt/NAME/.fellowship`.
+- **Boot:** the array is recorded in `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID (from `/etc/fstab`; see the open question on a systemd mount unit).
+- **Alerts:** `fnas` adds a `PROGRAM` line to `mdadm.conf`, so Debian's `mdmonitor` service runs `/usr/lib/fellowship-nas/md-alert` for each event, within its one-minute poll. A failed disk, a degraded or vanished array and a missing spare are alerts; a finished rebuild is a note.
+- **Checks:** Debian's `mdcheck` timers check every array from the first Sunday of each month, six hours a night until done. A drop-in on those services tells `fnas` which arrays they started and finished, so Health records them beside the checks `fnas` starts, and a check's mismatch count is a Health finding.
+- **Shares and settings:** shares are folders in `/mnt/NAME/shares`; settings in `/mnt/NAME/fellowship-config`.
 - **No snapshots:** shares show "No snapshots on this engine".
 - **Growing:** one disk at a time. The reshape runs as a job; the filesystem is grown when it finishes.
 - **Replacing:** a failed disk is marked failed, removed and replaced through the same guided flow as ZFS. The rebuild runs as a job, and a hot spare takes over by itself.
@@ -306,7 +307,8 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **Disks:** each data disk gets its own XFS filesystem, mounted at `/srv/disks/SERIAL`, and mergerfs joins them at `/mnt/NAME`.
   - XFS is used because SnapRAID keeps each parity level in one file, and ext4 caps a file at 16 TiB.
   - Parity disks are XFS too, and must be at least as large as the largest data disk.
-- **Shares and settings:** shares are top-level folders in `/mnt/NAME`; settings are in `/mnt/NAME/.fellowship`, copied to every data disk so the pool can be rebuilt after a reinstall.
+- **Shares and settings:** shares are folders in `/mnt/NAME/shares`, as on every engine, so the settings folder beside them isn't taken for a share; settings are in `/mnt/NAME/fellowship-config`, copied to every data disk so the pool can be rebuilt after a reinstall.
+- **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, which jobs don't have yet.
 - **Schedules:** `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` runs, then a weekly partial `snapraid scrub`. The sync is skipped with an alert if too many files were deleted, a sign of a missing disk.
 - **Repairs:** a failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
 - **Protection is visible:** the Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.
@@ -314,7 +316,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 **Btrfs**
 
 - **Layouts:** single, `raid1`, `raid1c3`, `raid10`. Metadata uses at least the same redundancy as data, and RAID5/6 isn't offered.
-- **Shares and settings:** shares are subvolumes in `/mnt/NAME/shares`; settings are in `/mnt/NAME/.fellowship`.
+- **Shares and settings:** shares are subvolumes in `/mnt/NAME/shares`; settings are in `/mnt/NAME/fellowship-config`.
 - **Snapshots:** made by `btrbk` into `/mnt/NAME/.snapshots`, named so Samba shows them as "Previous Versions".
 - **Checks:** a monthly `btrfs scrub`, and `btrfs device stats` read by the hourly check.
 - **Mounting:** by filesystem UUID through a systemd mount unit. A `degraded` mount only happens after a confirmed choice in the Storage app.
@@ -668,7 +670,7 @@ nas/
 
 ## Build phases and test checklist
 
-No phase starts until the previous gate passes in a VM. Each storage gate runs on several machines: the system disk alone, one data disk, two disks, four disks, sixteen disks, and disks of mixed sizes, so nothing only works on a big box. Every gate also checks rule 6: Chris can see from the screens alone what exists, what doesn't, and why.
+No phase starts until the previous gate passes in a VM, except for items carried over by name: the phase's row lists them, and they are done before the release. Each storage gate runs on real disks in the VM (virtual disks the kernel sees as disks), never only against fakes: Phase 10's engine passed every unit test, and its first real-disk run still found seven bugs. Each storage gate runs on several machines: the system disk alone, one data disk, two disks, four disks, sixteen disks, and disks of mixed sizes, so nothing only works on a big box. Every gate also checks rule 6: Chris can see from the screens alone what exists, what doesn't, and why.
 
 | Phase | Work | Gate | Status |
 | --- | --- | --- | --- |
@@ -682,8 +684,8 @@ No phase starts until the previous gate passes in a VM. Each storage gate runs o
 | 7. Any number of drives and ZFS depth | System growth from Settings, long-job progress, drive bays and identify, multi-group pools, RAIDZ3, spares, growing, guided replacement, share settings in pool config, NFS through `exports.d`, the engine layer in `fnas`, pools at `/mnt/NAME` | Layouts that fit on 0, 1, 2, 4 and 16 disks; on sixteen, a two-group RAIDZ2 pool with a spare survives a failed disk replaced from the desktop | Done. Bay lights tested against a fake sysfs only |
 | 8. Show everything | The fixes from Chris's review of the existing apps: engine choice first in Create pool (only ZFS usable, the others "Not built yet"); plain-word layout labels without nonsense layouts; "Ways to share" on Shares; Health rewritten around every check; Setup once, then Settings; Snapshots and backup app holding the backup jobs | With no pool, every app still shows every feature and why it can't be used yet; Setup appears on first login only; Health lists each check with a time | Done. On a fresh VM install: Setup opened on first login, stayed gone after Skip and a new login, and came back from Settings. Health caught a stopped Samba with a critical alert, then a Resolved one. The gate found and fixed a disks widget that said "all healthy" with no SMART data |
 | 9. Users and sharing settings | The Users app (accounts, shares-only accounts, groups, one password); share access by users and groups; every SMB and NFS setting listed under Sharing; existing shares migrated | From the desktop alone: add two shares-only users and a group; give one read and the other read and write; over SMB each gets exactly that and a guest gets nothing; a read-only NFS network can't write; recycle bin and Time Machine settings pass `testparm`; settings survive a reinstall and restore | Done. From the desktop: added Sam and Kim (shares only) and the family group, made docs with Sam read and family read and write, turned on guests and the recycle bin for media, and set the NAS-wide SMB and NFS settings. Over SMB, Sam read but couldn't write, Kim wrote through family, guests read media only, and deletes went to `.recycle`. Over NFS a read-only client couldn't write. After reinstalling the system disk, importing and restoring from the desktop brought back the accounts with their IDs, the group, the share access and both protocols' settings; passwords are set again in Users. The gate found and fixed: lockd and statd ignoring fixed ports, restored accounts shown as turned off, and guests silently shut out by required encryption (now refused with the reason). NFS access per user and the Time Machine setting were checked from the server side only (exports and `testparm`), with no Linux or Mac client |
-| 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | Engine, CLI, Health and the desktop screens are built. Gate partly passed in the VM on four disks, all from the desktop: created a RAID 5 array on XFS, shared it over SMB, ran Check array, failed a disk and replaced it, added a fifth disk (the filesystem grew after the reshape), and rebooted twice; a 50 MB test file kept its checksum throughout. That run found and fixed seven engine bugs (see the changelog). Outstanding: RAID 6 and sixteen disks, importing an array made on another machine, `mdadm --monitor` alerts wired into notifications, and Health learning of the checks Debian's own `mdcheck` timer runs each month (it records only checks fnas starts). |
-| 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync | |
+| 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | Engine, CLI, Health, alerts and the desktop screens are built. Gate partly passed in the VM on four disks, all from the desktop: created a RAID 5 array on XFS, shared it over SMB, ran Check array, failed a disk and replaced it, added a fifth disk (the filesystem grew after the reshape), and rebooted twice; a 50 MB test file kept its checksum throughout. That run found and fixed seven engine bugs (see the changelog). Later, in the same VM: Debian's `mdcheck` ran a check that Health recorded, and a failed disk raised a critical alert within a minute. **Carried over** into Phase 11, to be done before the release: RAID 6, sixteen disks, and importing an array made on another machine |
+| 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync; all on real disks in the VM; writing `snapraid.conf` and the mergerfs mount twice changes nothing the second time, the check that caught `spares=1` in `mdadm.conf` | |
 | 12. More ways to share | SFTP, FTP (FTPS by default) and WebDAV, using Phase 9's users and access lists | Two users with different access see only their shares over SFTP, FTP and WebDAV; plain FTP stays off until turned on | |
 | 13. Files | The Files app, snapshot browse and restore | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
 | 14. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
@@ -766,8 +768,7 @@ Web and access:
 | Features decided without Chris | Rework and lost trust, as in revisions 2 and 3 | Rule 7: his reference list is the scope; anything cut is put to him first |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step:** finish Phase 10's gate: RAID 6, sixteen disks and importing an array made
-on another machine; wire `mdadm --monitor` into notifications; and have Health learn of the
-checks Debian's own `mdcheck` timer runs. Then Phase 11, Unraid-style.
+**Next step:** Phase 11, Unraid-style, carrying Phase 10's RAID 6, sixteen-disk and
+foreign-import tests over by name.
 Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs
 a real Windows client: mount a share, then check Previous Versions.

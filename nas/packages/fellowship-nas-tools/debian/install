@@ -1,3 +1,6 @@
 fnas usr/sbin
 fellowship-nas-notify usr/sbin
 fellowship_nas usr/lib/python3/dist-packages
+md-alert usr/lib/fellowship-nas
+systemd/mdcheck_start.service.d usr/lib/systemd/system
+systemd/mdcheck_continue.service.d usr/lib/systemd/system

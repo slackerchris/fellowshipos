@@ -25,6 +25,8 @@ RESERVED_POOL_PREFIXES = ("mirror", "raidz", "draid", "spare", "log", "cache")
 SCRUB_DONE = re.compile(r"scrub (?:repaired|canceled).* on (\w{3} \w{3} +\d+ [\d:]+ \d{4})")
 # What this engine calls its monthly check, for Health's wording
 CHECK_WORD = "scrub"
+# When Debian's zfsutils-linux cron job scrubs every healthy pool by itself
+CHECK_SCHEDULE = "on the second Sunday of each month"
 MODULE_DIR = "/sys/module/zfs"
 SIZE_ONLY = re.compile(r"^\s*(mirror|raidz) contains devices of different sizes$")
 CONFIG_DATASET = "fellowship-config"
@@ -565,6 +567,15 @@ def scrub_finished(pool):
 def last_scrub(pool):
     """When a scrub last finished, or when the pool was made if it never has."""
     return scrub_finished(pool) or created_at(pool)
+
+
+def created(pool):
+    return created_at(pool)
+
+
+def mismatches(pool):
+    """A scrub's errors show in the pool's own state, which Health reads already."""
+    return 0
 
 
 def scrub_pool(name):

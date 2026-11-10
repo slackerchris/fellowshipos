@@ -14,6 +14,14 @@ bump.
 
 ### Added
 
+- mdadm's array events reach alerts the moment `mdmonitor` sees them, rather than at
+  the next hourly check: a failed disk, a degraded or vanished array and a missing spare
+  are alerts, and a finished rebuild is a note. `fnas` points mdadm at
+  `/usr/lib/fellowship-nas/md-alert` through a `PROGRAM` line in `mdadm.conf`, and the
+  package adds it to existing systems on upgrade.
+- Health records the monthly array checks Debian's `mdcheck` timers run, not only the
+  ones fnas starts, through a drop-in on those services. A check's finish is a note, and
+  blocks it found that don't match are a Health finding and an alert.
 - Create pool names RAID layouts in full ("Two copies of everything, striped across
   4 disks", "RAID 10 · Two copies, 4 disks") and asks for the format, XFS or ext4. An
   array's card offers Check array, Repair when a check found mismatches, and only the
@@ -29,7 +37,8 @@ bump.
   the wrong copy, so it needs its own confirmation.
 - CI in [.github/workflows/ci.yml](.github/workflows/ci.yml): the Python unit
   tests, `gofmt` and `go vet` plus `go test` for both Go modules, both frontend
-  builds, and ShellCheck over the shell scripts. The ISO build stays a local
+  builds, and ShellCheck over the shell scripts, including the hook and maintainer
+  scripts that carry no `.sh`. The ISO build stays a local
   step, since it needs Docker and Debian mirrors.
 - Health opens on a verdict banner, then two groups of cards: System (CPU usage,
   memory, CPU load) and Storage & services (pools, disks, services). Each card
@@ -58,6 +67,12 @@ bump.
 
 ### Changed
 
+- Health's storage check names when each engine checks itself (Debian's ZFS scrub on the
+  second Sunday, mdcheck from the first), and an array never checked falls due 40 days
+  after it was made instead of at once.
+- `mdadm` and `xfsprogs` are dependencies of `fellowship-nas-tools`, which holds the
+  engine, rather than of the role, so the tools alone can run it. The role depends on
+  `cron`, which Debian's monthly ZFS scrub needs.
 - `fnas` stops any command still running after 300 seconds and reports it.
   `syncoid` and `zfs destroy -r` are exempt, since they take as long as they take.
 - The privileged helper runs at most eight `fnas` processes at once, so a flood
@@ -87,7 +102,6 @@ bump.
   - mdadm.conf kept the `spares=1` a new array reports while it builds.
   - The pool details view failed before an array's first check.
   - `fnas pool status NAME` ran `zpool status` for arrays too.
-- `fellowship-nas` now depends on `mdadm` and `xfsprogs`, which the engine needs.
 - A Health dial showing a single part in full colour had a notch at twelve
   o'clock. The gap between parts now appears only when there is more than one.
 - A gauge beside a short row grew to fill the whole track and stretched its

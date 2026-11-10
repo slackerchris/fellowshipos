@@ -83,12 +83,22 @@ def scrub_findings(names, now):
     found = []
     for pool in names:
         engine = engine_of(pool)
-        age = now - engine.last_scrub(pool)
+        last = engine.last_scrub(pool)
+        # A pool never checked falls due a check's interval after it was made
+        age = now - (last or engine.created(pool))
         if age > SCRUB_MAX_AGE:
             word = "been checked" if engine.CHECK_WORD == "check" else "been scrubbed"
+            since = (f"The last {engine.CHECK_WORD} was {age // DAY:.0f} days ago" if last
+                     else f"It hasn't had a {engine.CHECK_WORD} since it was made, {age // DAY:.0f} days ago")
             found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't {word}",
-                                 f"The last {engine.CHECK_WORD} was {age // DAY:.0f} days ago. "
-                                 f"Start one with Check for damage in Storage, or sudo fnas pool scrub {pool}"))
+                                 f"{since}. One runs by itself {engine.CHECK_SCHEDULE}. "
+                                 f"Start one now from Storage, or sudo fnas pool scrub {pool}"))
+        count = engine.mismatches(pool)
+        if count:
+            found.append(finding(f"mismatch-{pool}", "medium",
+                                 f"Pool {pool}: {count} blocks don't match",
+                                 f"The last {engine.CHECK_WORD} found them. Repair them from Storage, "
+                                 f"or sudo fnas pool repair {pool}"))
     return found
 
 

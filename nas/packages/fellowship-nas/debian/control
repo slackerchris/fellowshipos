@@ -8,7 +8,7 @@ Standards-Version: 4.7.0
 Package: fellowship-nas
 Architecture: all
 Depends: fellowship-nas-tools (= ${binary:Version}), zfsutils-linux, zfs-dkms,
- zfs-zed, nfs-kernel-server, sanoid, smartmontools, msmtp, ca-certificates, mdadm, xfsprogs,
+ zfs-zed, nfs-kernel-server, sanoid, smartmontools, msmtp, ca-certificates, cron,
  linux-image-amd64, linux-headers-amd64, ${misc:Depends}
 Description: FellowshipNAS home server role
  Everything the FellowshipNAS role needs: ZFS and its tools, traditional RAID

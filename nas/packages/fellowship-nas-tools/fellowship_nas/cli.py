@@ -8,11 +8,13 @@ import time
 
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, pools, services, shares, snapshots, ssh, system, usage, users
+from .engines import mdadm
 
 
 # Actions that change nothing worth saving
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
-                     "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys"}
+                     "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys",
+                     "array-checks", "watch-events"}
 ON_OFF = ("on", "off")
 
 
@@ -361,6 +363,10 @@ def build_parser():
     repair = pool.add_parser("repair", help="mend the blocks a check found to be wrong")
     repair.add_argument("name")
     repair.add_argument("--confirm", default="", help='type "repair NAME"')
+    # Debian's mdcheck timers run these around each night's work, so Health sees their checks
+    array_checks = pool.add_parser("array-checks", help="note the array checks Debian's mdcheck runs")
+    array_checks.add_argument("when", choices=("starting", "resuming", "stopped"))
+    pool.add_parser("watch-events", help="send mdadm's array events to alerts")
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
@@ -696,6 +702,13 @@ def dispatch_pool(args, show):
         started(pools.engine_for(args.name).scrub_pool(args.name))
     elif args.action == "repair":
         started(pools.engine_for(args.name).repair_pool(args.name, args.confirm))
+    elif args.action == "array-checks":
+        if args.when == "stopped":
+            mdadm.mdcheck_stopped()
+        else:
+            mdadm.mdcheck_starting(resuming=args.when == "resuming")
+    elif args.action == "watch-events":
+        mdadm.watch_events()
 
 
 def dispatch_job(args, show):

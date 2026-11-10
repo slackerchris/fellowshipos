@@ -1,0 +1,37 @@
+#!/bin/sh
+# mdadm --monitor runs this for each array event: EVENT ARRAY [DISK]. Most are
+# routine, so only these reach a person.
+event="$1"
+array="$2"
+disk="${3:-a disk}"
+name=$(basename "$array")
+notify=/usr/sbin/fellowship-nas-notify
+
+case "$event" in
+    Fail|FailSpare)
+        "$notify" --severity critical "Pool $name: disk failed" \
+            "$disk has failed. Replace it from Storage in the desktop. See: sudo fnas pool status $name"
+        ;;
+    DegradedArray)
+        "$notify" --severity critical "Pool $name is degraded" \
+            "The array is missing a disk and has less protection until it is replaced. See: sudo fnas pool status $name"
+        ;;
+    DeviceDisappeared)
+        "$notify" --severity critical "Pool $name has disappeared" \
+            "The kernel no longer has this array. Check its disks are connected."
+        ;;
+    SparesMissing)
+        "$notify" --severity medium "Pool $name is missing a hot spare" \
+            "The array has fewer spares than it was set up with. Add one from Storage in the desktop."
+        ;;
+    SpareActive)
+        # A rebuild onto a new disk or a hot spare has finished: mdadm reports the
+        # disk joining, not the rebuild ending, which it also says of every check
+        "$notify" --severity info "Pool $name: rebuild finished" \
+            "$disk is back in use, and the array is fully protected again."
+        ;;
+    TestMessage)
+        "$notify" --severity info "Pool $name: test from mdadm" "mdadm's alerts reach FellowshipNAS."
+        ;;
+esac
+exit 0

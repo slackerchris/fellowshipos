@@ -1,5 +1,6 @@
 """Unit tests for fnas. Nothing here touches a real disk: every external
 command goes through a fake, and a test fails if fnas runs one it didn't expect."""
+import contextlib
 import importlib
 import json
 import os
@@ -1648,6 +1649,15 @@ class Protection(Base):
         self.assertEqual(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE - 1), [])
         self.assertEqual(len(fnas.scrub_findings(["tank"], expected + fnas.SCRUB_MAX_AGE + 1)), 1)
 
+    def test_a_pool_never_checked_falls_due_after_it_was_made(self):
+        engine = SimpleNamespace(CHECK_WORD="check", CHECK_SCHEDULE="monthly", last_scrub=lambda pool: 0,
+                                 created=lambda pool: 1000, mismatches=lambda pool: 0)
+        with patch("engine_of", lambda pool: engine):
+            self.assertEqual(fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE - 1), [])
+            found = fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE + 1)
+        self.assertEqual(len(found), 1)
+        self.assertIn("since it was made", found[0]["message"])
+
     def test_resilver_is_not_a_scrub(self):
         self.healthy(status="  scan: resilvered 1G in 00:01:00 with 0 errors on Sun Nov  8 00:24:01 2026\n",
                      created=77)
@@ -2096,7 +2106,74 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
                     mock.patch.object(self.engine, "MDADM_CONF", conf):
                 self.engine.save_conf()
             with open(conf) as file:
-                self.assertEqual(file.read(), "MAILADDR root\nARRAY /dev/md/vault metadata=1.2 UUID=d6a1:3cf5\n")
+                self.assertEqual(file.read(), "MAILADDR root\nPROGRAM /usr/lib/fellowship-nas/md-alert\n"
+                                              "ARRAY /dev/md/vault metadata=1.2 UUID=d6a1:3cf5\n")
+
+    def test_array_events_reach_alerts_after_an_upgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            conf = os.path.join(directory, "mdadm.conf")
+            with open(conf, "w") as file:
+                file.write("MAILADDR root\nPROGRAM /bin/old\nARRAY /dev/md/vault UUID=1\n")
+            ran = []
+            with patch("run", lambda *command, check=True: ran.append(command) or SimpleNamespace(
+                        stdout="", stderr="", returncode=0)), \
+                    mock.patch.object(self.engine, "MDADM_CONF", conf), \
+                    mock.patch.object(self.engine, "mdadm_installed", lambda: True):
+                self.engine.watch_events()
+                with open(conf) as file:
+                    self.assertEqual(file.read(), "MAILADDR root\nPROGRAM /usr/lib/fellowship-nas/md-alert\n"
+                                                  "ARRAY /dev/md/vault UUID=1\n")
+                self.assertIn(("systemctl", "try-restart", "mdmonitor.service"), ran)
+                # Already set up: nothing is rewritten or restarted
+                ran.clear()
+                self.engine.watch_events()
+                self.assertEqual(ran, [])
+
+    def mdcheck(self, directory, state):
+        """Run Debian's mdcheck hooks against arrays in these states: name -> (sync_action, paused)."""
+        def md_file(name, field):
+            action, _ = state[name]
+            return {"sync_action": action, "last_sync_action": "check", "mismatch_cnt": "0"}[field]
+        sent = []
+        return sent, contextlib.ExitStack(), [
+            mock.patch.object(self.engine, "CHECKS", os.path.join(directory, "checks.json")),
+            mock.patch.object(self.engine, "array_names", lambda: {f"/dev/{n}": n for n in state}),
+            mock.patch.object(self.engine, "md_file", md_file),
+            mock.patch.object(self.engine, "mdcheck_paused", lambda name: state[name][1]),
+            mock.patch.object(self.engine.alerts, "send_alert", lambda *alert: sent.append(alert)),
+        ]
+
+    def test_health_sees_the_checks_debian_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = {"vault": ("idle", False), "busy": ("resync", False)}
+            sent, stack, patches = self.mdcheck(directory, state)
+            with stack:
+                for each in patches:
+                    stack.enter_context(each)
+                # The first night: mdcheck takes every idle array, then pauses after six hours
+                self.engine.mdcheck_starting()
+                state["vault"] = ("idle", True)
+                self.engine.mdcheck_stopped(now=100)
+                self.assertEqual(self.engine.last_scrub("vault"), 0)
+                self.assertEqual(sent, [])
+                # The next night it carries on and finishes
+                self.engine.mdcheck_starting(resuming=True)
+                state["vault"] = ("idle", False)
+                self.engine.mdcheck_stopped(now=200)
+                self.assertEqual(self.engine.last_scrub("vault"), 200)
+                self.assertEqual(self.engine.last_scrub("busy"), 0)
+                self.assertEqual([alert[0] for alert in sent], ["info"])
+                # A later continuation with nothing paused records nothing new
+                self.engine.mdcheck_starting(resuming=True)
+                self.engine.mdcheck_stopped(now=300)
+                self.assertEqual(self.engine.last_scrub("vault"), 200)
+
+    def test_only_a_checks_mismatches_are_a_problem(self):
+        values = {"last_sync_action": "check", "mismatch_cnt": "128"}
+        with mock.patch.object(self.engine, "md_file", lambda name, field: values[field]):
+            self.assertEqual(self.engine.mismatches("vault"), 128)
+            values["last_sync_action"] = "repair"
+            self.assertEqual(self.engine.mismatches("vault"), 0)
 
     def best(self, count):
         option = self.options(count)[0]

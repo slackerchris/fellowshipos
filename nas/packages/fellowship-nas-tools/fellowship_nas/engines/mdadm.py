@@ -13,7 +13,7 @@ import re
 import time
 
 from ..common import STATE_DIR, FnasError, read_json, run, write_json
-from .. import disks, jobs, pools, shares
+from .. import alerts, disks, jobs, pools, shares
 
 
 LAYOUTS = ("mirror", "raid5", "raid6", "raid10")
@@ -26,6 +26,8 @@ MAX_SPARES = 2
 FILESYSTEMS = ("xfs", "ext4")
 # What this engine calls its monthly check, for Health's wording
 CHECK_WORD = "check"
+# When Debian's mdcheck timers check every array by themselves
+CHECK_SCHEDULE = "from the first Sunday of each month, six hours a night until done"
 # XFS is the recommendation: it grows while mounted, and mends itself
 RECOMMENDED_FILESYSTEM = "xfs"
 MKFS = {"xfs": ("mkfs.xfs", "-f"), "ext4": ("mkfs.ext4", "-F")}
@@ -38,6 +40,13 @@ FSTAB = "/etc/fstab"
 MDADM_CONF = "/etc/mdadm/mdadm.conf"
 SYS_BLOCK = "/sys/block"
 CHECKS = os.path.join(STATE_DIR, "checks.json")
+# Arrays Debian's mdcheck is part way through, kept in CHECKS under a key no
+# pool name can take, since a pool name holds no "$"
+WATCHING = "$mdcheck"
+# Where mdcheck keeps its place in a check it paused for the night
+MDCHECK_DIR = "/var/lib/mdcheck"
+# mdadm --monitor runs this for each array event
+MD_PROGRAM = "/usr/lib/fellowship-nas/md-alert"
 # "md127 : active raid5 sdd1[3] sdc1[1] sdb1[0]"
 ARRAY_LINE = re.compile(r"^(md\w+)\s*:\s*(\S+)\s*(.*)$")
 # "sdd1[3]" or "sdc1[1](F)" for a disk that has failed
@@ -79,7 +88,8 @@ def read(path):
 
 def rows_of(path):
     try:
-        return open(path).readlines()
+        with open(path) as file:
+            return file.readlines()
     except FileNotFoundError:
         return []
 
@@ -368,18 +378,34 @@ def filesystem_uuid(device):
     return uuid
 
 
+def write_conf(arrays_rows):
+    """Write mdadm.conf with these ARRAY lines, keeping its other settings, and
+    point mdadm --monitor at our alerts."""
+    kept = [row for row in rows_of(MDADM_CONF) if not row.startswith(("ARRAY ", "PROGRAM "))]
+    os.makedirs(os.path.dirname(MDADM_CONF), exist_ok=True)
+    with open(MDADM_CONF, "w") as file:
+        file.writelines(kept + [f"PROGRAM {MD_PROGRAM}\n"] + arrays_rows)
+    # The monitor reads its settings once, when it starts
+    run("systemctl", "try-restart", "mdmonitor.service", check=False)
+
+
 def save_conf():
     """Record every array in mdadm.conf, so the kernel can assemble them at
     boot, before anything is mounted."""
     scanned = run("mdadm", "--detail", "--scan", check=False).stdout
-    kept = [row for row in rows_of(MDADM_CONF) if not row.startswith("ARRAY ")]
-    os.makedirs(os.path.dirname(MDADM_CONF), exist_ok=True)
-    with open(MDADM_CONF, "w") as file:
-        # A new array counts the disk it is still building onto as a spare; a spares=
-        # count recorded then would have mdadm --monitor report a spare missing forever
-        file.writelines(kept + [" ".join(word for word in row.split() if not word.startswith("spares=")) + "\n"
-                                for row in scanned.splitlines() if row.startswith("ARRAY ")])
+    # A new array counts the disk it is still building onto as a spare; a spares=
+    # count recorded then would have mdadm --monitor report a spare missing forever
+    write_conf([" ".join(word for word in row.split() if not word.startswith("spares=")) + "\n"
+                for row in scanned.splitlines() if row.startswith("ARRAY ")])
     run("update-initramfs", "-u", "-k", "all", check=False)
+
+
+def watch_events():
+    """Send mdadm's array events to alerts, as an upgrade from a release that
+    didn't. Leaves mdadm.conf alone when it already does."""
+    if not mdadm_installed() or f"PROGRAM {MD_PROGRAM}\n" in rows_of(MDADM_CONF):
+        return
+    write_conf([row for row in rows_of(MDADM_CONF) if row.startswith("ARRAY ")])
 
 
 # --------------------------------------------------------------- status
@@ -495,6 +521,74 @@ def member_disks(status):
 def last_scrub(name):
     """When a check last finished, in seconds since the epoch, or 0."""
     return int(read_json(CHECKS, {}).get(name, 0))
+
+
+def created(name):
+    """When the array was made, which is when its first check falls due."""
+    return created_at(detail(name)["fields"])
+
+
+def md_file(name, field):
+    with open(os.path.join(SYS_BLOCK, kernel_name(name), "md", field)) as file:
+        return file.read().strip()
+
+
+def mismatches(name):
+    """Blocks the last check found that don't match. A repair rewrites them and
+    counts them the same way, so only a check's count is a problem still there."""
+    try:
+        return int(md_file(name, "mismatch_cnt")) if md_file(name, "last_sync_action") == "check" else 0
+    except (OSError, ValueError, FnasError):
+        return 0
+
+
+def mdcheck_paused(name):
+    """Whether Debian's mdcheck has paused a check of this array for the night."""
+    fields = dict(line.split("=", 1) for line in run(
+        "mdadm", "--detail", "--export", array_device(name), check=False).stdout.split() if "=" in line)
+    return bool(fields.get("MD_UUID")) and os.path.exists(os.path.join(MDCHECK_DIR, "MD_UUID_" + fields["MD_UUID"]))
+
+
+def mdcheck_starting(resuming=False):
+    """Before Debian's mdcheck runs, note the arrays it is about to check, since
+    only fnas's own checks are otherwise recorded. Starting, it checks every idle
+    array; resuming, only those it paused."""
+    checks = read_json(CHECKS, {})
+    watching = set(checks.get(WATCHING, []))
+    for name in array_names().values():
+        try:
+            idle = md_file(name, "sync_action") == "idle"
+        except (OSError, FnasError):
+            continue
+        if idle and (not resuming or mdcheck_paused(name)):
+            watching.add(name)
+    checks[WATCHING] = sorted(watching)
+    write_json(CHECKS, checks)
+
+
+def mdcheck_stopped(now=None):
+    """After mdcheck stops: an array it was checking that is idle, with no place
+    saved for tomorrow, has finished. Record it and say what it found."""
+    checks = read_json(CHECKS, {})
+    still = []
+    for name in checks.get(WATCHING, []):
+        try:
+            if md_file(name, "sync_action") == "check" or mdcheck_paused(name):
+                still.append(name)
+                continue
+        except (OSError, FnasError):
+            # The array has gone; there is nothing to record
+            continue
+        checks[name] = int(now or time.time())
+        found = mismatches(name)
+        if found:
+            alerts.send_alert("medium", f"Pool {name}: the monthly check found {found} blocks that don't match",
+                              f"Repair them from Storage in the desktop, or sudo fnas pool repair {name}. "
+                              "A repair can keep the wrong copy, so back up what matters first.")
+        else:
+            alerts.send_alert("info", f"Pool {name}: monthly check finished", "No problems found.")
+    checks[WATCHING] = still
+    write_json(CHECKS, checks)
 
 
 def record_check(name, when=None):

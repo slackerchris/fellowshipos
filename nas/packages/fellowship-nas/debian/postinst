@@ -19,6 +19,10 @@ if [ "$1" = "configure" ]; then
     # Every account with a login shell joins nas-ssh, so nobody is locked out
     fnas ssh refresh || true
 
+    # Sends mdadm's array events, such as a failed disk, to alerts the moment
+    # they happen, rather than at the next hourly check
+    fnas pool watch-events || true
+
     # Picks up the alert hook
     systemctl try-restart zfs-zed.service
     systemctl daemon-reload

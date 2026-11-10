@@ -99,4 +99,9 @@ jobs:
       # Errors only to start with, so the first runs are about real bugs.
       # Tighten to --severity=warning once the scripts are quiet.
       - name: ShellCheck
-        run: shellcheck --severity=error $(git ls-files '*.sh')
+        # Plus the hook and maintainer scripts, which carry no .sh
+        run: >-
+          shellcheck --severity=error $(git ls-files '*.sh')
+          nas/packages/fellowship-nas-tools/md-alert nas/packages/fellowship-nas-tools/fellowship-nas-notify
+          nas/packages/fellowship-nas/smart-alert nas/packages/fellowship-nas/zfs-kernel-check
+          $(git ls-files 'nas/packages/*/debian/postinst' 'nas/packages/*/debian/postrm')

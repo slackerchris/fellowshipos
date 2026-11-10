@@ -24,11 +24,11 @@ All the Open questions have since been answered; the plan's Open questions secti
 
 7. **Agreed, built** in Phase 8: an always-visible "Ways to share" section, with each protocol's state, what it's for, how to connect, and its own settings.
 8. **Agreed:** add SFTP, FTP and WebDAV now. DLNA and iSCSI come later. FTP uses TLS (FTPS) by default, and plain FTP, which sends passwords unencrypted, is an opt-in.
-9. **Built** in Phase 9, **found** in the audit: no per-user permissions on shares. A share is either "shared" (everyone writes as one account) or "matched" (one owner). There's no "Alice can read, Bob can write".
+9. **Built** in Phase 9. The audit had found no per-user permissions on shares. A share was either "shared" (everyone writes as one account) or "matched" (one owner), with no "Alice can read, Bob can write". Shares now grant read or write access per user and group.
 
 ## Users
 
-10. **Built** in Phase 9, **found** in the audit: no Users app. Accounts can't be created, removed or grouped from the desktop; only an SMB password can be set for an account that already exists.
+10. **Built** in Phase 9. The audit had found no Users app. Accounts couldn't be created, removed or grouped from the desktop; only an SMB password could be set for an account that already existed. The Users app now does all of that.
 
 ## Health
 
@@ -50,7 +50,7 @@ All the Open questions have since been answered; the plan's Open questions secti
 20. **Agreed, built** in Phase 8: Setup opens by itself on an admin's first login, with "Skip for now". Afterwards it is gone from the desktop and launcher.
 21. **Agreed, built** in Phase 8: each setup step lives in its own app. Settings gets "Run setup again".
 22. **Agreed, built** in Phase 8: after a reinstall, Setup first offers to restore settings found on a pool.
-23. **Built** in Phase 8 (the Snapshots and backup app), **found** in the audit: the nightly backup can only be set up in Setup and the Shares page. Removing Setup must not take it away: it needs a home (a Backup section or app) showing every job, its last run and its next run.
+23. **Built** in Phase 8, as the Snapshots and backup app. The audit had found that the nightly backup could only be set up in Setup and the Shares page, so removing Setup would have taken it away. The Snapshots and backup app now holds it, with its last run and its 03:00 schedule.
 24. **Found:** Settings has no network settings (IP address, static or DHCP, DNS, gateway) and no updates screen.
 
 ## Snapshots and files

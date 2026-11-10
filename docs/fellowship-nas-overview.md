@@ -1,6 +1,6 @@
 # FellowshipNAS project overview
 
-Baseline as of November 9, 2026 · `nas-edition` at `e8a4450`
+Baseline as of November 9, 2026 · `nas-edition` after `8223f61`
 
 FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS. FellowshipOS builds a bootable ISO and a Proxmox LXC template. The NAS role runs on a full install on a physical machine or a VM. At this baseline, it manages ZFS pools and traditional RAID arrays, serves files over SMB and NFS, and provides a browser desktop for administration.
 
@@ -34,7 +34,7 @@ FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS.
 | Users and groups | Manage local accounts, passwords, account kind, administrators and groups. A password change through FellowshipNAS sets the Linux and Samba passwords together. Shares can grant access to everyone or give selected users and groups read or write access. |
 | Sharing | SMB and NFS can be enabled per share. SMB has guest read access on eligible shares, recycle bin, Time Machine and Previous Versions settings, plus server-wide controls. NFS has private client networks or hosts, read/write rules, identity mapping and global options including optional NFSv3 and fixed ports. For NFS access based on individual users, the client and NAS must agree on numeric IDs. |
 | Snapshots and backup | Sanoid schedules ZFS snapshots per share. The default retention is 24 hourly, 30 daily and 6 monthly snapshots. One configured ZFS-to-ZFS backup job copies a pool's shares and snapshots to a second pool. The desktop manages schedules and can restore a missing share from backup. File-level browsing and restore in the desktop are planned. A traditional RAID pool has no snapshots and is not covered by the backup job. Its shares still show the snapshot, Previous Versions and backup controls, disabled with "This pool doesn't support snapshots" or "The current backup engine only supports ZFS pools". |
-| Health and alerts | Health opens on a verdict banner, then cards for CPU usage, memory and load, and for the pools, disks and services, each with a **View details** link. A strip along the bottom shows the backup's last result and whether any alert is active. The desktop's Health widget is the same panel in miniature and opens it, and its Disks widget maps the drive bays by level, each opening that drive's row. **Monthly storage checks** covers every writable pool and each engine names its own action, Scrub for ZFS and Array check for traditional RAID. The system and each pool draw Week or Year charts from what the hourly check recorded. A check that cannot run shows its reason. Alerts go to the desktop notification center and local history, with email and ntfy available as extra channels. |
+| Health and alerts | Health opens on a verdict banner, then cards for CPU usage, memory and load, and for the pools, disks and services, each with a **View details** link. A strip along the bottom shows the backup's last result and whether any alert is active. The desktop's Health widget is the same panel in miniature and opens it, and its Disks widget maps the drive bays by level, each opening that drive's row. **Monthly storage checks** covers every writable pool and each engine names its own action, Scrub for ZFS and Array check for traditional RAID. The system and each pool draw Week or Year charts from what the hourly check recorded. A check that cannot run shows its reason. Monthly checks run on Debian's own schedules: the `zfsutils-linux` cron job scrubs ZFS pools on the second Sunday, and the `mdcheck` timers check arrays from the first, with a drop-in that lets Health record them. Alerts go to the desktop notification center and local history, with email and ntfy available as extra channels. Disk failures arrive from `smartd`, `zed` and, for arrays, mdadm's monitor, without waiting for the hourly check. |
 | SSH | **Users → Change** manages each eligible user's public keys. **Settings → SSH** controls the service and password logins. Health shows an intentional shutdown as **Turned off in Settings**. See the SSH policy below. |
 | Settings | Includes own password, hostname, time zone, certificate, system volume growth, power controls, sessions and rerunning Setup. Network and update management are planned. |
 
@@ -60,7 +60,7 @@ Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arriv
 
 | Phase | Planned work |
 | --- | --- |
-| 10 | Traditional RAID via mdadm: RAID 1, 5, 6 and 10 with spares on XFS (recommended) or ext4, import, monitoring, monthly checks, growth and guided replacement. Built in `fnas`, the CLI and the desktop. The four-disk RAID 5 gate passed in the VM; RAID 6, sixteen disks, importing a foreign array, monitor alerts and Health seeing Debian's own monthly checks are outstanding. |
+| 10 | Traditional RAID via mdadm: RAID 1, 5, 6 and 10 with spares on XFS (recommended) or ext4, import, monitoring, monthly checks, growth and guided replacement. Built in `fnas`, the CLI and the desktop. The four-disk RAID 5 gate passed in the VM, along with mdadm event alerts and Health recording Debian's own monthly checks. RAID 6, sixteen disks and importing a foreign array are carried over into Phase 11 by name. |
 | 11 | Unraid-style pools with mergerfs and SnapRAID on XFS disks. Add scheduled parity sync and scrub, disk recovery and spin-down support. |
 | 12 | Share-scoped SFTP, FTP and WebDAV using the existing users and share permissions. FTPS is the default for FTP, with plain FTP an explicit opt-in. |
 | 13 | Files app with snapshot browsing and file-level restoration. |
@@ -83,7 +83,7 @@ For desktop development, run `npm ci` and `npm run build` in `nas/packages/fello
 
 [CI](../.github/workflows/ci.yml) runs the Python and Go suites, `gofmt` and `go vet`, both frontend builds and ShellCheck on every push. The phase gates below still run by hand in a VM.
 
-**Checked for this overview.** The checked-out branch is `nas-edition` at `e8a4450`. All 227 Python unit tests passed on a fresh run, and the desktop type-checks.
+**Checked for this overview.** The checked-out branch is `nas-edition`, after `8223f61`. All 231 Python unit tests passed on a fresh run, and the desktop type-checks.
 
 **Running development VM.** On the host, [https://localhost:8443/](https://localhost:8443/) forwards to the VM's HTTPS port. On November 9, the signed-in desktop showed both `tank` and `usb`. The `tank` details rendered the space breakdown, per-share table and diagnostics. Both Week and Year showed insufficient history to draw a chart, so chart hover remains unverified. Settings showed SSH and password authentication enabled. The guest's exact revision was not checked. The RAID test later added a third pool, `vault`, a RAID 5 array on four disks.
 
