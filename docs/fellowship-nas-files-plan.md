@@ -1,14 +1,15 @@
 # FellowshipNAS: what Files still needs
 
 A work plan for the rest of Phase 12, written November 10, 2026 against
-`nas-edition` at `0e08f77`. It sits under [the plan](fellowship-nas-plan.md) and
+`nas-edition` at `0e08f77`, and brought up to date at `f1f0228` with slices A to D built. It sits under [the plan](fellowship-nas-plan.md) and
 [the brief](fellowship-nas-next-steps.md), and covers only the Files app and the
 gate it carries; everything else stays where the plan puts it.
 
 What is built, so the gaps are clear: browse, download and preview as the person;
 upload, new folder, rename, move by dragging, delete, and a filter box; the path
 resolver and its refusal tests; the helper running file work as the signed-in
-person inside their share roots.
+person inside their share roots; and slices A to D below. Snapshots (E), the phone
+(F) and the gate (G) are left.
 
 ## 1. Order, and why
 
@@ -19,10 +20,10 @@ is best done once the interactions have settled.
 
 | | Slice | Why here |
 | --- | --- | --- |
-| A | Multi-select and bulk actions | The first thing anyone tries after moving one file |
-| B | Copy and paste, and a "Move to…" picker | Completes the operations, and gives touch a way to move without dragging |
-| C | Search across the share | The filter only sees one folder; searching is what people expect next |
-| D | Kind, owner and permissions columns | Answers "why can't I write this?" without a shell |
+| A | Multi-select and bulk actions (built, `f0a14c7`) | The first thing anyone tries after moving one file |
+| B | Copy and paste, and a "Move to…" picker (built, `9a010ec`) | Completes the operations, and gives touch a way to move without dragging |
+| C | Search across the share (built, `baee7c8`) | The filter only sees one folder; searching is what people expect next |
+| D | Kind, owner and permissions columns (built, `f1f0228`) | Answers "why can't I write this?" without a shell |
 | E | Snapshots: browse, restore a copy, replace | The last gate clause that needs server work, ZFS only |
 | F | The installable phone app | Changes layout and input, so last |
 | G | The gate, in the VM | Proves the whole thing on a real NAS |

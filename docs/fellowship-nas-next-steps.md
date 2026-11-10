@@ -14,9 +14,9 @@ picking work back up, not a fourth source of truth.
 | Storage engines built | ZFS, traditional RAID (mdadm), Unraid-style (mergerfs + SnapRAID) |
 | Storage engines left | Btrfs (Phase 14) |
 | Phases done | 1 to 11, with the gates recorded in the plan |
-| Next phase | 12, the Files app, which now comes before more ways to share. Slices 1 to 3 built: the resolver, browsing and previewing, then uploading, folders, renaming, moving and deleting |
-| Tests | 261 Python unit tests pass locally, the Go tests cover the resolver, the file ops and the stream, and CI is green on every push |
-| Docs baseline | The overview describes `6772f13`, and the plan's Files section records the decisions and the two slices built |
+| Next phase | 12, the Files app, which now comes before more ways to share. Built: the resolver, browsing and previewing, uploading, folders, renaming, moving and deleting, then slices A to D of the Files plan (several at once, copy and move, search, who may change what). Left: snapshots, the phone, the gate |
+| Tests | 264 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, and CI runs on every push |
+| Docs baseline | The overview describes `f1f0228`, and the plan's Files section records each slice built and what was seen of it |
 
 ## 2. What the docs get right, and what drifted
 
@@ -95,8 +95,8 @@ per-user file helper that WebDAV reuses in Phase 13.
 The plan's Files section carries the same answers, and the code follows them.
 What is left of Phase 12 is planned slice by slice in
 [the Files plan](fellowship-nas-files-plan.md): multi-select, copy and a "Move
-to…" picker, search, the owner and permission columns, snapshots, then the
-installable phone app.
+to…" picker, search and the owner and permission columns are built; snapshots,
+then the installable phone app and the gate, are left.
 
 ## 5. Order of work
 
@@ -111,8 +111,8 @@ Left, in order:
 
 3. Phase 12's remaining slices: snapshots on ZFS only and restoring from them;
    then the phone work, so the gate can still pass on desktop if the
-   installable-app work runs long. Browsing, downloading, previewing, uploading,
-   folders, renaming, moving and deleting are built.
+   installable-app work runs long. Browsing, previewing, every change to files,
+   several at once, copy and move, search and permissions are built.
 4. The catch-up gate on real disks for both engines, which section 3 lists item
    by item.
 
