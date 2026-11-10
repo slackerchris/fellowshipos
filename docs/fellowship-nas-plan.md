@@ -316,8 +316,8 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - XFS is used because SnapRAID keeps each parity level in one file, and ext4 caps a file at 16 TiB.
   - Parity disks are XFS too, and must be at least as large as the largest data disk.
 - **Shares and settings:** shares are folders in `/mnt/NAME/shares`, as on every engine, so the settings folder beside them isn't taken for a share; settings are in `/mnt/NAME/fellowship-config`, copied to every data disk so the pool can be rebuilt after a reinstall.
-- **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, which `jobs.KINDS` doesn't have yet; it goes through `jobs.work` like the others, with an alert when a sync finishes or fails.
-- **Packages:** `mergerfs` and `snapraid` are dependencies of `fellowship-nas-tools`, added in the same commit as the engine, as `mdadm` and `xfsprogs` are.
+- **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, one of `jobs.KINDS`; it goes through `jobs.work` like the others, with an alert when a sync finishes or fails.
+- **Packages:** `mergerfs`, `snapraid` and `hd-idle` are dependencies of `fellowship-nas-tools`, as `mdadm` and `xfsprogs` are.
 - **Schedules:** `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` runs, then a weekly partial `snapraid scrub`, both from `fnas`'s own timers and set in the same Settings → Storage checks rows as ZFS, from the first day. The sync is skipped with an alert if too many files were deleted, a sign of a missing disk.
 - **Repairs:** a failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
 - **Protection is visible:** the Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.
@@ -673,12 +673,35 @@ The desktop is the interface from the start. Every app opens in a window; there 
 - Quick look for images, video (with seeking), audio, PDF and text with the space bar
 - **Previous versions panel** on ZFS and Btrfs: a timeline of snapshots containing the file, with preview, "Restore a copy" and "Replace"
 
+## Files (Phase 12)
+
+Chris's order (Nov 10): Files comes before more ways to share, because WebDAV in Phase 13 goes through the same helper.
+
+**Scope.** Browse each share the signed-in person can already use, download, preview (images, video with seeking, audio, PDF, text), upload, rename, move, delete, and bring back an earlier version from a snapshot. The richer list above is the shape of the app rather than all of this phase: search and zip downloads wait.
+
+**Snapshots are ZFS only** (decided Nov 10, of the three questions in the next-steps brief). On arrays and Unraid-style pools the previous-versions button is shown disabled with the reason, as the desktop already does elsewhere, rather than hidden or quietly empty.
+
+**One helper, and the work is done as the person** (decided Nov 10).
+
+- The existing `fellowship-nas-helper` gains file ops beside `fnas`. A second privileged service would mean a second socket, a second peer check and a second set of rules to keep in step.
+- The person comes from the session secret the helper already keeps, never from the request.
+- Each request is served by a child re-exec'd with `SysProcAttr.Credential` set to that person's uid, gid and groups, so the kernel enforces the answer and an error in the path check can't reach another person's files.
+- The roots are that person's share roots, which the helper asks `fnas` for itself. The client sends a share name and a path inside it, never an absolute path.
+- The path is resolved with symlinks followed, and refused if it leaves the root or doesn't resolve. An unmounted pool, an unknown share or an unreadable root answers "no" rather than naming a disk.
+- Tests for every way out: `..` climbing out of a share, a symlink inside the share that points outside it, a dangling symlink, a NUL byte, a share the person can't use, and a root that has gone since its pool was exported.
+
+**10 GB transfers** (decided Nov 10). `ReadTimeout` covers the whole request, so a large upload cannot fit in it. The upload and download routes clear the connection's deadline through `http.ResponseController` for their own duration, as the jobs stream already avoids a `WriteTimeout`; the rest of the desktop keeps the 60 second cover. A cap on each file and on the whole request keeps one upload from filling a pool or holding a worker.
+
+**Phone.** The gate is the installable web app on top of the phone rules the shell already has: a manifest and icons, a service worker for the shell so the home-screen icon opens instead of a blank page, and the Files screens laid out with tap targets and no sideways scrolling.
+
+**Slices, in order.** The resolver and its refusal tests come before any file is served; then list, download and preview; then upload, rename, move and delete; then snapshots on ZFS only; then the phone work; then the gate in the phase table.
+
 ## Security model
 
 Built for a trusted home LAN; nothing is exposed to the internet by default.
 
 - **Two roles:** `nas-admins` manage storage, shares, users and settings. Everyone else sees Files for folders they already have permission to.
-- **Privileges:** only the privileged helper runs as root. It runs `fnas` for `nas-admins` members and nothing else, and `fnas` checks every argument.
+- **Privileges:** only the privileged helper runs as root. It runs `fnas` for `nas-admins` members and nothing else, and `fnas` checks every argument. Files adds one narrow exception: the helper serves file requests as the signed-in person, in a child running with that person's uid and groups, inside that person's share roots (see Files).
 - **Network:** `nftables` allows HTTPS, NFS, SMB, SSH/SFTP and FTP (with its passive range) from the LAN subnet only.
 - **Protocols:** SFTP-only users get no shell. FTP requires TLS unless plain FTP is turned on, and the FTP row says plainly that passwords then travel unencrypted.
 - **Remote access:** not built in; a VPN such as WireGuard or Tailscale is documented.
@@ -730,7 +753,7 @@ No phase starts until the previous gate passes in a VM, except for items carried
 | 9. Users and sharing settings | The Users app (accounts, shares-only accounts, groups, one password); share access by users and groups; every SMB and NFS setting listed under Sharing; existing shares migrated | From the desktop alone: add two shares-only users and a group; give one read and the other read and write; over SMB each gets exactly that and a guest gets nothing; a read-only NFS network can't write; recycle bin and Time Machine settings pass `testparm`; settings survive a reinstall and restore | Done. From the desktop: added Sam and Kim (shares only) and the family group, made docs with Sam read and family read and write, turned on guests and the recycle bin for media, and set the NAS-wide SMB and NFS settings. Over SMB, Sam read but couldn't write, Kim wrote through family, guests read media only, and deletes went to `.recycle`. Over NFS a read-only client couldn't write. After reinstalling the system disk, importing and restoring from the desktop brought back the accounts with their IDs, the group, the share access and both protocols' settings; passwords are set again in Users. The gate found and fixed: lockd and statd ignoring fixed ports, restored accounts shown as turned off, and guests silently shut out by required encryption (now refused with the reason). NFS access per user and the Time Machine setting were checked from the server side only (exports and `testparm`), with no Linux or Mac client |
 | 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | Engine, CLI, Health, alerts and the desktop screens are built. Gate partly passed in the VM on four disks, all from the desktop: created a RAID 5 array on XFS, shared it over SMB, ran Check array, failed a disk and replaced it, added a fifth disk (the filesystem grew after the reshape), and rebooted twice; a 50 MB test file kept its checksum throughout. That run found and fixed seven engine bugs (see the changelog). Later, in the same VM: Debian's `mdcheck` ran a check that Health recorded, and a failed disk raised a critical alert within a minute. **Carried over** into Phase 11, to be done before the release: RAID 6, sixteen disks, and importing an array made on another machine |
 | 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync; all on real disks in the VM; writing `snapraid.conf` and the mergerfs mount twice changes nothing the second time, the check that caught `spares=1` in `mdadm.conf` || Built, with a shortened gate (Chris, Nov 10): created from the desktop on mixed disks, shared, filled and synced in the VM, which found and fixed a sync that failed whenever fnas saved settings. Not tried in the VM: failing, replacing and pulling disks, a second parity disk, the timers, the deleted-files limit, spin-down and a reboot. Also carried: RAID 6, sixteen disks and importing an array made on another machine (Phase 10), and importing disks from a mergerfs + SnapRAID setup fnas didn't make |
-| 12. Files | The Files app (Chris, Nov 10: before more ways to share), snapshot browse and restore, and the per-user file helper that WebDAV reuses; the desktop as a mobile-friendly web app that installs on the home screen | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; on a phone's browser, from the home-screen icon: browse folders, download, open a photo, play a video, upload from the photo library, rename, move and delete by tapping, and restore an earlier version, with no sideways scrolling | |
+| 12. Files | The Files app (Chris, Nov 10: before more ways to share), snapshot browse and restore, and the per-user file helper that WebDAV reuses; the desktop as a mobile-friendly web app that installs on the home screen | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; on a phone's browser, from the home-screen icon: browse folders, download, open a photo, play a video, upload from the photo library, rename, move and delete by tapping, and restore an earlier version, with no sideways scrolling | Decided Nov 10: the existing helper does the work, as the person, in their share roots; uploads clear the read deadline; snapshots are ZFS only (see Files). Started with the path resolver and its refusal tests |
 | 13. More ways to share | SFTP, FTP (FTPS by default) and WebDAV, using Phase 9's users and access lists; WebDAV goes through Phase 12's file helper | Two users with different access see only their shares over SFTP, FTP and WebDAV; plain FTP stays off until turned on | |
 | 14. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
 | 15. Release | Network and updates in Settings, theme and icons, hosted signed apt repo | Set a static address from the desktop; updates arrive from the hosted repo | |
@@ -814,7 +837,8 @@ Web and access:
 | Features decided without Chris | Rework and lost trust, as in revisions 2 and 3 | Rule 7: his reference list is the scope; anything cut is put to him first |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step:** Phase 12, the Files app, carrying the untried Phase 10 and 11 tests
+**Next step:** Phase 12, the Files app, starting with the file helper's path
+resolver and its refusal tests, and carrying the untried Phase 10 and 11 tests
 over by name.
 Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs
 a real Windows client: mount a share, then check Previous Versions.

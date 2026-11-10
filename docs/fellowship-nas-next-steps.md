@@ -1,6 +1,7 @@
 # FellowshipNAS next steps
 
-Working note, written November 9, 2026 against `nas-edition` at `3610577`.
+Working note, written November 9, 2026 against `nas-edition` at `3610577`, and
+brought up to date against `059a150` when Phase 12 started.
 The three canonical documents remain [the plan](fellowship-nas-plan.md),
 [the overview](fellowship-nas-overview.md) and
 [the review notes](fellowship-nas-changes.md). This file is a short brief for
@@ -13,11 +14,11 @@ picking work back up, not a fourth source of truth.
 | Storage engines built | ZFS, traditional RAID (mdadm), Unraid-style (mergerfs + SnapRAID) |
 | Storage engines left | Btrfs (Phase 14) |
 | Phases done | 1 to 11, with the gates recorded in the plan |
-| Next phase | 12, the Files app, which now comes before more ways to share |
-| Tests | 250 Python unit tests pass locally, and CI is green on every push |
-| Docs baseline | The overview describes `e99ca0c`; `3610577` is the docs commit after it |
+| Next phase | 12, the Files app, which now comes before more ways to share. Started: the path resolver comes first |
+| Tests | 259 Python unit tests pass locally, and CI is green on every push |
+| Docs baseline | The overview describes `059a150`, and the plan's Files section records the Phase 12 decisions |
 
-## 2. What the docs get right, and the two lines that drift
+## 2. What the docs get right, and what drifted
 
 Verified consistent across README, overview and plan:
 
@@ -34,12 +35,13 @@ Verified consistent across README, overview and plan:
 - Disabling ZFS's own periodic scrub through `org.debian:periodic-scrub` keeps
   Debian's monthly TRIM while fnas owns the scrub.
 
-Two lines in the plan are now out of date, both in the Unraid-style section:
+Two lines in the plan were out of date, both in the Unraid-style section, and
+are fixed as of this pass:
 
-1. The sync job is described as "a `sync` kind, which `jobs.KINDS` doesn't have
-   yet". `KINDS` now reads `resilver, scrub, expand, sync, backup`.
-2. The packages bullet still reads as a to-do. `mergerfs`, `snapraid` and
-   `hd-idle` are already dependencies of `fellowship-nas-tools`.
+1. The sync job read as a kind `jobs.KINDS` didn't have yet. `KINDS` reads
+   `resilver, scrub, expand, sync, backup`, and the line now says so.
+2. The packages bullet read as a to-do and left out `hd-idle`. All three are
+   dependencies of `fellowship-nas-tools`.
 
 ## 3. The untried gate list
 
@@ -73,32 +75,43 @@ Scope as written: browse and restore from snapshots, 10 GB transfers and video
 seeking, and the desktop as an installable phone web app. Files also builds the
 per-user file helper that WebDAV reuses in Phase 13.
 
-### Three decisions needed before code
+### The three decisions, now answered (Nov 10)
 
-1. **How the file helper holds its privileges.** The existing helper runs `fnas`
-   with an argv allowlist, which is a narrow surface. Browsing arbitrary paths is
-   much wider. Suggested rule: the socket keeps the `SO_PEERCRED` check, each
-   request is served as the logged-in user, and every path is resolved and then
-   refused if it leaves that user's share roots. Needs a decision, then tests.
-2. **Large uploads against the 60 second read timeout.** `ReadTimeout` in
-   `cmd/fellowship-nas-web/main.go` covers the whole request, so a 10 GB upload is
-   cut off. Either that route gets its own server or handler with a streaming
-   deadline, or the timeout becomes per-route. This is the same argument the jobs
-   stream already makes for having no write timeout.
-3. **Snapshots exist only on ZFS.** Files must show browse and restore as
-   disabled on arrays and Unraid-style pools, with the reason, or the gate's
-   "restore an earlier version" quietly means ZFS only.
+1. **How the file helper holds its privileges.** Answered: the existing helper,
+   gaining file ops beside `fnas`; the person comes from the session secret; each
+   request runs in a child with that person's uid, gid and groups through
+   `SysProcAttr.Credential`; the client sends a share name and a path inside it;
+   every path is resolved with symlinks followed and refused if it leaves the root
+   or doesn't resolve; an unmounted pool or an unreadable root answers "no".
+2. **Large uploads against the 60 second read timeout.** Answered: the upload and
+   download routes clear the connection's deadline with `http.ResponseController`
+   for their own duration, as the jobs stream already avoids a write timeout, and
+   the rest of the desktop keeps the 60 second cover. Caps on each file and on the
+   whole request keep a stuck upload from holding a worker.
+3. **Snapshots exist only on ZFS.** Answered: the previous-versions control is
+   shown disabled with the reason on arrays and Unraid-style pools, which is
+   already the house rule for a feature that can't work.
 
-## 5. Suggested order of work
+The plan's Files section carries the same answers, and the code follows them.
 
-1. Fix the two stale plan lines, and pull the untried tests into one checklist
-   under the release gate in the plan.
-2. Settle the file helper's privilege and confinement model, and write it as a
-   short plan section. WebDAV inherits it, so it is worth deciding once.
-3. Run the catch-up gate on real disks for both engines.
-4. Phase 12 in slices: browse, download and preview with the confinement tests
-   first; then upload, rename, move, delete and restore; phone polish last, so
-   the gate can still pass on desktop if the installable-app work runs long.
+## 5. Order of work
+
+Done in this pass:
+
+1. The two stale plan lines are fixed, and the untried tests are one checklist
+   in section 3.
+2. The three Phase 12 questions are answered in the plan's Files section, which
+   WebDAV in Phase 13 inherits.
+
+Left, in order:
+
+3. Phase 12's first slice: the path resolver and its refusal tests, before any
+   file is served.
+4. Then list, download and preview; then upload, rename, move and delete; then
+   snapshots on ZFS only; phone work last, so the gate can still pass on desktop
+   if the installable-app work runs long.
+5. The catch-up gate on real disks for both engines, which section 3 lists item
+   by item.
 
 ## 6. Notes for the UI work
 
@@ -117,6 +130,13 @@ What is true in the desktop today, so changes have a reference point:
   only supports ZFS pools".
 - Engines word their own growth and repair actions, so the desktop names no engine
   when it offers them. New engines should keep that true.
+- Every group the machine has is offered where a group can be granted, marked
+  when it belongs to the machine or to one account, and searchable once a machine
+  has dozens. Nothing is filtered out, and fnas only adds or removes people from
+  those groups so the app they exist for keeps working (`fnas group list
+  --system`).
+- Lists hold one line per thing, with its actions in a menu on the row, as Shares
+  and Users now do; a form opens under the list rather than in a separate page.
 - Not-built notes carry phase numbers. After the reorder those are Files at 12 and
   SFTP, FTP and WebDAV at 13. The sample data in `web/dev/fake-fnas` follows them.
 - The widget column scrolls on shorter screens, and icon slots fit a two-line
