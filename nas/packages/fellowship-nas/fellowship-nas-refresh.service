@@ -1,0 +1,17 @@
+[Unit]
+Description=Rebuild every way to share files from the saved settings
+Documentation=man:fnas(8)
+# The SFTP views are mounts, and mounts don't survive a reboot, so they are made
+# again once the pools are there. Everything else this rebuilds is on disk and
+# only needs doing if something went wrong.
+After=local-fs.target remote-fs.target zfs-mount.service
+Wants=zfs-mount.service
+ConditionPathExists=/etc/fellowshipos
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/fnas share refresh
+
+[Install]
+WantedBy=multi-user.target

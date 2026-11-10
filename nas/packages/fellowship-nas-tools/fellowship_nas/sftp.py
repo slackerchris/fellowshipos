@@ -116,10 +116,22 @@ def shows(point, path):
     return (here.st_dev, here.st_ino) == (there.st_dev, there.st_ino)
 
 
+def unmount(point):
+    """Take a share out of a view.
+
+    A plain unmount is refused while anything still has its feet in the share —
+    a client with a file open, say. That must not leave the share reachable, so
+    the mount is detached instead: the client that has hold of it keeps the file
+    it already opened, which nothing can take back, and every new open through
+    that name fails at once."""
+    if run("umount", point, check=False).returncode != 0:
+        run("umount", "-l", point, check=False)
+
+
 def let_go(point, here=None):
     """Take one share out of somebody's view and leave the folder empty."""
     if os.path.normpath(point) in (mounts() if here is None else here):
-        run("umount", point, check=False)
+        unmount(point)
     try:
         os.rmdir(point)
     except OSError:
@@ -147,18 +159,19 @@ def sync_view(user, wanted):
         if shown and shows(point, one["path"]):
             continue
         if shown:
-            run("umount", point, check=False)
+            unmount(point)
         os.makedirs(point, mode=0o755, exist_ok=True)
         run("mount", "--bind", one["path"], point)
 
 
-def sync_views():
+def sync_views(known=None):
     """Rebuild every SFTP account's view from the shares it may use now, so a
-    share turned off or an account changed takes effect at once."""
+    share turned off or an account changed takes effect at once. known is the
+    share list, for a caller that has just worked it out."""
     os.makedirs(VIEW_ROOT, mode=0o755, exist_ok=True)
     os.chown(VIEW_ROOT, 0, 0)
     os.chmod(VIEW_ROOT, 0o755)
-    known = shares.list_shares()
+    known = shares.list_shares() if known is None else known
     wanted = {name: view(name, known) for name in accounts()}
     for entry in sorted(os.listdir(VIEW_ROOT)):
         if entry in wanted:
@@ -175,8 +188,17 @@ def sync_views():
         sync_view(name, found)
 
 
-def sync():
-    """Bring the group, the shell and every view in line with the shares."""
+def rebuild(known=None):
+    """Rebuild the views after a share changed. Most machines never need this:
+    one with no SFTP accounts has no views to build, and nothing is touched then."""
+    if not accounts() and not os.path.isdir(VIEW_ROOT):
+        return
+    sync_views(known)
+
+
+def sync(known=None):
+    """Bring the group, the shell and every view in line with the shares. known
+    is the share list when the caller has just read it."""
     ensure_shell()
     sync_accounts()
-    sync_views()
+    sync_views(known)

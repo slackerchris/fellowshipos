@@ -812,7 +812,9 @@ def dispatch_user(args, show):
     dispatch_user_action(args, show)
     if args.action in ("create", "set", "remove"):
         ssh.sync_members()
-        sftp.sync_accounts()
+        # A person who is no longer set to Files over SFTP loses their view as
+        # well as their place in the group
+        sftp.sync()
 
 
 def dispatch_user_action(args, show):

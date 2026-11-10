@@ -1213,6 +1213,17 @@ class Sharing(Base):
         with self.assertRaisesRegex(fnas.FnasError, "at least one of --nfs, --smb, --webdav and --sftp"):
             fnas.create_share("photos", "tank", True, self.everyone(), False, False)
 
+    def test_a_share_change_rebuilds_the_sftp_views(self):
+        self.write_settings(media={"mode": "everyone", "nfs": True, "smb": True})
+        self.fake(volume_line("media"))
+        seen = []
+        sftp = {m.__name__: m for m in MODULES}["fellowship_nas.sftp"]
+        with mock.patch.object(sftp, "rebuild", lambda known=None: seen.append(known)):
+            fnas.set_share("media", None, None, None, "on")
+        # The views are rebuilt from the same list NFS and Samba are written
+        # from, so turning a way in on or off takes effect in one command
+        self.assertEqual([(one["name"], one["sftp"]) for one in seen[0]], [("media", True)])
+
     def test_a_share_can_be_shared_over_sftp_alone(self):
         fake = self.fake()
         fnas.create_share("photos", "tank", True, self.everyone(), False, False, False, True)
@@ -3227,6 +3238,25 @@ class SftpViews(unittest.TestCase):
             self.sftp.sync_view("kim", [one for one in self.sftp.view("kim") if one["share"] == "media"])
         self.assertIn(("umount", os.path.join(home, "old")), self.calls)
         self.assertFalse(os.path.exists(os.path.join(home, "old")))
+
+    def test_a_share_something_still_holds_is_detached(self):
+        home = os.path.join(self.root, "view", "kim")
+        point = os.path.join(home, "media")
+        os.makedirs(point)
+
+        def stubborn(*command, check=True, stdin=None):
+            self.calls.append(command)
+            busy = command[:2] == ("umount", point)
+            return SimpleNamespace(stdout="", stderr="busy" if busy else "",
+                                   returncode=1 if busy else 0)
+        with mock.patch.object(self.sftp, "run", stubborn), \
+                mock.patch.object(self.sftp, "mounts", lambda: {point}):
+            self.sftp.sync_view("kim", [one for one in self.sftp.view("kim")
+                                       if one["share"] == "private"])
+        # A client with a file open keeps the file it opened and nothing more
+        self.assertIn(("umount", point), self.calls)
+        self.assertIn(("umount", "-l", point), self.calls)
+        self.assertFalse(os.path.exists(point))
 
     def test_an_account_no_longer_set_to_sftp_loses_its_view(self):
         os.makedirs(os.path.join(self.root, "view", "sam"))

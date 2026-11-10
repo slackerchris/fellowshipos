@@ -14,6 +14,15 @@ bump.
 
 ### Added
 
+- Sharing, taking a way in away over SFTP takes effect at once. Every change to
+  a share rebuilds each account's view as well as the NFS and Samba files, so
+  turning SFTP off for a share, or taking someone off it, needs no second
+  command; a session already open loses the share straight away. A mount that
+  cannot be unmounted because a client has a file open is detached instead, so
+  the client that already opened a file keeps that file and nothing else.
+- Sharing, `fellowship-nas-refresh.service` rebuilds the share views at boot,
+  since mounts don't survive a reboot, so both accounts come back with exactly
+  their shares and permissions without anyone running a command.
 - Sharing, SFTP: a share can be shared over SFTP with its own checkbox, off
   until it is asked for, and an account can be set to Files over SFTP. Such an
   account is chrooted to a folder of bind mounts holding just the shares it may

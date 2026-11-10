@@ -439,10 +439,15 @@ def write_smb_config(shares):
 
 def write_config(leaving=None):
     """Rebuild the NFS exports and every Samba share file from what the pools
-    say now, leaving out a pool about to be exported."""
+    say now, leaving out a pool about to be exported, and rebuild every SFTP
+    account's view of the shares — a way in that was just taken away has to be
+    taken away from the view too, without anyone asking for a second command."""
     shares = [s for s in list_shares() if s["pool"] != leaving]
     write_nfs_config(shares)
     write_smb_config(shares)
+    # Imported here because sftp reads the share list through this module
+    from . import sftp
+    sftp.rebuild(shares)
 
 
 def check_name(name):
