@@ -12,7 +12,9 @@ PROTOCOLS = [
     ("nfs", "NFS", "Linux computers, Proxmox and other servers", "nfs-server.service", None),
     ("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", None, 13),
     ("ftp", "FTP", "Cameras, scanners and older devices", None, 13),
-    ("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", None, 13),
+    # Served by the desktop's own web server, so there is no unit of its own
+    ("webdav", "WebDAV", "A network drive over HTTPS, and phone apps",
+     "fellowship-nas-web.service", None),
     ("dlna", "DLNA", "TVs and consoles finding media by themselves", None, "later"),
     ("iscsi", "iSCSI", "Part of a pool as a disk on another machine", None, "later"),
 ]
@@ -58,6 +60,8 @@ def protocols():
             entry.update(state=state, detail={"running": f"Running, {used}", "stopped": f"Stopped, {used}",
                                               "failed": f"Failed, {used}",
                                               "missing": "Not installed"}[state])
+            if name == "webdav" and state == "running":
+                entry["detail"] = f"Running, read-only for now, {used}"
         shown.append(entry)
     return shown
 

@@ -73,6 +73,8 @@ type Folder struct {
 type Head struct {
 	Size   int64 `json:"size"`
 	Length int64 `json:"length"`
+	// When the file last changed, so a reader can tell one version from another
+	Modified int64 `json:"modified,omitempty"`
 }
 
 type problem struct {
@@ -396,7 +398,11 @@ func read(out *json.Encoder, root int, inside string, start, length int64) error
 	if wanted <= 0 || start+wanted > info.Size() {
 		wanted = info.Size() - start
 	}
-	if err := out.Encode(Head{Size: info.Size(), Length: wanted}); err != nil {
+	head := Head{Size: info.Size(), Length: wanted}
+	if !info.ModTime().IsZero() {
+		head.Modified = info.ModTime().Unix()
+	}
+	if err := out.Encode(head); err != nil {
 		return err
 	}
 	if _, err := file.Seek(start, io.SeekStart); err != nil {

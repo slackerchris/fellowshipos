@@ -32,7 +32,7 @@ ACCESS_LEVELS = ("read", "write")
 # Fixed so that files on a moved pool keep their owner
 SHARE_ACCOUNT = "nas-share"
 SHARE_ID = 3000
-SETTING_KEYS = ("mode", "access", "nfs", "smb", "policy", "smb_options", "nfs_options")
+SETTING_KEYS = ("mode", "access", "nfs", "smb", "webdav", "policy", "smb_options", "nfs_options")
 DEFAULT_SMB = {"readonly": False, "hidden": False, "guest": False, "recycle": False, "recycle_days": 30,
                "timemachine": False, "timemachine_size": 0, "previous_versions": True}
 # An empty client list means the home network, read-write, following the LAN subnet
@@ -146,6 +146,9 @@ def check_settings(name, settings):
             "access": checked_access(settings.get("access")) if settings.get("access") is not None or mode == "everyone"
             else None,
             "nfs": settings.get("nfs") is True, "smb": settings.get("smb") is True,
+            # Off unless it is asked for: a share reached over HTTPS is a new way in,
+            # so turning it on is a decision rather than a default
+            "webdav": settings.get("webdav") is True,
             "policy": {period: policy[period] if isinstance(policy.get(period), int)
                        and 0 <= policy[period] <= snapshots.MAX_KEPT else kept
                        for period, kept in snapshots.DEFAULT_POLICY.items()},
@@ -495,14 +498,15 @@ def apply_access(share):
             "{}", "+")
 
 
-def new_settings(mode, access, nfs, smb):
-    return {"mode": mode, "access": access, "nfs": nfs, "smb": smb, "policy": dict(snapshots.DEFAULT_POLICY),
+def new_settings(mode, access, nfs, smb, webdav=False):
+    return {"mode": mode, "access": access, "nfs": nfs, "smb": smb, "webdav": webdav,
+            "policy": dict(snapshots.DEFAULT_POLICY),
             "smb_options": dict(DEFAULT_SMB), "nfs_options": dict(DEFAULT_NFS)}
 
 
-def create_share(name, pool, everyone, access, nfs, smb):
-    if not nfs and not smb:
-        raise FnasError("choose at least one of --nfs and --smb")
+def create_share(name, pool, everyone, access, nfs, smb, webdav=False):
+    if not nfs and not smb and not webdav:
+        raise FnasError("choose at least one of --nfs, --smb and --webdav")
     if smb and not os.path.isdir(SMB_DIR):
         raise FnasError("SMB needs the fellowship-nas-smb package")
     if everyone and (access["users"] or access["groups"]):
@@ -517,15 +521,16 @@ def create_share(name, pool, everyone, access, nfs, smb):
     lan_subnet()
 
     path = pools.ENGINES[found["engine"]].create_volume(pool, name)
-    share = {"name": name, "path": path, **new_settings("everyone" if everyone else "chosen", access, nfs, smb)}
+    share = {"name": name, "path": path,
+             **new_settings("everyone" if everyone else "chosen", access, nfs, smb, webdav)}
     apply_access(share)
     save_settings(pool, share)
     write_config()
 
 
-def set_share(name, nfs, smb):
-    if nfs is None and smb is None:
-        raise FnasError("nothing to change: pass --nfs or --smb")
+def set_share(name, nfs, smb, webdav=None):
+    if nfs is None and smb is None and webdav is None:
+        raise FnasError("nothing to change: pass --nfs, --smb or --webdav")
     share = find_share(name)
     if smb == "on" and not os.path.isdir(SMB_DIR):
         raise FnasError("SMB needs the fellowship-nas-smb package")
@@ -533,6 +538,8 @@ def set_share(name, nfs, smb):
         share["nfs"] = nfs == "on"
     if smb is not None:
         share["smb"] = smb == "on"
+    if webdav is not None:
+        share["webdav"] = webdav == "on"
     save_settings(share["pool"], share)
     write_config()
 
@@ -673,7 +680,8 @@ def roots_of(user):
         if not share:
             continue
         found.append({"share": share["name"], "path": share["path"], "level": used["level"],
-                      "through": used["through"], "snapshots": share["snapshots"]})
+                      "through": used["through"], "snapshots": share["snapshots"],
+                      "webdav": share["webdav"]})
     return found
 
 

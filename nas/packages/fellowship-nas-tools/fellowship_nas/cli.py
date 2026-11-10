@@ -157,7 +157,7 @@ def print_shares(shares):
     if not shares:
         print("No shares")
     for share in shares:
-        protocols = [p for p in ("nfs", "smb") if share[p]]
+        protocols = [p for p in ("nfs", "smb", "webdav") if share[p]]
         print(f"{share['name']}  {' '.join(protocols).upper() or 'not shared'}  {share['path']}")
         print(f"    for {describe_access(share)}")
 
@@ -412,6 +412,7 @@ def build_parser():
     add_access_arguments(create)
     create.add_argument("--nfs", action="store_true", help="share over NFS")
     create.add_argument("--smb", action="store_true", help="share over SMB")
+    create.add_argument("--webdav", action="store_true", help="share over HTTPS as a WebDAV drive")
     access = share.add_parser("access", help="change who can use a share, for every file in it")
     access.add_argument("name")
     add_access_arguments(access)
@@ -439,6 +440,7 @@ def build_parser():
     change.add_argument("name")
     change.add_argument("--nfs", choices=("on", "off"))
     change.add_argument("--smb", choices=("on", "off"))
+    change.add_argument("--webdav", choices=("on", "off"))
     share.add_parser("refresh", help="rewrite the NFS and Samba settings from each pool")
     share.add_parser("services", help="list every way to share files and whether each is running")
     delete = share.add_parser("delete", help="destroy a share, its data and its snapshots")
@@ -899,7 +901,8 @@ def dispatch_share(args, show):
             f"{root['share']}: {root['level']} at {root['path']}" for root in found) or
             f"{args.user} can't use any shares"))
     elif args.action == "create":
-        shares.create_share(args.name, args.pool, args.everyone, access_from(args), args.nfs, args.smb)
+        shares.create_share(args.name, args.pool, args.everyone, access_from(args), args.nfs, args.smb,
+                            args.webdav)
         print(f"Created share {args.name}")
     elif args.action == "access":
         shares.set_access(args.name, args.everyone, access_from(args))
@@ -917,7 +920,7 @@ def dispatch_share(args, show):
                                switch(args.async_writes))
         print(f"Updated NFS settings for {args.name}")
     elif args.action == "set":
-        shares.set_share(args.name, args.nfs, args.smb)
+        shares.set_share(args.name, args.nfs, args.smb, args.webdav)
         print(f"Updated share {args.name}")
     elif args.action == "refresh":
         shares.migrate()

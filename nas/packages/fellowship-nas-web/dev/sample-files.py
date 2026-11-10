@@ -25,8 +25,11 @@ def main(root):
     photos = os.path.join(media, "photos")
     family = os.path.join(root, "family")
     archive = os.path.join(root, "archive")
-    for folder in (media, photos, family, archive):
+    private = os.path.join(root, "private")
+    for folder in (media, photos, family, archive, private):
         os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(private, "diary.txt"), "w") as file:
+        file.write("Only dana's account can read this share.\n")
     with open(os.path.join(media, "notes.txt"), "w") as file:
         file.write("Things for the weekend\n\n"
                    "- ring the boat yard\n"

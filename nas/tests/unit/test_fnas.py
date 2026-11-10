@@ -907,7 +907,9 @@ class Sharing(Base):
         self.assertEqual(self.exports(), ['"/tank/shares/media" 192.168.1.0/24'
                                           '(rw,sync,no_subtree_check,all_squash,anonuid=3000,anongid=3000)'])
         self.assertEqual(self.settings(), {"media": {
-            "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": False, "policy": fnas.DEFAULT_POLICY,
+            "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": False,
+            # A new share is never reachable over HTTPS until it is asked for
+            "webdav": False, "policy": fnas.DEFAULT_POLICY,
             "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS}})
         self.assertIn(("chown", "-R", "3000:3000", "/tank/shares/media"), fake.calls)
         self.chmod.assert_called_once_with("/tank/shares/media", 0o2775)
@@ -1028,7 +1030,8 @@ class Sharing(Base):
         self.assertEqual(fnas.list_shares(), [{
             "name": "media", "pool": "tank", "engine": "zfs", "snapshots": True, "dataset": "tank/shares/media",
             "path": "/tank/shares/media", "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": True,
-            "policy": fnas.DEFAULT_POLICY, "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS,
+            "webdav": False, "policy": fnas.DEFAULT_POLICY,
+            "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS,
             "readonly": False}])
 
     def test_damaged_settings_are_ignored(self):
@@ -1192,6 +1195,38 @@ class Sharing(Base):
         self.fake(volume_line("media"))
         with self.assertRaisesRegex(fnas.FnasError, "nothing to change"):
             fnas.set_share("media", None, None)
+
+    def test_a_share_can_be_shared_over_webdav_alone(self):
+        """A share nobody mounts over SMB or NFS but a phone app reaches over
+        HTTPS is a real thing, so WebDAV counts as a way to share."""
+        self.fake(volume_line("photos"))
+        fnas.create_share("photos", "tank", False, {"users": {"kim": "read"}, "groups": {}},
+                          False, False, webdav=True)
+        self.assertEqual({key: self.settings()["photos"][key] for key in ("nfs", "smb", "webdav")},
+                         {"nfs": False, "smb": False, "webdav": True})
+        # It is written into what the desktop reads, so the row can show it
+        self.assertEqual([root["share"] for root in fnas.roots_of("kim")], ["photos"])
+        self.assertTrue(fnas.roots_of("kim")[0]["webdav"])
+
+    def test_a_share_needs_at_least_one_way_in(self):
+        self.fake(volume_line("photos"))
+        with self.assertRaisesRegex(fnas.FnasError, "at least one of --nfs, --smb and --webdav"):
+            fnas.create_share("photos", "tank", True, self.everyone(), False, False)
+
+    def test_webdav_is_off_until_it_is_asked_for(self):
+        self.write_settings(media={"mode": "everyone", "nfs": True, "smb": True})
+        self.fake(volume_line("media"))
+        # An older shares.json has no such key at all, and still reads as off
+        self.assertFalse(fnas.list_shares()[0]["webdav"])
+        self.assertFalse(fnas.roots_of("anyone")[0]["webdav"])
+
+    def test_webdav_can_be_turned_on_and_off(self):
+        self.write_settings(media={"mode": "everyone", "nfs": True, "smb": True})
+        self.fake(volume_line("media"))
+        fnas.set_share("media", None, None, "on")
+        self.assertTrue(self.settings()["media"]["webdav"])
+        fnas.set_share("media", None, None, "off")
+        self.assertFalse(self.settings()["media"]["webdav"])
 
     def test_forgetting_and_renaming_people(self):
         self.write_settings(docs={"mode": "chosen", "nfs": False, "smb": True,
@@ -3088,11 +3123,11 @@ class FileRoots(unittest.TestCase):
 
     shares = [
         {"name": "media", "path": "/mnt/tank/shares/media", "snapshots": True, "mode": "chosen",
-         "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
+         "webdav": True, "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
         {"name": "docs", "path": "/mnt/tank/shares/docs", "snapshots": False, "mode": "chosen",
-         "access": {"users": {}, "groups": {"family": "read"}}},
+         "webdav": False, "access": {"users": {}, "groups": {"family": "read"}}},
         {"name": "private", "path": "/mnt/tank/shares/private", "snapshots": True, "mode": "chosen",
-         "access": {"users": {"tester": "write"}, "groups": {}}},
+         "webdav": True, "access": {"users": {"tester": "write"}, "groups": {}}},
     ]
 
     def setUp(self):
@@ -3105,9 +3140,9 @@ class FileRoots(unittest.TestCase):
     def test_a_person_gets_their_shares_with_where_each_one_is(self):
         self.assertEqual(fnas.roots_of("kim"), [
             {"share": "media", "path": "/mnt/tank/shares/media", "level": "write",
-             "through": "own", "snapshots": True},
+             "through": "own", "snapshots": True, "webdav": True},
             {"share": "docs", "path": "/mnt/tank/shares/docs", "level": "read",
-             "through": "group family", "snapshots": False},
+             "through": "group family", "snapshots": False, "webdav": False},
         ])
 
     def test_a_share_someone_cannot_use_is_not_a_root(self):

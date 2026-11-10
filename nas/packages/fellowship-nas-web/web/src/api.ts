@@ -251,6 +251,8 @@ export interface Share {
     access: Access;
     nfs: boolean;
     smb: boolean;
+    // Reachable over HTTPS as a WebDAV drive. Off unless it was asked for
+    webdav: boolean;
     policy: Policy;
     smb_options: SmbOptions;
     nfs_options: NfsOptions;
@@ -632,6 +634,7 @@ export interface FileShare {
     level: "read" | "write";
     through: string;
     snapshots: boolean;
+    webdav: boolean;
 }
 
 export interface FileEntry {

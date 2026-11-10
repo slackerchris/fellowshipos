@@ -14,6 +14,16 @@ bump.
 
 ### Added
 
+- Sharing, Phase 13 starts with WebDAV: a share can be shared over HTTPS as a
+  drive, with a checkbox of its own that is off until it is asked for. A client
+  signs in with the NAS user name and password (only accepted over HTTPS) and sees
+  only the shares that are both theirs and shared over WebDAV, at
+  `https://ADDRESS/dav/`. A file can be downloaded and seeked in, a folder listed
+  with sizes and dates, and nothing can be changed: every write answers 405 with
+  the methods that are allowed. A share that is not theirs answers 404, so an
+  address can't be used to find out what other people have. SFTP, FTP and writing
+  over WebDAV are still to come.
+
 - Files, slice E: **Earlier versions…** in a file's menu lists the snapshots that
   hold that path, each with the date it was taken and how big the file was, and
   **Look** opens one. **Put back a copy** writes it beside the file as

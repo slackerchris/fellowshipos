@@ -27,6 +27,7 @@ type rootResponse struct {
 	Level     string `json:"level"`
 	Through   string `json:"through"`
 	Snapshots bool   `json:"snapshots"`
+	Webdav    bool   `json:"webdav"`
 }
 
 // RootsFor is how long a person's shares are remembered. A change to who may
@@ -88,6 +89,7 @@ type shareItem struct {
 	Level     string `json:"level"`
 	Through   string `json:"through"`
 	Snapshots bool   `json:"snapshots"`
+	Webdav    bool   `json:"webdav"`
 }
 
 // listShares answers what the person may browse, for the Files app's first
@@ -100,7 +102,7 @@ func (h *Helper) listShares(user string) protocol.Response {
 	items := make([]shareItem, 0, len(found))
 	for _, root := range found {
 		items = append(items, shareItem{Share: root.Share, Level: root.Level,
-			Through: root.Through, Snapshots: root.Snapshots})
+			Through: root.Through, Snapshots: root.Snapshots, Webdav: root.Webdav})
 	}
 	out, err := json.Marshal(items)
 	if err != nil {
@@ -244,7 +246,7 @@ func headed(out io.ReadCloser, failed string) (protocol.Response, io.ReadCloser)
 		out.Close()
 		return failure(protocol.CodeFailed, head.Error), nil
 	}
-	return protocol.Response{Size: head.Size, Length: head.Length},
+	return protocol.Response{Size: head.Size, Length: head.Length, Modified: head.Modified},
 		struct {
 			io.Reader
 			io.Closer

@@ -60,6 +60,8 @@ type Server struct {
 	Scheme string
 	// How often the jobs stream asks fnas for progress; a second when unset
 	JobPoll time.Duration
+	// WebDAV clients' sessions, so a folder of pictures costs one password check
+	davKept davSessions
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string)
@@ -86,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/copy", s.withSession(true, s.copyFile))
 	mux.HandleFunc("GET /api/files/tree", s.withSession(false, s.tree))
 	mux.HandleFunc("GET /api/files/search", s.withSession(false, s.search))
+	mux.HandleFunc("/dav/", s.dav)
+	mux.HandleFunc("/dav", s.dav)
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }

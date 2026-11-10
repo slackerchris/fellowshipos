@@ -106,6 +106,8 @@ type Response struct {
 	// to the end when Length is ToTheEnd, for a zip that is made as it is sent
 	Size   int64 `json:"size,omitempty"`
 	Length int64 `json:"length,omitempty"`
+	// When the file behind it last changed, for an ETag
+	Modified int64 `json:"modified,omitempty"`
 }
 
 // Send is Call for a request that carries bytes after it, such as an upload.
