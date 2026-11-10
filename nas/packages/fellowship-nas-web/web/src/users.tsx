@@ -40,9 +40,13 @@ export const passwordProblem = (password: string, again: string) =>
     password.length < 8 ? "The password needs at least 8 characters."
     : password !== again ? "The passwords don't match." : "";
 
-function GroupChoices({ groups, chosen, setChosen }: { groups: Group[]; chosen: string[]; setChosen: (names: string[]) => void }) {
-    const system = groups.filter(group => group.system);
-    const managed = groups.filter(group => !group.system);
+function GroupChoices({ groups, chosen, setChosen, own }: {
+    groups: Group[]; chosen: string[]; setChosen: (names: string[]) => void; own?: string;
+}) {
+    // A person's own group follows their account, so it isn't a choice here
+    const offered = groups.filter(group => !(own && group.private && group.name === own));
+    const system = offered.filter(group => group.system);
+    const managed = offered.filter(group => !group.system);
     const box = (group: Group) => (
         <label class="check" key={group.name}>
             <input type="checkbox" checked={chosen.includes(group.name)}
@@ -60,8 +64,8 @@ function GroupChoices({ groups, chosen, setChosen }: { groups: Group[]; chosen: 
             {system.length > 0 && (
                 <details class="system-groups">
                     <summary>System groups ({system.length})</summary>
-                    <p class="muted small">Groups the system already has, such as video. Joining one gives this person
-                        whatever those files are, and keeps everyone else who is already in it.</p>
+                    <p class="muted small">Every other group on this NAS, such as video or docker. Joining one gives
+                        this person whatever those files are, and keeps everyone else who is already in it.</p>
                     <div class="row">{system.map(box)}</div>
                 </details>
             )}
@@ -129,7 +133,7 @@ export function AddUser({ onAdded }: { onAdded: () => void }) {
                 <KindChoice kind={kind} setKind={setKind} admin={admin} setAdmin={setAdmin} />
                 <div class="field">
                     <span class="field-label">Groups</span>
-                    <Loading loaded={groups}>{() => <GroupChoices groups={groups.data!} chosen={chosen} setChosen={setChosen} />}</Loading>
+                    <Loading loaded={groups}>{() => <GroupChoices groups={groups.data!} chosen={chosen} setChosen={setChosen} own={name} />}</Loading>
                 </div>
                 {problem && name && <p class="muted small">{problem}</p>}
                 <div class="row"><Button kind="primary" type="submit" busy={action.busy} disabled={!!problem}>Add</Button></div>
@@ -157,7 +161,7 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
             <KindChoice kind={kind} setKind={setKind} admin={admin} setAdmin={setAdmin} />
             <div class="field">
                 <span class="field-label">Groups</span>
-                <GroupChoices groups={groups} chosen={chosen} setChosen={setChosen} />
+                <GroupChoices groups={groups} chosen={chosen} setChosen={setChosen} own={user.name} />
             </div>
             <div class="row">
                 <Button kind="primary" busy={save.busy} onClick={() => save.run(() => fnas([
@@ -444,7 +448,7 @@ function Groups({ groups, users, reload, creating, setCreating }: {
             <p class="muted small">Removing a group takes it off every share; its members keep their accounts.</p>
             {machine.length > 0 && (
                 <details class="system-groups">
-                    <summary>System groups ({machine.length})</summary>
+                    <summary>Every other group on this NAS ({machine.length})</summary>
                     <p class="muted small">These came with the system, and its packages expect them to stay. A share can
                         be given to one from the share's access settings, which is how Plex, the *arr apps and other
                         software already running here reach the files they need. They can't be renamed or removed.</p>
@@ -454,7 +458,8 @@ function Groups({ groups, users, reload, creating, setCreating }: {
                             <tbody>
                                 {machine.map(group => (
                                     <tr key={group.name}>
-                                        <td><strong>{group.name}</strong></td>
+                                        <td><strong>{group.name}</strong>
+                                            {group.private && <span class="muted small"> own group</span>}</td>
                                         <td class="small muted">{group.gid}</td>
                                         <td class="small">{group.members.join(", ") || <span class="muted">no members</span>}</td>
                                     </tr>

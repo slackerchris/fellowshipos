@@ -2831,13 +2831,18 @@ class Users(unittest.TestCase):
 
     def test_the_machines_own_groups_are_offered_but_not_removed(self):
         # An app such as Plex or a *arr runs as a system account in a group that
-        # already exists, so a share can be given to that group instead
+        # already exists, so a share can be given to that group instead. Nothing
+        # is filtered: every group on the machine can be chosen.
         found = {g["name"]: g for g in fnas.list_groups(include_system=True)}
-        self.assertEqual(sorted(found), ["docker", "family", "video", "wheel"])
+        self.assertEqual(sorted(found),
+                         ["docker", "family", "kim", "nas-admins", "nas-share", "tester", "video", "wheel"])
         self.assertEqual((found["video"]["system"], found["video"]["members"]), (True, ["kim"]))
         self.assertFalse(found["family"]["system"])
-        # nas-admins is managed through the administrator switch, not as a group
-        self.assertNotIn("nas-admins", found)
+        # A group named after an account is flagged, since its members follow the account
+        self.assertEqual((found["kim"]["system"], found["kim"]["private"]), (True, True))
+        self.assertEqual((found["family"]["system"], found["family"]["private"]), (False, False))
+        # nas-admins has a switch of its own, but it is still a group and can be shared to
+        self.assertTrue(found["nas-admins"]["system"])
         self.assertEqual([g["name"] for g in fnas.list_groups()], ["family"])
         with self.assertRaisesRegex(fnas.FnasError, "video belongs to the machine"):
             fnas.rename_group("video", "films")

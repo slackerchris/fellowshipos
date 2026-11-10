@@ -278,6 +278,8 @@ export interface Group {
     // A group that came with the system, such as video or wheel: it can be
     // granted a share and joined, but never renamed or removed from here
     system: boolean;
+    // Named after an account, whose primary group it is
+    private: boolean;
 }
 
 export interface UserShare {

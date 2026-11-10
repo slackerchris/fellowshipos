@@ -598,3 +598,4 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .system-groups > summary::before { content: "▸"; font-size: 0.75rem; }
 .system-groups[open] > summary::before { content: "▾"; }
 .system-groups > summary:hover { text-decoration: underline; text-underline-offset: 2px; }
+.group-filter { width: 100%; margin: 4px 0 8px; }

@@ -471,13 +471,16 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
   - **Administrator**: also manages the NAS (`nas-admins`).
 - **One password:** setting a password sets the Linux one and the Samba one together, so the desktop, SMB and later SFTP, FTP and WebDAV all take the same password. An account made before this, with no Samba password, says so and offers to set one.
 - **Groups:** create, rename and remove groups, and choose their members. Shares can be given to a group.
-- **The machine's own groups** are offered too, under System groups: video, render, wheel,
-  docker and the rest of what Debian and its packages made. A share can be given to one,
-  which is how Plex, the *arr apps or a backup tool reach the files they need without a
-  second account, and a person can be given one from their own form. fnas never renames or
-  removes them, and when it changes who is in one it only adds and removes people it
-  manages, so the app the group exists for stays where it is. `fnas group list --system`
-  shows them with their ID.
+- **Every other group on the machine** is offered under that heading, not a list fnas
+  keeps: the packages' groups (video, render, wheel, docker), the groups of accounts fnas
+  doesn't manage (Plex, the *arr services, a backup tool), `nas-admins`, and each
+  account's own group, which is marked as such. A share can be given to any of them, which
+  is how software that already runs here reaches the files it needs without a second
+  account, and a person can be given one from their own form. Nothing is filtered; the
+  list is searchable when a machine has dozens. fnas never renames or removes these
+  groups, and when it changes who is in one it only adds and removes people it manages, so
+  the app the group exists for stays where it is. `fnas group list --system` lists them,
+  with their ID.
 - **Changing someone:** password, full name, groups, what they may do, and turning the account off without removing it.
 - **Removing someone** asks whether to keep their home folder, names the shares they lose, and needs a typed confirmation. You can't remove yourself or the last administrator.
 - **Accounts are normal Linux accounts** with IDs from 1000 up. Users, groups and their IDs are saved in the pool config, so they come back the same after a reinstall.

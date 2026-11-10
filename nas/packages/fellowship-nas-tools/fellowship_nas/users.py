@@ -71,24 +71,32 @@ def managed_group_names():
 
 
 def system_group_names():
-    """The machine's own groups: video, render, wheel, docker and the rest.
+    """Every group on the machine that fnas didn't make.
 
-    A share can be given to one, so an app that already runs here (Plex, the
-    *arr apps, a backup tool) reads what it needs without a second account, and
-    a person can join one. fnas never renames or removes them, because the
-    packages that made them expect them to stay."""
-    own = {private_group(account) for account in pwd.getpwall()}
-    return {g.gr_name for g in grp.getgrall()
-            if not FIRST_ID <= g.gr_gid < LAST_ID and ACCOUNT_NAME.match(g.gr_name)
-            and g.gr_name not in own | SERVICE_ACCOUNTS | {ADMIN_GROUP}}
+    That covers the packages' groups (video, render, wheel, docker and the
+    rest), the groups belonging to accounts fnas doesn't manage (Plex, the
+    *arr services, a backup tool), `nas-admins`, and each account's own group.
+    A share can be given to any of them, so software that already runs here
+    reaches the files it needs without a second account. Nothing is filtered
+    out: if the group exists, it can be chosen, and fnas never renames or
+    removes it."""
+    return {g.gr_name for g in grp.getgrall()} - managed_group_names()
+
+
+def private_group_names():
+    """Each account's own group, named after the account, which can't be shared
+    on purpose because membership follows the account's primary group."""
+    return {private_group(account) for account in pwd.getpwall()} - {None}
 
 
 def list_groups(include_system=False):
-    """Groups people manage, and with include_system the machine's own too."""
+    """Groups people manage, and with include_system everything else on the
+    machine as well, each flagged so a panel can tell them apart."""
     managed = managed_group_names()
     wanted = managed | (system_group_names() if include_system else set())
+    own = private_group_names()
     return sorted(({"name": g.gr_name, "gid": g.gr_gid, "members": sorted(g.gr_mem),
-                    "system": g.gr_name not in managed}
+                    "system": g.gr_name not in managed, "private": g.gr_name in own}
                    for g in grp.getgrall() if g.gr_name in wanted),
                   key=lambda group: group["name"])
 

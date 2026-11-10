@@ -81,6 +81,10 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
         </div>
     );
     const systemGroups = groups.filter(group => group.system);
+    const [filter, setFilter] = useState("");
+    const shownSystem = filter
+        ? systemGroups.filter(group => group.name.toLowerCase().includes(filter.trim().toLowerCase()))
+        : systemGroups;
     return (
         <div class="field">
             <span class="field-label">Who can use it</span>
@@ -102,12 +106,20 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
                         .map(group => row("groups", group.name, group.members.join(", ") || "no members"))}
                     {systemGroups.length > 0 && (
                         <details class="system-groups">
-                            <summary>System groups ({systemGroups.length})</summary>
-                            <p class="muted small">These came with the system. Give one access when an app already
-                                running here needs the files, such as Plex or the *arr apps reading media, or a
-                                backup tool writing to a folder.</p>
-                            {systemGroups.map(group => row("groups", group.name,
-                                                           group.members.join(", ") || "no members"))}
+                            <summary>Every other group on this NAS ({systemGroups.length})</summary>
+                            <p class="muted small">Every group the machine has, so an app that already runs here can be
+                                given the files it needs: Plex and the *arr apps usually read as video or render, a
+                                container as docker, a backup tool as whatever it was installed with.</p>
+                            {systemGroups.length > 8 && (
+                                <input class="group-filter" type="search" placeholder="Filter groups"
+                                       aria-label="Filter groups"
+                                       onInput={event => setFilter(event.currentTarget.value)} />
+                            )}
+                            {shownSystem.map(group => row("groups", group.name,
+                                                          [group.members.join(", "),
+                                                           group.private ? "own group" : ""].filter(Boolean).join(", ")
+                                                          || "no members"))}
+                            {!shownSystem.length && <p class="muted small">No group matches that.</p>}
                         </details>
                     )}
                     {!users.length && <p class="muted small">No people yet: add them in Users.</p>}
