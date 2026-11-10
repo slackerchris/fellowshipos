@@ -426,6 +426,20 @@ def next_data_name(found):
     return f"d{max(taken, default=0) + 1}"
 
 
+def mount_unit(path):
+    """systemd's name for the mount at this path, as in mnt-media.mount; a "-" in a pool's name is escaped."""
+    return run("systemd-escape", "--path", "--suffix=mount", path).stdout.strip()
+
+
+def mount_pool(name):
+    """Start the pool's mount through systemd, from its /etc/fstab line. mergerfs
+    keeps running as long as the pool is mounted, and a process fnas started
+    itself would belong to whichever service called fnas, the desktop's helper
+    among them, and stop when that service restarts, as on every update."""
+    run("systemctl", "daemon-reload", check=False)
+    run("systemctl", "start", mount_unit(pools.mountpoint(name)))
+
+
 def branches(name):
     return os.path.join(pools.mountpoint(name), ".mergerfs")
 
@@ -453,7 +467,7 @@ def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0,
     save(found)
     path = pools.mountpoint(name)
     os.makedirs(path, exist_ok=True)
-    run("mount", path)
+    mount_pool(name)
     for folder in DEFAULT_FOLDERS:
         os.makedirs(os.path.join(path, folder), exist_ok=True)
     # The first sync is quick on empty disks, and from then on parity is in step
@@ -780,10 +794,11 @@ def import_pool(pool, readonly, force=False):
         branches_list = ":".join(f"{d['mount']}/{FILES}" for d in data_disks(found))
         os.makedirs(POOLS_DIR, exist_ok=True)
         write_json(record_path(name), found)
-        run("mount", "-t", "fuse.mergerfs", "-o", f"ro,{MERGERFS_OPTIONS},fsname={name}", branches_list, path)
+        # A transient mount unit, for the same reason as mount_pool's
+        run("systemd-mount", "-t", "fuse.mergerfs", "-o", f"ro,{MERGERFS_OPTIONS},fsname={name}", branches_list, path)
     else:
         save(found)
-        run("mount", path)
+        mount_pool(name)
     shares.migrate()
     shares.write_config()
 

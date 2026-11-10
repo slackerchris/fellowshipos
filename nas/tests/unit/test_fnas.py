@@ -1954,6 +1954,19 @@ class Unraid(unittest.TestCase):
         self.assertIn("x-systemd.after=srv-disks-P1.mount", pool_line[3])
         self.assertIn("nofail", pool_line[3])
 
+    def test_the_pool_mounts_through_systemd(self):
+        # mergerfs keeps running while mounted; started by fnas itself, it would stop
+        # whenever the service that ran fnas restarted, as the desktop's helper does on updates
+        ran = []
+        def fake(*command, check=True, timeout=None):
+            ran.append(command)
+            return SimpleNamespace(stdout="mnt-my\\x2dpool.mount\n" if command[0] == "systemd-escape" else "",
+                                   stderr="", returncode=0)
+        with patch("run", fake):
+            self.engine.mount_pool("my-pool")
+        self.assertIn(("systemctl", "start", "mnt-my\\x2dpool.mount"), ran)
+        self.assertFalse(any(command[0] == "mount" for command in ran))
+
     def test_disks_are_found_by_their_label(self):
         output = ("DEVNAME=/dev/sdb\nLABEL=fn-012345678\nUUID=1\nTYPE=xfs\n\n"
                   "DEVNAME=/dev/sdc\nLABEL=photos\nTYPE=xfs\n\n"

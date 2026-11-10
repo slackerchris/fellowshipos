@@ -136,6 +136,12 @@ bump.
 
 ### Fixed
 
+- The desktop's widget column ran under the taskbar on shorter screens, hiding the lower
+  drive rows and Recent alerts; it now scrolls. A two-line icon label, such as Snapshots
+  & backup, no longer runs into the icon below it.
+- An Unraid-style pool unmounted whenever the desktop's helper restarted, as on every
+  update: mergerfs keeps running while a pool is mounted, and fnas had started it inside
+  whichever service called it. The pool now mounts through its own systemd mount unit.
 - Found in the VM while building Unraid-style pools: a sync failed whenever fnas saved
   its settings during it, since SnapRAID stops when a file changes under it. The settings
   folder is kept out of parity and copied to every data disk after each sync instead.

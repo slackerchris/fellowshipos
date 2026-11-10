@@ -19,7 +19,8 @@
     left: 12px;
     display: grid;
     grid-auto-flow: column;
-    grid-template-rows: repeat(auto-fill, 96px);
+    /* Tall enough for a label on two lines, such as Snapshots & backup */
+    grid-template-rows: repeat(auto-fill, 112px);
     max-height: calc(100% - 32px);
     gap: 4px;
 }
@@ -53,9 +54,18 @@
     position: absolute;
     top: 16px;
     right: 16px;
-    width: 280px;
+    /* 280px of widget, with the padding below either side */
+    width: 296px;
     display: grid;
+    align-content: start;
     gap: 12px;
+    /* On a short screen the column scrolls rather than running under the taskbar,
+       with room either side so the widgets' shadows aren't clipped */
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
+    padding: 0 8px 16px;
+    margin-right: -8px;
+    scrollbar-width: thin;
 }
 .widget {
     display: grid;
