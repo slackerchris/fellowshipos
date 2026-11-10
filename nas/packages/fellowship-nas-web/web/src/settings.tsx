@@ -4,6 +4,7 @@ import {
     CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, jobStarted,
     onOff, sessions, when,
 } from "./api";
+import { Mode, PALETTES, useAppearance } from "./appearance";
 import { DesktopContext } from "./desktop/context";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
@@ -440,6 +441,7 @@ function NotBuilt({ title, phase, children }: { title: string; phase: number; ch
 
 const SECTIONS = [
     { id: "account", label: "Your account", admin: false },
+    { id: "look", label: "Appearance", admin: false },
     { id: "sessions", label: "Sessions", admin: false },
     { id: "nas", label: "Name and time", admin: true },
     { id: "space", label: "System space", admin: true },
@@ -451,6 +453,40 @@ const SECTIONS = [
     { id: "power", label: "Power", admin: true },
     { id: "setup", label: "Setup", admin: true },
 ] as const;
+
+/** Light, dark or the system's own, and which of the themes to draw with. Both are
+    kept in this browser, not on the NAS. */
+function Look() {
+    const look = useAppearance();
+    return (
+        <Card title="Appearance">
+            <p class="muted small">Kept in this browser, so another computer or browser starts on Auto with the
+                Fellowship theme.</p>
+            <Field label="Light or dark">
+                <div class="segmented look-mode" role="group" aria-label="Mode">
+                    {(["system", "light", "dark"] as Mode[]).map(option => (
+                        <button key={option} type="button" class={look.mode === option ? "current" : ""}
+                                aria-pressed={look.mode === option}
+                                onClick={() => look.setMode(option)}>
+                            {option === "system" ? "Auto" : option[0].toUpperCase() + option.slice(1)}
+                        </button>
+                    ))}
+                </div>
+            </Field>
+            <span class="field-label">Theme</span>
+            <div class="palettes look-palettes" role="group" aria-label="Theme">
+                {PALETTES.map(palette => (
+                    <button key={palette.id} type="button" class={`palette ${look.palette === palette.id ? "current" : ""}`}
+                            aria-pressed={look.palette === palette.id} onClick={() => look.setPalette(palette.id)}>
+                        <span class="palette-swatch" aria-hidden="true"
+                              style={{ background: `linear-gradient(135deg, ${palette.swatch[0]} 55%, ${palette.swatch[1]} 55%)` }} />
+                        {palette.title}
+                    </button>
+                ))}
+            </div>
+        </Card>
+    );
+}
 
 export function Settings() {
     const { admin } = useContext(SessionContext);
@@ -467,6 +503,7 @@ export function Settings() {
             </nav>
             <Page>
                 {section === "account" && <OwnPassword />}
+                {section === "look" && <Look />}
                 {section === "sessions" && <Sessions />}
                 {section === "nas" && <Loading loaded={info}>{() => <ThisNas info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "certificate" && <Loading loaded={info}>{() => <Certificate info={info.data!} reload={info.reload} />}</Loading>}

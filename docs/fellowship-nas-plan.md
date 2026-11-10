@@ -613,7 +613,8 @@ The desktop is the interface from the start. Every app opens in a window; there 
 - **Look (chosen by Chris):** a dark forest palette, with the fantasy in the atmosphere only.
   - Controls stay clean and readable: solid panels, softly rounded windows, crisp icons, gold used sparingly.
   - The theme follows the device; the light theme is the same palette in daylight.
-  - **Themes** (Chris, Nov 9): Silverwater, Hearthfield and Highwatch sit beside the default forest and gold, each with a light and a dark mode and its own wallpaper, chosen in the account menu. Each is four colours per mode in `web/themes.mjs`; the build works out the rest and stops if any text falls below WCAG AA contrast.
+  - **Themes** (Chris, Nov 9): Silverwater, Hearthfield and Highwatch sit beside the default forest and gold, each with a light and a dark mode and its own wallpaper. Each is four colours per mode in `web/themes.mjs`; the build works out the rest and stops if any text falls below WCAG AA contrast.
+  - **Where the look is chosen** (Chris, Nov 10): Settings → Appearance holds both light, dark or the system's and the four themes, because it is a preference and the account menu is for identity and signing out. The menu keeps the three-way toggle alone, since that is a frequent one-click change. Both are kept in the browser, so a second computer starts on Auto and the Fellowship theme; making the choice follow the account needs it stored on the NAS.
 
   | Element | Colour |
   | --- | --- |

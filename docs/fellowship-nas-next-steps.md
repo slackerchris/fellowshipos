@@ -105,7 +105,9 @@ per-user file helper that WebDAV reuses in Phase 13.
 What is true in the desktop today, so changes have a reference point:
 
 - Three appearances sit beside the default: Silverwater, Hearthfield and
-  Highwatch (`docs/fellowship-nas-plan.md`, desktop section).
+  Highwatch, chosen in Settings → Appearance (`docs/fellowship-nas-plan.md`,
+  desktop section). The account menu keeps only the light, dark or automatic
+  toggle, and both are remembered in the browser rather than on the NAS.
 - Severity has one scale everywhere: green good, yellow low, orange medium, red
   high, purple critical.
 - Features that cannot work are shown disabled with the reason rather than hidden.

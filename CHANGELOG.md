@@ -37,8 +37,9 @@ bump.
 - `fnas pool sync`, `fnas pool sync-all` and `fnas pool scrub-all --scheduled`, and a
   `sync` job kind. `mergerfs`, `snapraid` and `hd-idle` are dependencies of
   `fellowship-nas-tools`.
-- Three themes beside the default forest and gold, chosen in the account menu with
-  light, dark or the system's: **Silverwater** (slate blue, the waterfall city),
+- Three themes beside the default forest and gold, chosen in Settings →
+  Appearance (Nov 10) with light, dark or the system's: **Silverwater** (slate
+  blue, the waterfall city),
   **Hearthfield** (warm parchment and rust, the hill homes) and **Highwatch** (mauve
   stone, the mountain fortress), each with its own wallpaper. Each is four colours per
   mode in `web/themes.mjs`; the build works out the rest, including the taskbar and the
@@ -106,6 +107,11 @@ bump.
 
 ### Changed
 
+- The theme choice moved out of the account menu into **Settings → Appearance**,
+  beside the light, dark or automatic setting, because the look is a preference
+  and the menu is for identity and signing out. The menu keeps the three-way
+  toggle, since that is a frequent one-click change. Both are still remembered in
+  the browser rather than on the NAS.
 - The Users app is two tabs, People and Groups. Each person is one line with what
   they can do, their groups and whether they have a password, and Change, Turn off
   and Remove move into a menu on the row. **Add someone** opens the form under the

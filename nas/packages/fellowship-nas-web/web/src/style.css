@@ -599,3 +599,7 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .system-groups[open] > summary::before { content: "▾"; }
 .system-groups > summary:hover { text-decoration: underline; text-underline-offset: 2px; }
 .group-filter { width: 100%; margin: 4px 0 8px; }
+/* Appearance in Settings: the same chooser the account menu used to hold */
+.look-mode { width: max-content; }
+.look-palettes { display: grid; gap: 8px; max-width: 420px; margin: 0; }
+.look-palettes .palette { padding: 9px 12px; }

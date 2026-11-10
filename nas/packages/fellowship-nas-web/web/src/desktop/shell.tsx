@@ -2,7 +2,7 @@
 import { useContext, useEffect, useState } from "preact/hooks";
 import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
-import { Mode, PALETTES, useAppearance } from "../appearance";
+import { Mode, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
@@ -289,16 +289,6 @@ function UserMenu({ open, onSignOut }: { open: (app: AppId) => void; onSignOut: 
                 {(["system", "light", "dark"] as Mode[]).map(option => (
                     <button key={option} type="button" class={look.mode === option ? "current" : ""} aria-pressed={look.mode === option}
                             onClick={() => look.setMode(option)}>{option === "system" ? "Auto" : option[0].toUpperCase() + option.slice(1)}</button>
-                ))}
-            </div>
-            <div class="palettes" role="group" aria-label="Theme">
-                {PALETTES.map(palette => (
-                    <button key={palette.id} type="button" class={`palette ${look.palette === palette.id ? "current" : ""}`}
-                            aria-pressed={look.palette === palette.id} onClick={() => look.setPalette(palette.id)}>
-                        <span class="palette-swatch" aria-hidden="true"
-                              style={{ background: `linear-gradient(135deg, ${palette.swatch[0]} 55%, ${palette.swatch[1]} 55%)` }} />
-                        {palette.title}
-                    </button>
                 ))}
             </div>
             <button type="button" class="menu-item" role="menuitem" onClick={() => open("settings")}>Settings</button>
