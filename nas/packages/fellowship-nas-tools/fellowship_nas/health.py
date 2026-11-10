@@ -61,13 +61,15 @@ def health_findings(found_pools):
         status = pools.ENGINES[pool["engine"]].pool_status(pool["name"])
         bad = [disk for disk in pools.ENGINES[pool["engine"]].member_disks(status)
                if disk["state"] not in ("ONLINE",)]
-        named = "; ".join(f"{describe_disk(d['path'], slots)} is {d['state'].lower()}" for d in bad)
+        # A disk that has gone has no path left, only the name its engine remembers
+        named = "; ".join(f"{describe_disk(d['path'] or d.get('name', ''), slots)} is {d['state'].lower()}"
+                          for d in bad)
         # Missing a disk is broken too: the pool has lost its protection
         severity = "critical"
         found.append(finding(f"pool-health-{pool['name']}-{pool['health']}", severity,
                              f"Pool {pool['name']} is {pool['health'].lower()}",
                              (named + ". " if named else "")
-                             + "Replace the disk from Storage in the desktop."))
+                             + f"Replace {'them' if len(bad) > 1 else 'the disk'} from Storage in the desktop."))
     return found
 
 

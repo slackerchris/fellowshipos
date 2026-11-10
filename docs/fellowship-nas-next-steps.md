@@ -50,7 +50,7 @@ They are the paths a release rests on.
 
 Carried from Phase 10:
 
-- [ ] RAID 6
+- [x] RAID 6 (Nov 10: four disks, two failed one at a time, data intact; fixed degraded detection)
 - [ ] Sixteen disks in one array
 - [ ] Importing an array made on another machine
 

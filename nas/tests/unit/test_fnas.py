@@ -2357,6 +2357,37 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         self.assertNotIn("grow", shown["btrfs"])
         self.assertEqual(pools.engine_title("mdadm"), "Traditional RAID")
 
+    def test_an_array_missing_disks_is_degraded(self):
+        # A disk that has gone isn't listed as a member at all, failed or not; only the count shows it
+        mdstat = ("Personalities : [raid6]\nmd127 : active raid6 vdd[2] vdb[0]\n"
+                  "      8378368 blocks super 1.2 level 6, 512k chunk, algorithm 2 [4/2] [U_U_]\n"
+                  "      bitmap: 0/1 pages [0KB], 65536KB chunk\n\nunused devices: <none>\n")
+        with mock.patch.object(self.engine, "read", lambda path: mdstat):
+            array = self.engine.arrays()["/dev/md127"]
+        self.assertEqual((array["wanted"], array["working"]), (4, 2))
+        self.assertEqual(self.engine.health(array), "DEGRADED")
+        self.assertEqual(self.engine.health({**array, "working": 4}), "ONLINE")
+
+    def test_a_gone_disk_is_named_by_what_was_in_its_slot(self):
+        links = {"/dev/vdb": "/dev/disk/by-id/virtio-DATA-1", "/dev/vdc": "/dev/disk/by-id/virtio-DATA-2"}
+        present = [{"slot": 0, "raid_device": 0, "state": "active sync", "path": "/dev/vdb"},
+                   {"slot": 1, "raid_device": 1, "state": "active sync", "path": "/dev/vdc"}]
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(self.engine, "SLOTS", os.path.join(directory, "slots.json")):
+            self.engine.remember_slots("r6", present, links)
+            gone = [present[0], {"slot": None, "raid_device": 1, "state": "removed", "path": ""}]
+            self.engine.remember_slots("r6", gone, links)
+            shown = self.engine.describe_disk(gone[1], links)
+        self.assertEqual((shown["name"], shown["path"], shown["state"]), ("/dev/disk/by-id/virtio-DATA-2", "", "FAULTED"))
+
+    def test_the_notice_says_how_much_protection_is_left(self):
+        self.assertEqual(self.engine.broken_status("raid6", 4, 0), "")
+        self.assertIn("less protection, until it is replaced", self.engine.broken_status("raid6", 4, 1))
+        two = self.engine.broken_status("raid6", 4, 2)
+        self.assertIn("no protection left: one more failure loses it. Replace them now", two)
+        self.assertIn("no protection left", self.engine.broken_status("raid5", 4, 1))
+        self.assertIn("less protection", self.engine.broken_status("mirror", 3, 1))
+
     def test_saved_arrays_carry_no_spare_count(self):
         scan = "ARRAY /dev/md/vault metadata=1.2 spares=1 UUID=d6a1:3cf5\n"
         with tempfile.TemporaryDirectory() as directory:
@@ -2577,7 +2608,10 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
                 {"slot": 2, "raid_device": None, "state": "faulty", "path": "/dev/vdh"},
                 {"slot": 3, "raid_device": None, "state": "spare", "path": "/dev/vdj"}]
         detail = {"fields": {"raid level": "raid5"}, "rows": rows}
-        with mock.patch.object(self.engine, "detail", lambda name: detail), \
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with mock.patch.object(self.engine, "SLOTS", os.path.join(directory.name, "slots.json")), \
+                mock.patch.object(self.engine, "detail", lambda name: detail), \
                 mock.patch.object(self.engine, "array_device", lambda name: "/dev/md127"), \
                 mock.patch.object(self.engine, "sync_from", lambda device: None), \
                 mock.patch.object(self.engine, "missed", lambda device: 0), \

@@ -196,6 +196,13 @@ bump.
 
 ### Fixed
 
+- Found by a RAID 6 test in the VM, with two of four disks pulled out: an array missing
+  disks read as healthy everywhere but the pool card's table, since a disk that has gone
+  isn't listed among the array's members. The pool, the Storage and Health widgets and
+  Health's "every disk present" check now read the array's own count (`[4/2]`) and say
+  degraded. A missing disk is named by the disk last seen in its slot ("DATA-2
+  (missing)") rather than "Missing disk", and the notice says when no protection is left:
+  "2 disks failed, so the array has no protection left: one more failure loses it."
 - Files, from a review of slices 1 to 3:
   - A file someone uploaded could run as whoever opened it: HTML and scripts were sent
     as themselves, and the desktop's policy let a page load a script from the same

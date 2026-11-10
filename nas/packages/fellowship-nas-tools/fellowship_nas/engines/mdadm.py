@@ -85,6 +85,12 @@ ARRAY_LINE = re.compile(r"^(md\w+)\s*:\s*(\S+)\s*(.*)$")
 # "sdd1[3]" or "sdc1[1](F)" for a disk that has failed
 MEMBER = re.compile(r"^(\S+)\[(\d+)\](?:\((.)\))?$")
 # "  [=>...................]  recovery = 8.3% (65/781) finish=120.4min"
+# "[4/2] [U_U_]": the array wants 4 members and has 2 working. A disk that has
+# gone isn't listed among the members at all, so only this count shows it
+COUNTS = re.compile(r"\[(\d+)/(\d+)\]")
+# Which disk held each slot of each array, remembered while it was there, so a
+# disk that has gone can still be named
+SLOTS = os.path.join(STATE_DIR, "array-slots.json")
 PROGRESS = re.compile(r"^\s*\[[=>.]+\]\s*(\w+)\s*=\s*([\d.]+)%")
 # "       0       8       17        0      active sync   /dev/sdb1"
 DETAIL_DISK = re.compile(r"^\s*(?P<slot>\d+|-)\s+\d+\s+\d+\s+(?P<raid>\d+|-)\s+"
@@ -135,7 +141,7 @@ def arrays():
         match = ARRAY_LINE.match(line)
         if match:
             current = {"device": f"/dev/{match.group(1)}", "state": match.group(2),
-                       "members": [], "sync": None}
+                       "members": [], "sync": None, "wanted": None, "working": None}
             for token in match.group(3).split():
                 member = MEMBER.match(token)
                 if member:
@@ -144,6 +150,9 @@ def arrays():
                         "state": "failed" if member.group(3) == "F" else "in sync"})
             found[current["device"]] = current
             continue
+        counts = COUNTS.search(line) if current and "blocks" in line else None
+        if counts:
+            current["wanted"], current["working"] = int(counts.group(1)), int(counts.group(2))
         progress = PROGRESS.match(line) if current else None
         if progress:
             current["sync"] = {"function": progress.group(1).lower(), "state": "running",
@@ -204,6 +213,8 @@ def readonly(path):
 def health(array):
     """The word every engine uses for a pool's state."""
     if array["state"] != "active" or any(m["state"] == "failed" for m in array["members"]):
+        return "DEGRADED"
+    if array.get("working") is not None and array["working"] < array["wanted"]:
         return "DEGRADED"
     if array["sync"] and array["sync"]["function"] in ("recovery", "resync"):
         return "DEGRADED"
@@ -377,6 +388,7 @@ def create_pool(name, layout, wanted, confirm, wipe_disks, width=None, spares=0,
     run(*command, *[paths[i] for i in groups[0]], *[paths[i] for i in spare])
     run(*MKFS[filesystem], device)
     save_conf()
+    note_slots(name)
     mount_pool(name, device, filesystem)
     for folder in DEFAULT_FOLDERS:
         os.makedirs(os.path.join(pools.mountpoint(name), folder), exist_ok=True)
@@ -485,10 +497,11 @@ def disk_size(device):
 
 def describe_disk(row, links=None):
     """A disk in the array as the desktop shows it, by its stable by-id name rather than the
-    /dev/vdX name mdadm reports, which can change between boots."""
+    /dev/vdX name mdadm reports, which can change between boots. A disk that has gone has
+    no path, and is named by the disk that was last seen in its slot, if any."""
     links = links if links is not None else {**disks.by_id_links(), **disks.by_id_links(partitions=True)}
     path = links.get(row["path"], row["path"])
-    return {"name": path or f"slot {row['slot']}", "type": "disk",
+    return {"name": path or row.get("remembered", ""), "type": "disk",
             "state": disk_state(row["state"]), "path": path,
             "size": disk_size(row["path"]) if row["path"] else 0, "errors": 0, "note": row["state"]}
 
@@ -534,9 +547,9 @@ def pool_status(name):
     broken = [row for row in members if disk_state(row["state"]) == "FAULTED"]
     state = "ONLINE" if not broken else "DEGRADED"
     links = {**disks.by_id_links(), **disks.by_id_links(partitions=True)}
+    remember_slots(name, members, links)
     # mdadm's own state words ("clean, checking") say nothing a person needs unless a disk is gone
-    status = (f"{plural(len(broken), 'disk')} failed. The array still works, with less protection, "
-              "until the disk is replaced." if broken else "")
+    status = broken_status(level, len(members), len(broken))
     return {"name": name, "state": state, "status": status, "action": "",
             "groups": [{"name": f"{level}-0", "type": level, "state": state, "path": "",
                         "size": 0, "errors": missed(device), "note": "",
@@ -544,6 +557,51 @@ def pool_status(name):
             "spares": [describe_disk(row, links) for row in spares],
             # A mirror stays two disks; every other level reshapes onto one more
             "scan": sync_from(device), "expand": None, "expandable": level != "mirror"}
+
+
+def survives(level, count):
+    """How many failed disks an array of this level and width outlasts."""
+    return {"mirror": count - 1, "raid10": 1}.get(level, PARITY.get(level, 0))
+
+
+def broken_status(level, count, broken):
+    """What the pool's notice says about failed disks: how much protection is left."""
+    if not broken:
+        return ""
+    them = "it" if broken == 1 else "them"
+    if broken >= survives(level, count):
+        return (f"{plural(broken, 'disk')} failed, so the array has no protection left: one more failure "
+                f"loses it. Replace {them} now.")
+    return (f"{plural(broken, 'disk')} failed. The array still works, with less protection, until "
+            f"{'it is' if broken == 1 else 'they are'} replaced.")
+
+
+def note_slots(name):
+    """Record which disk is in each slot now, as after the array is made or a disk is
+    replaced, rather than waiting for someone to look at its status. Only a help in
+    naming a disk later, so it never stops what called it."""
+    try:
+        found = detail(name)
+    except (FnasError, OSError):
+        return
+    links = {**disks.by_id_links(), **disks.by_id_links(partitions=True)}
+    remember_slots(name, [row for row in found["rows"] if row["raid_device"] is not None], links)
+
+
+def remember_slots(name, members, links):
+    """Note which disk holds each slot while it is there, and name a slot whose disk
+    has gone by the disk last seen in it. Written only when something changed."""
+    everything = read_json(SLOTS, {})
+    known = dict(everything.get(name, {}))
+    for row in members:
+        slot = str(row["raid_device"])
+        if row["path"]:
+            known[slot] = links.get(row["path"], row["path"])
+        elif slot in known:
+            row["remembered"] = known[slot]
+    if known != everything.get(name, {}):
+        everything[name] = known
+        write_json(SLOTS, everything)
 
 
 def member_disks(status):
@@ -655,6 +713,9 @@ def follow(job):
               "scrub": ("check", "repair")}.get(job["kind"], ())
     if sync and sync["function"] in wanted:
         return jobs.RUNNING, sync["progress"]
+    if job["kind"] in ("resilver", "expand"):
+        # A new disk holds a slot now
+        note_slots(job["pool"])
     if job["kind"] == "expand":
         # The array has its new space; the filesystem needs telling
         grow_filesystem(job["pool"])

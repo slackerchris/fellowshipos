@@ -31,7 +31,8 @@ function diskFor(vdev: Vdev, disks: Disk[]) {
 function vdevName(vdev: Vdev, disks: Disk[]) {
     const disk = diskFor(vdev, disks);
     if (!vdev.path) {
-        return "Missing disk";
+        // A disk that has gone, named by the disk its engine last saw there when it can be
+        return vdev.name.startsWith("/dev/") ? `${vdev.name.split("/").pop()} (missing)` : "Missing disk";
     }
     if (disk?.kind === "partition") {
         return `Free part of the system disk · ${diskName(disk)}`;
