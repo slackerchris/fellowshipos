@@ -236,6 +236,11 @@ bump.
 
 ### Fixed
 
+- The list/grid switch in Files was squeezed: it inherited the segmented
+  control's share of the row and its wide padding, so two 26px buttons held the
+  icons in half of a box and cut them off, the two looking alike. The switch now
+  keeps its own size, with the one in use filled and the other quiet behind a
+  divider.
 - Previews no longer depend on the machine having a MIME table: Files now knows
   the types it shows itself, so a picture, a film or a text file is sent with the
   type the browser needs even on a small install where `/etc/mime.types` is

@@ -656,8 +656,18 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .crumbs button:hover { background: var(--raised); }
 .crumbs button.current { color: var(--text); font-weight: 600; }
 .crumb-sep { color: var(--muted); font-size: 0.85rem; }
-.view-switch { margin-left: auto; }
-.view-switch button { display: inline-grid; place-items: center; width: 26px; height: 24px; }
+/* List or grid: two square buttons in the toolbar. They have to shed the
+   segmented control's full-width share and its wide padding, or the icons are
+   squeezed into half of a 26px box and cut off */
+.view-switch { margin-left: auto; flex: none; }
+.view-switch button {
+    flex: 0 0 auto; display: grid; place-items: center;
+    width: 30px; height: 26px; padding: 0; color: var(--muted);
+}
+.view-switch button + button { border-left: 1px solid var(--border); }
+.view-switch button:hover:not(.current) { background: var(--raised); color: var(--text); }
+.view-switch button.current { font-weight: normal; }
+.view-switch .file-icon { width: 16px; height: 16px; }
 
 /* The folder and the picked file, side by side */
 .files-split { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 0; }
