@@ -19,6 +19,7 @@ type fileFake struct {
 	roots    string // what `fnas share roots USER` prints
 	ran      [][]string
 	childed  []string
+	rootSeen string
 	person   Account
 	body     string
 	uploaded string
@@ -40,9 +41,10 @@ func newFileFake(t *testing.T) (*fileFake, *Helper, string) {
 			f.ran = append(f.ran, args)
 			return f.roots, "", nil
 		},
-		Child: func(account Account, body io.Reader, op, path string, start, length int64,
+		Child: func(account Account, body io.Reader, op, root, path string, start, length int64,
 			extra ...string) (io.ReadCloser, error) {
 			f.person = account
+			f.rootSeen = root
 			f.childed = append(f.childed, op+" "+path+" "+strings.Join(extra, " "))
 			if body != nil {
 				written, _ := io.ReadAll(body)
@@ -152,7 +154,7 @@ func TestAChildThatRefusesSaysWhy(t *testing.T) {
 	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h.config.Child = func(Account, io.Reader, string, string, int64, int64, ...string) (io.ReadCloser, error) {
+	h.config.Child = func(Account, io.Reader, string, string, string, int64, int64, ...string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(`{"error":"you don't have permission to open that"}` + "\n")), nil
 	}
 	token := login(t, h, "kim").Token
@@ -240,8 +242,10 @@ func TestUploadArrivesAsThePersonsChild(t *testing.T) {
 	if f.uploaded != "hello" {
 		t.Errorf("the child was given %q", f.uploaded)
 	}
-	if len(f.childed) != 1 || f.childed[0] != "write "+filepath.Join(dir, "new notes.txt")+" " {
-		t.Errorf("the child was asked %v", f.childed)
+	// The child gets the share's real folder and a path inside it, never a whole path to trust
+	real, _ := filepath.EvalSymlinks(dir)
+	if len(f.childed) != 1 || f.childed[0] != "write new notes.txt " || f.rootSeen != real {
+		t.Errorf("the child was asked %v under %q", f.childed, f.rootSeen)
 	}
 }
 
@@ -280,12 +284,47 @@ func TestAFolderDeleteSaysWhetherItTakesWhatIsInside(t *testing.T) {
 	if response.Code != "" {
 		t.Fatalf("delete: %s %s", response.Code, response.Error)
 	}
-	if got := f.childed[len(f.childed)-1]; !strings.HasSuffix(got, "keep") {
+	// The path once, then the word: before, the path went twice and "tree" never reached the child
+	if got := f.childed[len(f.childed)-1]; got != "remove photos keep" {
 		t.Errorf("a plain delete asked the child for %q", got)
 	}
 	h.Handle(protocol.Request{Op: protocol.OpFileDelete, Session: token, Share: "media",
 		Path: "photos", Recursive: true})
-	if got := f.childed[len(f.childed)-1]; !strings.HasSuffix(got, "tree") {
+	if got := f.childed[len(f.childed)-1]; got != "remove photos tree" {
 		t.Errorf("a folder delete asked the child for %q", got)
+	}
+}
+
+func TestAChildThatSaysNothingDidntFinish(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	// A child killed part way prints nothing at all
+	f.body = ""
+	token := login(t, h, "kim").Token
+	response := h.Handle(protocol.Request{Op: protocol.OpFileMkdir, Session: token, Share: "media", Path: "holiday"})
+	if response.Code == "" {
+		t.Fatal("a child that said nothing was taken for success")
+	}
+	if !strings.Contains(response.Error, "stopped before it finished") {
+		t.Errorf("it said %q", response.Error)
+	}
+}
+
+func TestSharesAreAskedForOnceAWhile(t *testing.T) {
+	f, h, _ := newFileFake(t)
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	h.config.Now = func() time.Time { return now }
+	token := login(t, h, "kim").Token
+	for i := 0; i < 3; i++ {
+		h.Handle(protocol.Request{Op: protocol.OpFileList, Session: token})
+	}
+	if len(f.ran) != 1 {
+		t.Errorf("three listings asked fnas %d times", len(f.ran))
+	}
+	// A change to who may use a share reaches Files within RootsFor
+	now = now.Add(RootsFor)
+	h.Handle(protocol.Request{Op: protocol.OpFileList, Session: token})
+	if len(f.ran) != 2 {
+		t.Errorf("after %s fnas was asked %d times in all", RootsFor, len(f.ran))
 	}
 }

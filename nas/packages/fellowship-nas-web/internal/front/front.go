@@ -375,7 +375,9 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, session *proto
 		return
 	}
 	header := w.Header()
-	header.Set(contentType, contentTypeOf(inside))
+	kind := contentTypeOf(inside)
+	header.Set(contentType, kind)
+	downloadPolicy(header, kind)
 	header.Set("Accept-Ranges", "bytes")
 	disposition := "inline"
 	if query.Get("save") != "" {
@@ -533,20 +535,41 @@ func byteRange(header string) (start, length int64, ok bool) {
 }
 
 // contentTypeOf names a file for the browser. Only what the desktop previews is
-// named; everything else is an opaque download.
+// named; everything else is an opaque download. Anyone who can write a share can
+// put a file in it, so text of every kind, HTML and scripts among them, is sent
+// as plain text: a page or script someone uploaded is never run by the browser
+// of whoever opens it.
 func contentTypeOf(path string) string {
 	shown := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
 	switch {
 	case shown == "":
 		return "application/octet-stream"
+	case strings.HasPrefix(shown, "text/"), strings.Contains(shown, "javascript"),
+		strings.Contains(shown, "xml") && !strings.HasPrefix(shown, "image/"):
+		return "text/plain; charset=utf-8"
 	case strings.HasPrefix(shown, "image/"), strings.HasPrefix(shown, "video/"),
-		strings.HasPrefix(shown, "audio/"), strings.HasPrefix(shown, "text/"):
+		strings.HasPrefix(shown, "audio/"):
 		return shown
 	case shown == "application/pdf":
 		return shown
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// downloadPolicy replaces the desktop's own policy on a file's bytes. The file is
+// a stranger's: opened on its own it gets a sandbox with no scripts and no
+// origin, so even an SVG with a script in it can't act as the person looking
+// at it. A PDF is left unsandboxed, since browsers won't draw one in a sandbox,
+// and may be framed by the desktop alone, which previews it in a frame.
+func downloadPolicy(header http.Header, kind string) {
+	if kind == "application/pdf" {
+		header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'self'")
+		header.Set("X-Frame-Options", "SAMEORIGIN")
+		return
+	}
+	header.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; "+
+		"style-src 'unsafe-inline'; frame-ancestors 'none'")
 }
 
 // safeName keeps a file name from breaking the header it goes in.

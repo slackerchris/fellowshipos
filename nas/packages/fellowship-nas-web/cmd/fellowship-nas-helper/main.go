@@ -94,13 +94,13 @@ func lookup(name string) (helper.Account, error) {
 // person's uid, gid and groups. The kernel does the permission checking, so a
 // mistake in the path check can't reach a file the person couldn't open
 // themselves.
-func runChild(account helper.Account, body io.Reader, op, path string, start, length int64,
+func runChild(account helper.Account, body io.Reader, op, root, path string, start, length int64,
 	extra ...string) (io.ReadCloser, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"file-child", op, path}
+	args := []string{"file-child", op, root, path}
 	if op == "read" {
 		args = append(args, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
 	}
@@ -111,8 +111,10 @@ func runChild(account helper.Account, body io.Reader, op, path string, start, le
 		command.Stdin = body
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{
+		// The groups are always set, to none if the person has none, so the child
+		// never keeps the helper's own
 		Credential: &syscall.Credential{Uid: uint32(account.UID), Gid: uint32(account.GID),
-			Groups: account.Groups, NoSetGroups: len(account.Groups) == 0},
+			Groups: append([]uint32{}, account.Groups...)},
 	}
 	out, err := command.StdoutPipe()
 	if err != nil {

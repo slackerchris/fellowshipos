@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"time"
 
 	"fellowship-nas-web/internal/filechild"
 	"fellowship-nas-web/internal/files"
@@ -26,9 +27,27 @@ type rootResponse struct {
 	Snapshots bool   `json:"snapshots"`
 }
 
+// RootsFor is how long a person's shares are remembered. A change to who may
+// use a share reaches Files within this, and a folder of thumbnails costs one
+// fnas run rather than one a picture.
+const RootsFor = 5 * time.Second
+
+type knownRoots struct {
+	at    time.Time
+	roots []files.Root
+	found []rootResponse
+}
+
 // roots asks fnas for the shares this person can use. The helper runs fnas
 // itself, so the desktop never names a path on disk.
 func (h *Helper) roots(user string) ([]files.Root, []rootResponse, error) {
+	now := h.config.Now()
+	h.rootsMu.Lock()
+	kept, ok := h.known[user]
+	h.rootsMu.Unlock()
+	if ok && now.Sub(kept.at) < RootsFor && now.Sub(kept.at) >= 0 {
+		return kept.roots, kept.found, nil
+	}
 	stdout, stderr, err := h.config.Fnas([]string{"--json", "share", "roots", user}, "")
 	if err != nil {
 		text := stderr
@@ -45,6 +64,9 @@ func (h *Helper) roots(user string) ([]files.Root, []rootResponse, error) {
 	for _, root := range found {
 		roots = append(roots, files.Root{Share: root.Share, Path: root.Path})
 	}
+	h.rootsMu.Lock()
+	h.known[user] = knownRoots{at: now, roots: roots, found: found}
+	h.rootsMu.Unlock()
 	return roots, found, nil
 }
 
@@ -99,7 +121,7 @@ func (h *Helper) fileList(user string, request protocol.Request) protocol.Respon
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now")
 	}
-	out, err := h.config.Child(account, nil, "list", path, 0, 0)
+	out, err := h.child(account, nil, "list", root, path, 0, 0)
 	if err != nil {
 		log.Printf("listing %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that folder can't be listed right now")
@@ -140,7 +162,7 @@ func (h *Helper) fileRead(user string, request protocol.Request) (protocol.Respo
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now"), nil
 	}
-	out, err := h.config.Child(account, nil, "read", path, request.Start, request.Length)
+	out, err := h.child(account, nil, "read", root, path, request.Start, request.Length)
 	if err != nil {
 		log.Printf("reading %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that file can't be opened right now"), nil
@@ -242,7 +264,7 @@ func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader
 	if request.Replace {
 		extra = []string{"replace"}
 	}
-	out, err := h.config.Child(account, counting, "write", path, 0, 0, extra...)
+	out, err := h.child(account, counting, "write", root, path, 0, 0, extra...)
 	if err != nil {
 		log.Printf("writing %s for %s: %v", path, user, err)
 		return failure(protocol.CodeFailed, "that file can't be written right now")
@@ -274,7 +296,7 @@ func (c *counted) Read(into []byte) (int, error) {
 func (h *Helper) fileMkdir(user string, request protocol.Request) protocol.Response {
 	return h.change(user, request, "that folder can't be made right now", func(root files.Root) (string, error) {
 		return files.ResolveNew([]files.Root{root}, request.Share, request.Path)
-	}, func(path string) []string { return []string{"mkdir", path} })
+	}, []string{"mkdir"})
 }
 
 // fileRename moves or renames something inside one share. Moving between shares
@@ -296,7 +318,11 @@ func (h *Helper) fileRename(user string, request protocol.Request) protocol.Resp
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now")
 	}
-	out, err := h.config.Child(account, nil, "rename", from, 0, 0, to)
+	_, toInside, err := files.Relative(root, to)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	out, err := h.child(account, nil, "rename", root, from, 0, 0, toInside)
 	if err != nil {
 		return failure(protocol.CodeFailed, "that can't be renamed right now")
 	}
@@ -316,13 +342,13 @@ func (h *Helper) fileDelete(user string, request protocol.Request) protocol.Resp
 	}
 	return h.change(user, request, "that can't be removed right now", func(root files.Root) (string, error) {
 		return files.Resolve([]files.Root{root}, request.Share, request.Path)
-	}, func(path string) []string { return []string{"remove", path, whole} })
+	}, []string{"remove", whole})
 }
 
 // change is the shape mkdir and delete share: check the share can be written,
 // work out the path, then let the child do it and keep its words if it refuses.
 func (h *Helper) change(user string, request protocol.Request, failed string,
-	path func(root files.Root) (string, error), args func(path string) []string) protocol.Response {
+	path func(root files.Root) (string, error), command []string) protocol.Response {
 	root, err := h.writable(user, request.Share)
 	if err != nil {
 		return failure(protocol.CodeForbidden, err.Error())
@@ -335,8 +361,7 @@ func (h *Helper) change(user string, request protocol.Request, failed string,
 	if err != nil {
 		return failure(protocol.CodeFailed, "your account can't be read right now")
 	}
-	command := args(found)
-	out, err := h.config.Child(account, nil, command[0], found, 0, 0, command[1:]...)
+	out, err := h.child(account, nil, command[0], root, found, 0, 0, command[1:]...)
 	if err != nil {
 		log.Printf("%s for %s: %v", command[0], user, err)
 		return failure(protocol.CodeFailed, failed)
@@ -348,14 +373,28 @@ func (h *Helper) change(user string, request protocol.Request, failed string,
 	return protocol.Response{}
 }
 
+// child runs a file operation as the person on a path Resolve or ResolveNew
+// answered, handing over the share's real folder and the path inside it, so the
+// child opens it beneath that folder rather than trusting a path made earlier.
+func (h *Helper) child(account Account, body io.Reader, op string, root files.Root, path string,
+	start, length int64, extra ...string) (io.ReadCloser, error) {
+	real, inside, err := files.Relative(root, path)
+	if err != nil {
+		return nil, err
+	}
+	return h.config.Child(account, body, op, real, inside, start, length, extra...)
+}
+
 // childSaid reads the one line of JSON the child answers with, returning what it
 // complained about, if anything.
+// Every child that finishes says so, so no answer at all means it stopped part
+// way, which is reported rather than taken for success.
 func childSaid(out io.Reader) string {
 	var answer struct {
 		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(out, 64<<10)).Decode(&answer); err != nil {
-		return ""
+		return "that stopped before it finished"
 	}
 	return answer.Error
 }

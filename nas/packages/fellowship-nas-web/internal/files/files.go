@@ -123,6 +123,24 @@ func rooted(root Root) (string, error) {
 	return real, nil
 }
 
+// Relative splits a path Resolve or ResolveNew answered into the share's real
+// folder and the path inside it, so the child can open it again beneath that
+// folder and the kernel holds it there.
+func Relative(root Root, found string) (string, string, error) {
+	real, err := rooted(root)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := within(real, root.Share, found); err != nil {
+		return "", "", err
+	}
+	inside, _ := filepath.Rel(real, found)
+	if inside == "." {
+		inside = ""
+	}
+	return real, inside, nil
+}
+
 // within confirms a real path is inside the root's real path.
 func within(realRoot, share, found string) (string, error) {
 	inside, err := filepath.Rel(realRoot, found)

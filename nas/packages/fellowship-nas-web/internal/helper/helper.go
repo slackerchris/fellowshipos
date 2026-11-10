@@ -82,10 +82,11 @@ type Config struct {
 	Lookup       func(user string) (Account, error)
 	// Runs fnas, returning what it printed and whether it succeeded
 	Fnas func(args []string, input string) (stdout, stderr string, err error)
-	// Runs one file operation as the person, returning what it printed. The body
-	// is what an upload sends, and the extra words are the operation's own, such
-	// as a rename's new name.
-	Child func(account Account, body io.Reader, op, path string, start, length int64,
+	// Runs one file operation as the person, returning what it printed. The root
+	// is the share's real folder and the path is inside it, with no links left in
+	// it; the body is what an upload sends, and the extra words are the
+	// operation's own, such as a rename's new name inside the same folder.
+	Child func(account Account, body io.Reader, op, root, path string, start, length int64,
 		extra ...string) (io.ReadCloser, error)
 	Alert func(title, message string)
 	Now   func() time.Time
@@ -101,13 +102,18 @@ type Helper struct {
 	mu       sync.Mutex
 	sessions map[[32]byte]*session
 	limiter  *limiter
+	// Each person's shares, kept briefly so a folder of thumbnails asks fnas
+	// once rather than once a picture
+	rootsMu sync.Mutex
+	known   map[string]knownRoots
 }
 
 func New(config Config) *Helper {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &Helper{config: config, sessions: map[[32]byte]*session{}, limiter: newLimiter()}
+	return &Helper{config: config, sessions: map[[32]byte]*session{}, limiter: newLimiter(),
+		known: map[string]knownRoots{}}
 }
 
 func randomText(bytes int) string {

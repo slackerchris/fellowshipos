@@ -1,9 +1,12 @@
 // Package filechild is the small program the helper re-executes to touch a
-// file, already running as the person who asked. It does no path work of its
-// own: the helper resolved the path first, so this only opens what it was
-// given and says what happened.
+// file, already running as the person who asked. The helper resolved the path
+// first, so it arrives as the share's real folder and a path inside it with no
+// links in it. This opens the folder and then the path beneath it with openat2,
+// which the kernel refuses if the path leaves the folder or meets a link: a
+// folder swapped for a link since the helper looked can't lead anywhere else.
 //
-// It speaks one line of JSON to stdout, then, for a read, the bytes.
+// It speaks one line of JSON to stdout, then, for a read, the bytes. Every
+// operation that succeeds says so, so silence means it didn't finish.
 package filechild
 
 import (
@@ -19,7 +22,24 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 )
+
+// openat2 and what it is asked to refuse, from linux/openat2.h. The syscall has
+// the same number on every architecture Linux added it for.
+const (
+	sysOpenat2          = 437
+	resolveNoMagiclinks = 0x02
+	resolveNoSymlinks   = 0x04
+	resolveBeneath      = 0x08
+	// O_PATH, which the syscall package leaves out: open a folder only to work
+	// beneath it. The value is the same on every architecture Debian builds for
+	oPath = 0o10000000
+)
+
+type openHow struct {
+	flags, mode, resolve uint64
+}
 
 // Entry is one thing in a folder, as the desktop lists it.
 type Entry struct {
@@ -45,78 +65,164 @@ type problem struct {
 	Error string `json:"error"`
 }
 
-// Run does one file operation and returns the exit status.
+// Run does one file operation and returns the exit status. Its arguments are
+// the operation, the share's real folder, the path inside it, and what the
+// operation needs besides.
 func Run(args []string) int {
 	out := json.NewEncoder(os.Stdout)
-	if len(args) < 2 {
-		return say(out, "the file child needs an operation and a path")
+	if len(args) < 3 {
+		return say(out, "the file child needs an operation, a share's folder and a path")
 	}
-	switch args[0] {
+	root, err := syscall.Open(args[1], oPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return say(out, explain(err).Error())
+	}
+	defer syscall.Close(root)
+	op, inside, rest := args[0], args[2], args[3:]
+	switch op {
 	case "mkdir":
 		// A share is worked in by a group, so a new folder is for the group too,
 		// and the share's setgid bit carries on into it
-		if err := os.Mkdir(args[1], 0o775); err != nil {
+		target, release, err := named(root, inside)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		defer release()
+		if err := os.Mkdir(target, 0o775); err != nil {
 			return say(out, explain(err).Error())
 		}
-		if err := os.Chmod(args[1], 0o775); err != nil {
+		if err := os.Chmod(target, 0o775); err != nil {
 			return say(out, explain(err).Error())
 		}
 	case "rename":
-		if len(args) < 3 {
+		if len(rest) < 1 {
 			return say(out, "a rename needs where it is and where it goes")
 		}
-		if err := os.Rename(args[1], args[2]); err != nil {
+		from, release, err := named(root, inside)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		defer release()
+		to, releaseTo, err := named(root, rest[0])
+		if err != nil {
+			return say(out, err.Error())
+		}
+		defer releaseTo()
+		if err := os.Rename(from, to); err != nil {
 			return say(out, explain(err).Error())
 		}
 	case "remove":
 		// The helper says whether a folder goes with everything in it
-		whole := len(args) > 2 && args[2] == "tree"
-		var err error
-		if whole {
-			err = os.RemoveAll(args[1])
+		target, release, err := named(root, inside)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		defer release()
+		if len(rest) > 0 && rest[0] == "tree" {
+			err = os.RemoveAll(target)
 		} else {
-			err = os.Remove(args[1])
+			err = os.Remove(target)
 		}
 		if err != nil {
 			return say(out, explain(err).Error())
 		}
 	case "write":
-		wrote, err := write(args[1], os.Stdin, len(args) > 2 && args[2] == "replace")
+		target, release, err := named(root, inside)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		defer release()
+		wrote, err := write(target, os.Stdin, len(rest) > 0 && rest[0] == "replace")
 		if err != nil {
 			return say(out, err.Error())
 		}
 		if err := out.Encode(Head{Size: wrote, Length: wrote}); err != nil {
 			return 1
 		}
+		return 0
 	case "list":
-		entries, err := folder(args[1])
+		entries, err := folder(root, inside)
 		if err != nil {
 			return say(out, err.Error())
 		}
 		if err := out.Encode(Folder{Entries: entries}); err != nil {
 			return 1
 		}
+		return 0
 	case "read":
 		start, length := int64(0), int64(0)
-		if len(args) > 2 {
-			start, _ = strconv.ParseInt(args[2], 10, 64)
+		if len(rest) > 0 {
+			start, _ = strconv.ParseInt(rest[0], 10, 64)
 		}
-		if len(args) > 3 {
-			length, _ = strconv.ParseInt(args[3], 10, 64)
+		if len(rest) > 1 {
+			length, _ = strconv.ParseInt(rest[1], 10, 64)
 		}
-		if err := read(out, args[1], start, length); err != nil {
+		if err := read(out, root, inside, start, length); err != nil {
 			return say(out, err.Error())
 		}
+		return 0
 	default:
-		return say(out, "the file child doesn't know "+args[0])
+		return say(out, "the file child doesn't know "+op)
+	}
+	// Done, and saying so, so the helper can tell this from a child that died part way
+	if err := out.Encode(struct{}{}); err != nil {
+		return 1
 	}
 	return 0
 }
 
+// beneath opens a path inside the share's folder, refusing one that leaves it
+// or passes through a link of any kind.
+func beneath(root int, inside string, flags int) (int, error) {
+	if inside == "" {
+		inside = "."
+	}
+	name, err := syscall.BytePtrFromString(inside)
+	if err != nil {
+		return -1, err
+	}
+	how := openHow{flags: uint64(flags | syscall.O_CLOEXEC),
+		resolve: resolveBeneath | resolveNoSymlinks | resolveNoMagiclinks}
+	fd, _, errno := syscall.Syscall6(sysOpenat2, uintptr(root), uintptr(unsafe.Pointer(name)),
+		uintptr(unsafe.Pointer(&how)), unsafe.Sizeof(how), 0, 0)
+	if errno != 0 {
+		return -1, errno
+	}
+	return int(fd), nil
+}
+
+// through is a path that reaches what an open descriptor holds, for the calls
+// that take a path. It is the process's own descriptor, so nothing else can
+// change where it leads.
+func through(fd int) string {
+	return fmt.Sprintf("/proc/self/fd/%d", fd)
+}
+
+// named opens the folder a name sits in, beneath the share, and returns a path
+// to the name inside that open folder, with what closes the folder again.
+func named(root int, inside string) (string, func(), error) {
+	parent, base := filepath.Split(inside)
+	if base == "" || base == "." || base == ".." {
+		return "", nil, errors.New("that name can't be used")
+	}
+	fd, err := beneath(root, strings.TrimSuffix(parent, "/"), oPath|syscall.O_DIRECTORY)
+	if err != nil {
+		return "", nil, explain(err)
+	}
+	return filepath.Join(through(fd), base), func() { syscall.Close(fd) }, nil
+}
+
 // folder reads a folder. Folders come first and both kinds are in name order,
 // which is what the desktop shows.
-func folder(path string) ([]Entry, error) {
-	found, err := os.ReadDir(path)
+func folder(root int, inside string) ([]Entry, error) {
+	fd, err := beneath(root, inside, syscall.O_RDONLY|syscall.O_DIRECTORY)
+	if err != nil {
+		return nil, explain(err)
+	}
+	// Named by the descriptor, so each entry's details are read inside this folder
+	dir := os.NewFile(uintptr(fd), through(fd))
+	defer dir.Close()
+	found, err := dir.ReadDir(-1)
 	if err != nil {
 		return nil, explain(err)
 	}
@@ -138,14 +244,13 @@ func folder(path string) ([]Entry, error) {
 	return entries, nil
 }
 
-// read answers with the file's size, then the wanted part of it. The path was
-// resolved by the helper, so it is opened as it is, and O_NOFOLLOW means a
-// symlink swapped in since then is refused rather than followed.
-func read(out *json.Encoder, path string, start, length int64) error {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+// read answers with the file's size, then the wanted part of it.
+func read(out *json.Encoder, root int, inside string, start, length int64) error {
+	fd, err := beneath(root, inside, syscall.O_RDONLY)
 	if err != nil {
 		return explain(err)
 	}
+	file := os.NewFile(uintptr(fd), through(fd))
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
@@ -216,7 +321,8 @@ func explain(err error) error {
 		return errors.New("you don't have permission to open that")
 	case errors.Is(err, fs.ErrNotExist):
 		return errors.New("that isn't there any more")
-	case errors.Is(err, syscall.ELOOP):
+	case errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.EXDEV):
+		// A link, or a way out of the share, that wasn't there when the helper looked
 		return errors.New("that changed while it was being opened")
 	case errors.Is(err, syscall.ENOTEMPTY):
 		return errors.New("that folder isn't empty")

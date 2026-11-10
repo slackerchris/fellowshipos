@@ -243,3 +243,38 @@ func TestJobEventsStreamChangesUntilSignedOut(t *testing.T) {
 		}
 	}
 }
+
+// A share is written by its users, so what one person uploads must never run as
+// another who opens it: pages and scripts come back as text, and every file's
+// bytes carry a sandbox of their own.
+func TestAnUploadedPageOrScriptNeverRuns(t *testing.T) {
+	for name, want := range map[string]string{
+		"evil.html": "text/plain; charset=utf-8",
+		"evil.js":   "text/plain; charset=utf-8",
+		"page.xml":  "text/plain; charset=utf-8",
+		"notes.txt": "text/plain; charset=utf-8",
+		"cat.png":   "image/png",
+		"film.mp4":  "video/mp4",
+		"menu.pdf":  "application/pdf",
+		"tool.exe":  "application/octet-stream",
+	} {
+		if got := contentTypeOf(name); got != want {
+			t.Errorf("%s was sent as %q, want %q", name, got, want)
+		}
+	}
+	for _, name := range []string{"drawing.svg", "cat.png", "notes.txt"} {
+		header := http.Header{}
+		downloadPolicy(header, contentTypeOf(name))
+		if policy := header.Get("Content-Security-Policy"); !strings.HasPrefix(policy, "sandbox;") ||
+			!strings.Contains(policy, "default-src 'none'") {
+			t.Errorf("%s was sent with the policy %q", name, policy)
+		}
+	}
+	// A PDF is drawn in the desktop's own frame, and nowhere else's
+	header := http.Header{}
+	downloadPolicy(header, "application/pdf")
+	if header.Get("X-Frame-Options") != "SAMEORIGIN" ||
+		!strings.Contains(header.Get("Content-Security-Policy"), "frame-ancestors 'self'") {
+		t.Errorf("a PDF was sent with %v", header)
+	}
+}

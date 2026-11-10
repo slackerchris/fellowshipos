@@ -196,6 +196,26 @@ bump.
 
 ### Fixed
 
+- Files, from a review of slices 1 to 3:
+  - A file someone uploaded could run as whoever opened it: HTML and scripts were sent
+    as themselves, and the desktop's policy let a page load a script from the same
+    address. Text of every kind now goes as plain text, and every file's bytes carry
+    a sandbox with no scripts and no origin, an SVG included.
+  - The child that does the work as the person was handed a whole path the helper
+    had resolved earlier, so a folder swapped for a link in between could lead out of
+    the share. It now gets the share's real folder and the path inside it, and opens
+    every part beneath that folder with `openat2`, which refuses a way out or any link.
+  - Deleting a folder with anything in it always failed with "that folder isn't
+    empty": the path reached the child twice, and the word saying to take the
+    contents landed in the wrong place.
+  - A child that stopped part way, saying nothing, was taken for success. Each one now
+    says when it finishes.
+  - PDF previews were refused by the desktop's own "never in a frame" rule; a PDF may
+    now be framed by the desktop alone.
+  - A person with no groups besides their own could leave the child with the helper's
+    groups; the child's groups are now always set.
+  - Each file request ran `fnas share roots`, so a folder of thumbnails ran it once a
+    picture. A person's shares are now kept for five seconds.
 - The desktop's widget column ran under the taskbar on shorter screens, hiding the lower
   drive rows and Recent alerts; it now scrolls. A two-line icon label, such as Snapshots
   & backup, no longer runs into the icon below it.
