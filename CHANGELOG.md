@@ -14,6 +14,12 @@ bump.
 
 ### Added
 
+- Three themes beside the default forest and gold, chosen in the account menu with
+  light, dark or the system's: **Silverwater** (slate blue, the waterfall city),
+  **Hearthfield** (warm parchment and rust, the hill homes) and **Highwatch** (mauve
+  stone, the mountain fortress), each with its own wallpaper. Each is four colours per
+  mode in `web/themes.mjs`; the build works out the rest, including the taskbar and the
+  app icon tiles, and stops if a theme's text would fall below WCAG AA contrast.
 - **Settings → Storage checks**: one row per engine, with whether its pools are checked
   by themselves, when, the next run, and Check now. ZFS pools are scrubbed by fnas's own
   `fellowship-nas-scrub@zfs.timer`, monthly or every three months, on a chosen week,
@@ -117,6 +123,8 @@ bump.
 
 ### Fixed
 
+- A Light or Dark choice only took effect once the account menu was opened, so a reload
+  went back to the system's; the chosen mode and theme now apply before the page draws.
 - Traditional RAID, found by running it on real disks in the VM:
   - `mdadm --detail --scan` names an array `/dev/md/NAME` and `/proc/mdstat` calls it
     `md127`; nothing matched the two, so a new array was never listed as a pool, and

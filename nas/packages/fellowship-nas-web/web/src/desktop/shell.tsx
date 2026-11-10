@@ -2,6 +2,7 @@
 import { useContext, useEffect, useState } from "preact/hooks";
 import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
+import { Mode, PALETTES, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
@@ -278,42 +279,26 @@ function Notifications({ status, open }: { status: Status; open: (app: AppId) =>
     );
 }
 
-type Theme = "system" | "light" | "dark";
-
-function useTheme(): [Theme, (theme: Theme) => void] {
-    const read = (): Theme => {
-        try {
-            return (localStorage.getItem("fellowship-theme") as Theme) || "system";
-        } catch {
-            return "system";
-        }
-    };
-    const [theme, setTheme] = useState<Theme>(read);
-    useEffect(() => {
-        if (theme === "system") {
-            document.documentElement.removeAttribute("data-theme");
-        } else {
-            document.documentElement.setAttribute("data-theme", theme);
-        }
-        try {
-            localStorage.setItem("fellowship-theme", theme);
-        } catch {
-            // Remembered for this visit only
-        }
-    }, [theme]);
-    return [theme, setTheme];
-}
-
 function UserMenu({ open, onSignOut }: { open: (app: AppId) => void; onSignOut: () => void }) {
     const { user, admin } = useContext(SessionContext);
-    const [theme, setTheme] = useTheme();
+    const look = useAppearance();
     return (
         <div class="panel panel-right panel-small" role="menu" aria-label="Account">
             <p><strong>{user}</strong><br /><span class="small muted">{admin ? "Administrator" : "User"}</span></p>
-            <div class="segmented" role="group" aria-label="Theme">
-                {(["system", "light", "dark"] as Theme[]).map(option => (
-                    <button key={option} type="button" class={theme === option ? "current" : ""} aria-pressed={theme === option}
-                            onClick={() => setTheme(option)}>{option === "system" ? "Auto" : option[0].toUpperCase() + option.slice(1)}</button>
+            <div class="segmented" role="group" aria-label="Light or dark">
+                {(["system", "light", "dark"] as Mode[]).map(option => (
+                    <button key={option} type="button" class={look.mode === option ? "current" : ""} aria-pressed={look.mode === option}
+                            onClick={() => look.setMode(option)}>{option === "system" ? "Auto" : option[0].toUpperCase() + option.slice(1)}</button>
+                ))}
+            </div>
+            <div class="palettes" role="group" aria-label="Theme">
+                {PALETTES.map(palette => (
+                    <button key={palette.id} type="button" class={`palette ${look.palette === palette.id ? "current" : ""}`}
+                            aria-pressed={look.palette === palette.id} onClick={() => look.setPalette(palette.id)}>
+                        <span class="palette-swatch" aria-hidden="true"
+                              style={{ background: `linear-gradient(135deg, ${palette.swatch[0]} 55%, ${palette.swatch[1]} 55%)` }} />
+                        {palette.title}
+                    </button>
                 ))}
             </div>
             <button type="button" class="menu-item" role="menuitem" onClick={() => open("settings")}>Settings</button>

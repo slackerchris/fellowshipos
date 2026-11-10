@@ -23,28 +23,29 @@ const GLYPHS = {
     alerts: <path d="M16 30v-8a8 8 0 0 1 16 0v8l2.5 3h-21zM21.5 37h5" />,
     settings: <>
         <path d="M12 16h24M12 24h24M12 32h24" />
-        <circle cx="18" cy="16" r="3" fill="#c5a465" stroke="#c5a465" />
-        <circle cx="30" cy="24" r="3" fill="#c5a465" stroke="#c5a465" />
-        <circle cx="21" cy="32" r="3" fill="#c5a465" stroke="#c5a465" />
+        <circle cx="18" cy="16" r="3" style={{ fill: "var(--bar-accent)", stroke: "var(--bar-accent)" }} />
+        <circle cx="30" cy="24" r="3" style={{ fill: "var(--bar-accent)", stroke: "var(--bar-accent)" }} />
+        <circle cx="21" cy="32" r="3" style={{ fill: "var(--bar-accent)", stroke: "var(--bar-accent)" }} />
     </>,
 };
 
 export type AppIconName = keyof typeof GLYPHS;
 
-/** A moss tile with a fine gold edge and a parchment drawing, the same in both themes. */
+/** A tile in the theme's dark colours with a fine accent edge and a light drawing, the same in light and dark:
+    moss, gold and parchment in the default theme. */
 export function AppIcon({ name, size = 48 }: { name: AppIconName; size?: number }) {
     return (
         <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" class="app-icon">
             <defs>
                 <linearGradient id="fellowship-tile" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" stop-color="#344a3d" />
-                    <stop offset="1" stop-color="#1e2e27" />
+                    <stop offset="0" style={{ stopColor: "var(--tile-top)" }} />
+                    <stop offset="1" style={{ stopColor: "var(--tile-bottom)" }} />
                 </linearGradient>
             </defs>
             <rect x="2" y="2" width="44" height="44" rx="11" fill="url(#fellowship-tile)" />
-            <rect x="2.6" y="2.6" width="42.8" height="42.8" rx="10.4" fill="none" stroke="#c5a465"
+            <rect x="2.6" y="2.6" width="42.8" height="42.8" rx="10.4" fill="none" style={{ stroke: "var(--bar-accent)" }}
                   stroke-opacity="0.6" stroke-width="1.2" />
-            <g fill="none" stroke="#efe7d5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+            <g fill="none" style={{ stroke: "var(--bar-text)" }} stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
                 {GLYPHS[name]}
             </g>
         </svg>

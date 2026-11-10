@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { Session, currentSession, setSession } from "./api";
+import { apply, savedMode, savedPalette } from "./appearance";
 import { Login } from "./desktop/login";
 import { Desktop } from "./desktop/shell";
 import { SessionContext } from "./settings";
@@ -27,4 +28,6 @@ function Root() {
     );
 }
 
+// Before anything draws, so the login screen wears the chosen look too
+apply(savedMode(), savedPalette());
 render(<Root />, document.getElementById("app")!);

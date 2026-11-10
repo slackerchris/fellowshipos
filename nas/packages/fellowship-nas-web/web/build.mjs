@@ -1,6 +1,7 @@
 // Bundles the desktop into dist/, which the server serves as it is
 import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { THEMES, themesCss } from "./themes.mjs";
 
 mkdirSync("dist", { recursive: true });
 
@@ -13,6 +14,7 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <title>FellowshipOS NAS</title>
   <link rel="icon" href="mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="themes.css">
 </head>
 <body>
   <div id="app"></div>
@@ -137,6 +139,11 @@ copyFileSync("wallpapers/dark.jpg", "dist/wallpaper-dark.jpg");
 copyFileSync("wallpapers/light.jpg", "dist/wallpaper-light.jpg");
 writeFileSync("dist/wallpaper-dark.svg", wallpaper("dark"));
 writeFileSync("dist/wallpaper-light.svg", wallpaper("light"));
+// Chris's other themes, each with its own wallpaper, behind the drawn mountains too
+for (const theme of Object.values(THEMES)) {
+    copyFileSync(`wallpapers/${theme.wallpaper}`, `dist/wallpaper-${theme.wallpaper}`);
+}
+writeFileSync("dist/themes.css", themesCss());
 
 const options = {
     entryPoints: ["src/main.tsx", "src/style.css"],
@@ -147,7 +154,7 @@ const options = {
     jsx: "automatic",
     jsxImportSource: "preact",
     // The wallpapers sit next to the stylesheet; leave their addresses alone
-    external: ["*.svg", "*.jpg"],
+    external: ["*.svg", "*.jpg", "*.webp"],
     logLevel: "info",
 };
 

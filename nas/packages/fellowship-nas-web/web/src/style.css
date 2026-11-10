@@ -28,6 +28,16 @@
     --sev-high: #a8463a;
     --sev-critical: #6b4a9e;
     --wallpaper: url("wallpaper-light.jpg"), url("wallpaper-light.svg");
+    /* The taskbar and icon labels are dark in either mode, from the theme's dark colours */
+    --bar: #101a17;
+    --bar-text: #efe7d5;
+    --bar-muted: #b7b29e;
+    --bar-border: #405247;
+    --bar-hover: #1b2923;
+    --bar-pressed: #29392f;
+    --bar-accent: #c5a465;
+    --tile-top: #344a3d;
+    --tile-bottom: #1e2e27;
     --icon-label: #101a17;
     --icon-shadow: 0 1px 2px rgb(244 239 227 / 0.9);
     --icon-hover: rgb(251 248 240 / 0.6);
