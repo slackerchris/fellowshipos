@@ -63,9 +63,10 @@ Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arriv
 | 10 | Traditional RAID via mdadm: RAID 1, 5, 6 and 10 with spares on XFS (recommended) or ext4, import, monitoring, monthly checks, growth and guided replacement. Built in `fnas`, the CLI and the desktop. The four-disk RAID 5 gate passed in the VM, along with mdadm event alerts and Health recording Debian's own monthly checks. RAID 6, sixteen disks and importing a foreign array are carried over into Phase 11 by name. |
 | 11 | Unraid-style pools with mergerfs and SnapRAID on XFS disks. Add scheduled parity sync and scrub, disk recovery and spin-down support. |
 | 12 | Share-scoped SFTP, FTP and WebDAV using the existing users and share permissions. FTPS is the default for FTP, with plain FTP an explicit opt-in. |
-| 13 | Files app with snapshot browsing and file-level restoration. |
+| 13 | Files app with snapshot browsing and file-level restoration, and the desktop as a mobile-friendly web app that installs on a phone's home screen. |
 | 14 | Btrfs mirror layouts and snapshot, scrub and replacement workflows. |
 | 15 | Network and update controls, theme and icon work, and a hosted signed apt repository. |
+| 16 | A native mobile app, a project of its own: automatic photo backup, the phone's share sheet and offline files. |
 
 DLNA and iSCSI are later additions. Apprise, multiple external alert channels and severity routing are also planned. The plan describes a per-user file helper for Files and WebDAV, and multiple backup jobs across engines. The shipped system currently has two web processes and a single ZFS backup job.
 

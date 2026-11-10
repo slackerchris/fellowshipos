@@ -54,7 +54,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS. It replaces TrueN
 - Kubernetes, off-site replication, clustering, directory services
 - The NAS role in the LXC template (a container can't own disks or load ZFS)
 - Btrfs RAID5/6, which is still not considered safe
-- Native mobile apps (the desktop works in a phone browser instead)
+- A native mobile app: a project of its own, planned after the release (Phase 16). Until then the desktop works in a phone's browser and installs on the home screen, and WebDAV (Phase 12) puts the NAS in the phone's own file apps
 - A terminal in the browser (use SSH)
 
 **Design direction:** the feel of Synology DSM and FygoOS: a desktop in the browser with apps in windows, served by the NAS's own web server. It uses FellowshipOS's own name, icons, colours and layout; nothing is copied from either product.
@@ -575,7 +575,11 @@ The desktop is the interface from the start. Every app opens in a window; there 
 - **Desktop:** wallpaper, app icons, and widgets: pool health and capacity, disk temperatures, the last scrub, sync, snapshot and backup, and recent alerts.
 - **Windows:** move, resize, minimise, maximise, stack, several open at once; layout remembered per user.
 - **Taskbar:** open windows, launcher, clock, notification centre.
-- **Phone:** windows open full-screen and the taskbar becomes a bottom bar.
+- **Phone:** the desktop is a mobile-friendly web app, built with Files (Phase 13), not a separate app (Chris, Nov 10).
+  - It installs on the home screen (a web app manifest and icons) and opens full-screen, without the browser's bars.
+  - Windows open full-screen and the taskbar becomes a bottom bar, with tap targets sized for fingers.
+  - Every action has a tap path: nothing needs a right-click, hover or drag.
+  - A web app can't upload in the background on iOS, so automatic photo backup waits for the native app.
 - **Built with:** TypeScript, Preact 10 and esbuild (chosen in Phase 4).
 - **Non-admins** see only Files and their own settings.
 - **Look (chosen by Chris):** a dark forest palette, with the fantasy in the atmosphere only.
@@ -696,9 +700,10 @@ No phase starts until the previous gate passes in a VM, except for items carried
 | 10. Traditional RAID | The mdadm engine: RAID 1, 5, 6, 10, spares, ext4 or XFS, monitor alerts, monthly check, grow by one disk, guided replacement, import | Build RAID 5 and RAID 6 from the desktop on four and sixteen disks; fail a disk, replace it, and the data checks out; reboot and the array returns; import an array made on another machine | Engine, CLI, Health, alerts and the desktop screens are built. Gate partly passed in the VM on four disks, all from the desktop: created a RAID 5 array on XFS, shared it over SMB, ran Check array, failed a disk and replaced it, added a fifth disk (the filesystem grew after the reshape), and rebooted twice; a 50 MB test file kept its checksum throughout. That run found and fixed seven engine bugs (see the changelog). Later, in the same VM: Debian's `mdcheck` ran a check that Health recorded, and a failed disk raised a critical alert within a minute. **Carried over** into Phase 11, to be done before the release: RAID 6, sixteen disks, and importing an array made on another machine |
 | 11. Unraid-style | mergerfs + SnapRAID on XFS: sync and scrub schedules, `snapraid fix` flow, spin-down, absorbing the old storage node | Create with mixed disk sizes, share, sync; fail a data disk and rebuild it; pull more disks than the parity and the other disks stay readable; alert for a missed sync; all on real disks in the VM; writing `snapraid.conf` and the mergerfs mount twice changes nothing the second time, the check that caught `spares=1` in `mdadm.conf` | |
 | 12. More ways to share | SFTP, FTP (FTPS by default) and WebDAV, using Phase 9's users and access lists | Two users with different access see only their shares over SFTP, FTP and WebDAV; plain FTP stays off until turned on | |
-| 13. Files | The Files app, snapshot browse and restore | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; usable on a phone | |
+| 13. Files | The Files app, snapshot browse and restore; the desktop as a mobile-friendly web app that installs on the home screen | Restore a file from a snapshot in Files; 10 GB transfers and video seeking; on a phone's browser, from the home-screen icon: browse folders, download, open a photo, play a video, upload from the photo library, rename, move and delete by tapping, and restore an earlier version, with no sideways scrolling | |
 | 14. Btrfs | Engine, btrbk snapshots, Previous Versions, scrub, degraded mount | Create a mirror, restore a Previous Version from Windows, fail a disk and replace it | |
 | 15. Release | Network and updates in Settings, theme and icons, hosted signed apt repo | Set a static address from the desktop; updates arrive from the hosted repo | |
+| 16. Mobile app | A native app for iPhone and Android, a project of its own (Chris, Nov 10): automatic photo backup in the background, the phone's share sheet ("Save to NAS"), and offline copies of files, on top of what the web app does | Photos taken on a phone reach the NAS without opening the app; a file saved from another app's share sheet lands in the chosen share; an offline file opens with no network | |
 
 **Failure tests (run in the VM before every release)**
 
