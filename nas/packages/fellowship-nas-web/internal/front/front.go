@@ -635,8 +635,33 @@ func byteRange(header string) (start, length int64, ok bool) {
 // put a file in it, so text of every kind, HTML and scripts among them, is sent
 // as plain text: a page or script someone uploaded is never run by the browser
 // of whoever opens it.
+// shownTypes is what Files opens in the browser, spelled out rather than asked of
+// the system: a small install can have no /etc/mime.types, and then a picture or
+// a film would arrive as an opaque download instead of a preview.
+var shownTypes = map[string]string{
+	".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8",
+	".log": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
+	".json": "text/plain; charset=utf-8", ".conf": "text/plain; charset=utf-8",
+	".ini": "text/plain; charset=utf-8", ".yml": "text/plain; charset=utf-8",
+	".yaml": "text/plain; charset=utf-8", ".sh": "text/plain; charset=utf-8",
+	".py": "text/plain; charset=utf-8", ".ts": "text/plain; charset=utf-8",
+	".js": "text/plain; charset=utf-8", ".html": "text/plain; charset=utf-8",
+	".css": "text/plain; charset=utf-8",
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+	".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif", ".bmp": "image/bmp",
+	".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime",
+	".webm": "video/webm", ".ogv": "video/ogg",
+	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".oga": "audio/ogg", ".ogg": "audio/ogg",
+	".flac": "audio/flac", ".wav": "audio/wav", ".opus": "audio/ogg",
+	".pdf": "application/pdf",
+}
+
 func contentTypeOf(path string) string {
-	shown := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	extension := strings.ToLower(filepath.Ext(path))
+	if known, ok := shownTypes[extension]; ok {
+		return known
+	}
+	shown := mime.TypeByExtension(extension)
 	switch {
 	case shown == "":
 		return "application/octet-stream"

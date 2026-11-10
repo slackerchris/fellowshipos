@@ -225,6 +225,13 @@ bump.
 
 ### Fixed
 
+- Previews no longer depend on the machine having a MIME table: Files now knows
+  the types it shows itself, so a picture, a film or a text file is sent with the
+  type the browser needs even on a small install where `/etc/mime.types` is
+  missing, instead of arriving as an opaque download.
+- Coming back from a search left the searched word in the box, so the folder
+  underneath looked empty. Returning to the folder clears it.
+
 - A folder made in Files lost the share's setgid bit, since setting its mode cleared
   it, so what was then made inside belonged to the person's own group and others in the
   share's group couldn't change it. New and copied folders keep the bit.

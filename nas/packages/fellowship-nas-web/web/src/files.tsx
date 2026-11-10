@@ -303,6 +303,10 @@ function Browser({ share, view, setView, clip, setClip, columns, setColumns }: {
         }
     };
     const up = () => go(parentOf(path));
+    const leaveSearch = () => {
+        setFound(null);
+        setFilter("");
+    };
     const back = () => {
         const [last, ...rest] = [...before].reverse();
         if (last === undefined) return;
@@ -618,7 +622,7 @@ function Browser({ share, view, setView, clip, setClip, columns, setColumns }: {
                             <div class="file-scroll">
                             {found || looking ? (
                                 <SearchResults share={share.share} found={found} looking={looking}
-                                               onOpen={openHit} onBack={() => setFound(null)} />
+                                               onOpen={openHit} onBack={leaveSearch} />
                             ) : items.length === 0 ? (
                                 <p class="files-blank"><Icon of="folder" size={30} />This folder is empty.</p>
                             ) : view === "list" ? (
