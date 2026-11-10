@@ -52,7 +52,7 @@ To recover settings, import the existing pool, then use the desktop restore flow
 
 Desktop administration and SSH access are separate permissions. **Shares and SSH** accounts managed by FellowshipNAS join `nas-ssh`, and OpenSSH uses `AllowGroups nas-ssh`. Shares-only users cannot open a shell or a tunnel, and root SSH login is disabled. Refreshing SSH on upgrade derives membership from existing eligible users with login shells. Accounts added outside `fnas` can be picked up with `sudo fnas ssh refresh`.
 
-The key editor validates public keys and rejects leading authorized-key options such as `command=`. When SSH is enabled, switching off password authentication requires an enabled administrator with SSH access and a key. `fnas` generates `/etc/ssh/sshd_config.d/fellowship.conf`, validates it with `sshd -t`, and restores the previous drop-in if validation fails before reloading the service. The appliance-managed, share-scoped SFTP feature is a separate Phase 12 deliverable.
+The key editor validates public keys and rejects leading authorized-key options such as `command=`. When SSH is enabled, switching off password authentication requires an enabled administrator with SSH access and a key. `fnas` generates `/etc/ssh/sshd_config.d/fellowship.conf`, validates it with `sshd -t`, and restores the previous drop-in if validation fails before reloading the service. The appliance-managed, share-scoped SFTP feature is a separate Phase 13 deliverable.
 
 ## Decisions and roadmap
 
@@ -62,8 +62,8 @@ Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arriv
 | --- | --- |
 | 10 | Traditional RAID via mdadm: RAID 1, 5, 6 and 10 with spares on XFS (recommended) or ext4, import, monitoring, monthly checks, growth and guided replacement. Built in `fnas`, the CLI and the desktop. The four-disk RAID 5 gate passed in the VM, along with mdadm event alerts and Health recording Debian's own monthly checks. RAID 6, sixteen disks and importing a foreign array are carried over into Phase 11 by name. |
 | 11 | Unraid-style pools with mergerfs and SnapRAID on XFS disks. Add scheduled parity sync and scrub, disk recovery and spin-down support. |
-| 12 | Share-scoped SFTP, FTP and WebDAV using the existing users and share permissions. FTPS is the default for FTP, with plain FTP an explicit opt-in. |
-| 13 | Files app with snapshot browsing and file-level restoration, and the desktop as a mobile-friendly web app that installs on a phone's home screen. |
+| 12 | Files app with snapshot browsing and file-level restoration, and the desktop as a mobile-friendly web app that installs on a phone's home screen. |
+| 13 | Share-scoped SFTP, FTP and WebDAV using the existing users and share permissions. FTPS is the default for FTP, with plain FTP an explicit opt-in. |
 | 14 | Btrfs mirror layouts and snapshot, scrub and replacement workflows. |
 | 15 | Network and update controls, theme and icon work, and a hosted signed apt repository. |
 | 16 | A native mobile app, a project of its own: automatic photo backup, the phone's share sheet and offline files. |

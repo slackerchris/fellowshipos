@@ -63,9 +63,9 @@ def protocols(state):
     count = lambda name: len([s for s in state["shares"] if s.get(name)])
     return [entry("smb", "SMB", "Windows, Mac and phones", "running", f"Running, {count('smb')} shares"),
             entry("nfs", "NFS", "Linux computers, Proxmox and other servers", "running", f"Running, {count('nfs')} shares"),
-            entry("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", "not-built", "Not built yet (Phase 12)"),
-            entry("ftp", "FTP", "Cameras, scanners and older devices", "not-built", "Not built yet (Phase 12)"),
-            entry("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", "not-built", "Not built yet (Phase 12)"),
+            entry("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", "not-built", "Not built yet (Phase 13)"),
+            entry("ftp", "FTP", "Cameras, scanners and older devices", "not-built", "Not built yet (Phase 13)"),
+            entry("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", "not-built", "Not built yet (Phase 13)"),
             entry("dlna", "DLNA", "TVs and consoles finding media by themselves", "later", "Planned for after the storage engines"),
             entry("iscsi", "iSCSI", "Part of a pool as a disk on another machine", "later", "Planned for after the storage engines")]
 

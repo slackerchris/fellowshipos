@@ -160,7 +160,7 @@ function SnapshotSchedules() {
                         </div>
                     )}
                     <Notice>Browsing snapshots and restoring single files here isn't built yet: it comes with the Files app
-                        (Phase 13). Until then, use Previous Versions in Windows, or the snapshot folders over SSH.</Notice>
+                        (Phase 12). Until then, use Previous Versions in Windows, or the snapshot folders over SSH.</Notice>
                 </div>
             )}</Loading>
         </Card>

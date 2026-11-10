@@ -10,9 +10,9 @@ from . import shares, ssh
 PROTOCOLS = [
     ("smb", "SMB", "Windows, Mac and phones", "smbd.service", None),
     ("nfs", "NFS", "Linux computers, Proxmox and other servers", "nfs-server.service", None),
-    ("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", None, 12),
-    ("ftp", "FTP", "Cameras, scanners and older devices", None, 12),
-    ("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", None, 12),
+    ("sftp", "SFTP", "File transfer over SSH: scripts, FileZilla, phone apps", None, 13),
+    ("ftp", "FTP", "Cameras, scanners and older devices", None, 13),
+    ("webdav", "WebDAV", "A network drive over HTTPS, and phone apps", None, 13),
     ("dlna", "DLNA", "TVs and consoles finding media by themselves", None, "later"),
     ("iscsi", "iSCSI", "Part of a pool as a disk on another machine", None, "later"),
 ]
