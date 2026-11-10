@@ -694,6 +694,8 @@ Chris's order (Nov 10): Files comes before more ways to share, because WebDAV in
 
 **Phone.** The gate is the installable web app on top of the phone rules the shell already has: a manifest and icons, a service worker for the shell so the home-screen icon opens instead of a blank page, and the Files screens laid out with tap targets and no sideways scrolling.
 
+- **Built:** `internal/files` resolves a share and a path against the roots a person may use, with thirty refusal tests: climbing out with `..`, a link that leads out of the share, a dangling link, an absolute path, a NUL byte, a share they can't use, and a share whose pool has gone. `Resolve` is for something that exists, `ResolveNew` for a name that must not exist yet and refuses one that does, so replacing a file goes through `Resolve` and an `O_NOFOLLOW` open rather than a link sitting on the name.
+
 **Slices, in order.** The resolver and its refusal tests come before any file is served; then list, download and preview; then upload, rename, move and delete; then snapshots on ZFS only; then the phone work; then the gate in the phase table.
 
 ## Security model
