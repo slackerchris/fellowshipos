@@ -56,7 +56,7 @@ All the Open questions have since been answered; the plan's Open questions secti
 ## Snapshots and files
 
 25. **Found:** snapshots can be scheduled but not browsed or restored from the desktop.
-26. **Found:** the Files app (a real file manager, with "Previous versions") is in the plan but not built.
+26. **Found:** the Files app (a real file manager, with "Previous versions") is in the plan but not built. **Partly built, Nov 10:** browsing, downloading and previewing shipped in Phase 12; uploading, file operations and Previous Versions are still to come.
 
 ## FygoOS features not in the plan
 

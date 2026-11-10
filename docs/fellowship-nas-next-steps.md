@@ -16,7 +16,7 @@ picking work back up, not a fourth source of truth.
 | Phases done | 1 to 11, with the gates recorded in the plan |
 | Next phase | 12, the Files app, which now comes before more ways to share. Slices 1 and 2 built: the resolver, then browsing, downloading and previewing |
 | Tests | 261 Python unit tests pass locally, the Go tests cover the resolver, the file ops and the stream, and CI is green on every push |
-| Docs baseline | The overview describes `059a150`, and the plan's Files section records the Phase 12 decisions |
+| Docs baseline | The overview describes `6772f13`, and the plan's Files section records the decisions and the two slices built |
 
 ## 2. What the docs get right, and what drifted
 
@@ -135,6 +135,10 @@ What is true in the desktop today, so changes have a reference point:
   --system`).
 - Lists hold one line per thing, with its actions in a menu on the row, as Shares
   and Users now do; a form opens under the list rather than in a separate page.
+- Files puts the shares down the left and one line per file beside them, with the
+  size and date right-aligned, and opens a preview under the list rather than in
+  another window. It shows only the shares the signed-in account has, so nothing
+  in it is a link the server would refuse.
 - Not-built notes carry phase numbers. After the reorder those are Files at 12 and
   SFTP, FTP and WebDAV at 13. The sample data in `web/dev/fake-fnas` follows them.
 - The widget column scrolls on shorter screens, and icon slots fit a two-line

@@ -33,6 +33,7 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 
 | App | What you can do |
 | --- | --- |
+| **Files** | Browse the shares your own account can use, open folders, and preview pictures, video, audio, PDFs and text, with download. A share you can't use never appears or answers. Uploading, moving, deleting and earlier versions from a snapshot come next. |
 | **Storage** | Create, scan, import, check, and grow ZFS pools and RAID arrays, choosing XFS or ext4 for an array. Repair an array's mismatched blocks after a check. Replace or identify disks and follow background jobs. **Details and history** shows space use, compression, a Week or Year chart, and a fill estimate after at least three days of history if usage is rising. |
 | **Users** | Manage local accounts, groups, administrators, and SSH eligibility. Password changes through FellowshipNAS set the Linux and Samba passwords together. |
 | **Shares** | Share over SMB, NFS, or both. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
@@ -40,7 +41,7 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 | **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
 | **Settings** | Manage your password, sessions, certificates, system disk space, storage check schedules, SSH, and power controls. |
 
-**Available today.** ZFS pools, traditional RAID arrays and Unraid-style pools (mergerfs with SnapRAID parity) are the implemented storage engines. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. The Files app comes next, followed by more share protocols and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
+**Available today.** ZFS pools, traditional RAID arrays and Unraid-style pools (mergerfs with SnapRAID parity) are the implemented storage engines. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. The Files app browses, downloads and previews; uploading, file operations and snapshots come next, followed by more share protocols and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
 
 ### Storage and shares
 
@@ -81,7 +82,9 @@ sudo fnas ssh show
 sudo fnas look show sam
 ```
 
-The network-facing `fellowship-nas-web` process runs as an unprivileged account. A separate local helper authenticates with PAM and runs approved `fnas` commands for authorized users.
+`fnas share roots USER` prints the shares an account can use, where each one is on disk and whether it keeps snapshots. Files asks it rather than working out a path, and WebDAV will ask the same.
+
+The network-facing `fellowship-nas-web` process runs as an unprivileged account. A separate local helper authenticates with PAM, runs approved `fnas` commands for authorized users, and serves files for the Files app as the signed-in person, in a child running with that person's own account, inside the share roots they were given.
 
 ### Snapshots, backup, and recovery
 

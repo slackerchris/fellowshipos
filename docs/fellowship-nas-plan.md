@@ -563,7 +563,7 @@ Our own server, written in Go, replaces Cockpit entirely. It serves the desktop,
 | --- | --- | --- |
 | Web front | Unprivileged `fnas-web` account | HTTPS, the desktop's files, sessions, the API |
 | Privileged helper | root, reachable only through a local socket | Checks passwords with PAM, reports a user's groups, runs `fnas` for members of `nas-admins`, starts file helpers |
-| File helper | The logged-in user | Every Files app and WebDAV operation, so Linux permissions decide what each person sees |
+| File helper | The logged-in user | Every Files app and WebDAV operation, so Linux permissions decide what each person sees. Built in Phase 12 as the helper binary re-executed as that person, so there is no second socket and no second set of rules |
 
 **Login and sessions**
 
@@ -694,13 +694,17 @@ Chris's order (Nov 10): Files comes before more ways to share, because WebDAV in
 
 **Phone.** The gate is the installable web app on top of the phone rules the shell already has: a manifest and icons, a service worker for the shell so the home-screen icon opens instead of a blank page, and the Files screens laid out with tap targets and no sideways scrolling.
 
-- **Built, slice 1:** `internal/files` resolves a share and a path against the roots a person may use, with thirty refusal tests: climbing out with `..`, a link that leads out of the share, a dangling link, an absolute path, a NUL byte, a share they can't use, and a share whose pool has gone. `Resolve` is for something that exists, `ResolveNew` for a name that must not exist yet and refuses one that does, so replacing a file goes through `Resolve` and an `O_NOFOLLOW` open rather than a link sitting on the name.
+**Built so far.**
 
-- **Built, slice 2** (browsing, downloading and previewing): `fnas share roots USER` answers the shares a person can use with where each one is on disk and whether it has snapshots, joining `shares_of` and `list_shares` so neither the desktop nor WebDAV works out a path. The helper's `file-list` and `file-read` take a share name and a path, never an absolute path, ask fnas for the roots itself, resolve the path, then re-exec the helper as the person with `SysProcAttr.Credential` to do the work: the child runs the same binary with `file-child <op> <resolved path>`, answers with one line of JSON and, for a read, the bytes. A refusal from the child keeps its own words, so a file the kernel won't hand over says "you don't have permission to open that" rather than a generic failure. The front's `/api/files` lists shares or a folder and `/api/files/download` sends the bytes with `Content-Type` for what the desktop can show, `Content-Disposition: attachment` for a download, and one `Range` answered as 206 so a video can be seeked. `/api/files` never carries a path, since only the helper knows where a share lives.
+- **Slice 1:** `internal/files` resolves a share and a path against the roots a person may use, with thirty refusal tests: climbing out with `..`, a link that leads out of the share, a dangling link, an absolute path, a NUL byte, a share they can't use, and a share whose pool has gone. `Resolve` is for something that exists, `ResolveNew` for a name that must not exist yet and refuses one that does, so replacing a file goes through `Resolve` and an `O_NOFOLLOW` open rather than a link sitting on the name.
+
+- **Slice 2** (browsing, downloading and previewing): `fnas share roots USER` answers the shares a person can use with where each one is on disk and whether it has snapshots, joining `shares_of` and `list_shares` so neither the desktop nor WebDAV works out a path. The helper's `file-list` and `file-read` take a share name and a path, never an absolute path, ask fnas for the roots itself, resolve the path, then re-exec the helper as the person with `SysProcAttr.Credential` to do the work: the child runs the same binary with `file-child <op> <resolved path>`, answers with one line of JSON and, for a read, the bytes. A refusal from the child keeps its own words, so a file the kernel won't hand over says "you don't have permission to open that" rather than a generic failure. The front's `/api/files` lists shares or a folder and `/api/files/download` sends the bytes with `Content-Type` for what the desktop can show, `Content-Disposition: attachment` for a download, and one `Range` answered as 206 so a video can be seeked. `/api/files` never carries a path, since only the helper knows where a share lives.
 - **The one line of JSON and the file behind it** are read as a line on the connection, not with a JSON decoder: the decoder reads ahead into the file and leaves the newline that ended the head at the front of it, which cost the first few hundred bytes of every download until a round-trip test caught it.
 - **In the harness** the container now makes two shares with real owners: `media` for both sample accounts and `family` for `nas-admins` alone, so a person is refused by the kernel as well as by fnas.
 
-**Slices, in order.** The resolver and its refusal tests come before any file is served; then list, download and preview; then upload, rename, move and delete; then snapshots on ZFS only; then the phone work; then the gate in the phase table.
+- **Seen in the development container:** images and text preview, download as an attachment, one account refused a share the other can read, a climb out refused, `Range` answered as 206, and a whole file matching byte for byte. Not seen: video, audio and PDF previews (same path, no sample to try), and nothing was run in the VM.
+
+**Slices, in order.** The resolver and its refusal tests, then list, download and preview: both built. Then upload, rename, move and delete; then snapshots on ZFS only; then the phone work; then the gate in the phase table.
 
 ## Security model
 
