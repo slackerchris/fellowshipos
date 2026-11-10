@@ -172,3 +172,111 @@ func TestAZipTooBigIsRefusedBeforeAByteIsSent(t *testing.T) {
 		t.Errorf("a zip over the cap answered %v", err)
 	}
 }
+
+func TestAFolderIsCopiedWithWhatItHoldsButNoLink(t *testing.T) {
+	root, dir := share(t)
+	if err := os.Symlink(filepath.Join(filepath.Dir(dir), "secret"), filepath.Join(dir, "photos", "sneaky")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "photos", "2025"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "photos", "2025", "dog.png"), []byte("dog"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyInto(root, "photos", "backup"); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"backup/cat.png": "cat", "backup/2025/dog.png": "dog"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(got) != want {
+			t.Errorf("%s came out as %q, %v", name, got, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "backup", "sneaky")); err == nil {
+		t.Error("a link was copied")
+	}
+	// Nothing is left under a temporary name
+	found, _ := os.ReadDir(dir)
+	for _, entry := range found {
+		if strings.HasPrefix(entry.Name(), workingPrefix) {
+			t.Errorf("%s was left behind", entry.Name())
+		}
+	}
+	// A file copies too, and keeps its bytes
+	if err := copyInto(root, "photos/cat.png", "cat copy.png"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "cat copy.png")); string(got) != "cat" {
+		t.Errorf("the copied file held %q", got)
+	}
+}
+
+func TestACopyNeverLandsOnWhatIsThereOrInsideItself(t *testing.T) {
+	root, _ := share(t)
+	for _, c := range []struct{ from, to, says string }{
+		{"photos", "photos/inner", "into itself"},
+		{"photos", "photos", "into itself"},
+		{"photos/cat.png", "photos", "already here"},
+		{"out", "copied", "changed while"},
+	} {
+		if err := copyInto(root, c.from, c.to); err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("copying %s to %s answered %v, want %q", c.from, c.to, err, c.says)
+		}
+	}
+}
+
+func TestTheTreeListsFoldersOnlyAndStopsInTime(t *testing.T) {
+	root, dir := share(t)
+	for _, folder := range []string{"photos/2025", "photos/2025/june", "docs", workingPrefix + "copy-1"} {
+		if err := os.MkdirAll(filepath.Join(dir, folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found, err := tree(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pictures is a link to photos, so it isn't a folder of its own
+	if strings.Join(found.Folders, " ") != "docs photos photos/2025 photos/2025/june" || found.Cut {
+		t.Errorf("the tree was %v, cut %v", found.Folders, found.Cut)
+	}
+	kept := MaxTree
+	MaxTree = 2
+	defer func() { MaxTree = kept }()
+	found, _ = tree(root, "")
+	if len(found.Folders) != 2 || !found.Cut {
+		t.Errorf("a capped tree was %v, cut %v", found.Folders, found.Cut)
+	}
+}
+
+// A share's folders carry the setgid bit so what is made in them keeps the share's
+// group; making a folder, or copying one, must not clear it.
+func TestNewFoldersKeepTheSharesGroupBit(t *testing.T) {
+	root, dir := share(t)
+	photos := filepath.Join(dir, "photos")
+	if err := os.Chmod(photos, 0o775|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(photos, "2025"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// New folder, as the mkdir op makes it
+	fresh := filepath.Join(photos, "fresh")
+	if err := os.Mkdir(fresh, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := forTheGroup(fresh); err != nil {
+		t.Fatal(err)
+	}
+	// And a copied folder, made under a temporary name in the setgid folder
+	if err := copyInto(root, "photos/2025", "photos/2025 copy"); err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range []string{fresh, filepath.Join(photos, "2025 copy")} {
+		info, err := os.Stat(folder)
+		if err != nil || info.Mode()&os.ModeSetgid == 0 || info.Mode().Perm() != 0o775 {
+			t.Errorf("%s ended up %v, %v", folder, info.Mode(), err)
+		}
+	}
+}

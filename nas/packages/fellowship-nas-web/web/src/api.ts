@@ -656,6 +656,14 @@ export const makeFolder = (share: string, path: string, name: string) =>
 export const renameFile = (share: string, path: string, to: string) =>
     request<{ done: boolean }>("POST", "/api/files/rename", { share, path, to });
 
+/** Copy a file, or a folder with what it holds, to a new path in the same share. */
+export const copyFile = (share: string, path: string, to: string) =>
+    request<{ done: boolean }>("POST", "/api/files/copy", { share, path, to });
+
+/** The folders in a share, for picking where to move something. cut says there were more than it lists. */
+export const folderTree = (share: string) =>
+    request<{ folders: string[]; cut: boolean }>("GET", `/api/files/tree?share=${encodeURIComponent(share)}&path=`);
+
 export const deleteFile = (share: string, path: string, recursive = false) =>
     request<{ done: boolean }>("POST", "/api/files/delete", { share, path, recursive });
 

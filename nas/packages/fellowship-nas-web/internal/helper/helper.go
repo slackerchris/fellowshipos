@@ -165,6 +165,16 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 			return h.fileDelete(found.user, request)
 		}
 		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileCopy:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileCopy(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileTree:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileTree(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	case protocol.OpSessions:
 		return h.list(request)
 	case protocol.OpEndSession:

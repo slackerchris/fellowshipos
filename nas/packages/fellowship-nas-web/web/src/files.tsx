@@ -3,7 +3,7 @@
 // can be done with several at once.
 import { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { FileEntry, FileShare, deleteFile, fileShares, fileUrl, folderIn, humanSize,
+import { FileEntry, FileShare, copyFile, deleteFile, fileShares, fileUrl, folderIn, folderTree, humanSize,
     makeFolder, renameFile, uploadFile, zipUrl } from "./api";
 import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
@@ -105,10 +105,15 @@ function parentOf(path: string): string {
     return parts.join("/");
 }
 
+/** What Copy or Cut put aside, to paste in another folder of the same share. */
+type Clip = { share: string; folder: string; names: string[]; cut: boolean };
+
 export function Files() {
     const shares = useLoad(fileShares);
     const [share, setShare] = useState<FileShare | null>(null);
     const [view, setView] = useState<"list" | "grid">("list");
+    // Kept here, above the folder being shown, so it lasts while the person goes to another folder
+    const [clip, setClip] = useState<Clip | null>(null);
     return (
         <Loading loaded={shares}>
             {() => (
@@ -133,7 +138,8 @@ export function Files() {
                             </nav>
                             <div class="files-body">
                                 {share
-                                    ? <Browser key={share.share} share={share} view={view} setView={setView} />
+                                    ? <Browser key={share.share} share={share} view={view} setView={setView}
+                                               clip={clip} setClip={setClip} />
                                     : <p class="files-blank">Choose a share to look inside.</p>}
                             </div>
                         </div>
@@ -144,15 +150,17 @@ export function Files() {
     );
 }
 
-type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entries: FileEntry[] } | null;
+type Doing = { kind: "mkdir" } | { kind: "rename"; entry: FileEntry } | { kind: "delete"; entries: FileEntry[] }
+    | { kind: "move"; entries: FileEntry[] } | null;
 
 /** How a click picks: on its own, added to or taken from the rest, or everything since the last click. */
 type Picking = { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean };
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-function Browser({ share, view, setView }: {
+function Browser({ share, view, setView, clip, setClip }: {
     share: FileShare; view: "list" | "grid"; setView: (view: "list" | "grid") => void;
+    clip: Clip | null; setClip: (clip: Clip | null) => void;
 }) {
     const [path, setPath] = useState("");
     const [before, setBefore] = useState<string[]>([]);
@@ -317,6 +325,60 @@ function Browser({ share, view, setView }: {
         again();
     };
     const dragged = (entry: FileEntry) => picked.has(entry.name) ? [...picked] : [entry.name];
+
+    // Copy and Cut set things aside; Paste brings them here, copying or moving them.
+    // Within one share only, since a share is where a person's rights are decided
+    const pasting = clip && clip.share === share.share ? clip : null;
+    const setAside = (entries: FileEntry[], cut: boolean) => {
+        if (!entries.length) return;
+        setClip({ share: share.share, folder: here, names: entries.map(entry => entry.name), cut });
+        setSaid(`${plural(entries.length, "item")} ${cut ? "cut" : "copied"}: go to a folder and paste`);
+    };
+    const paste = async () => {
+        if (!pasting) return;
+        setTrouble(null);
+        const refused: string[] = [];
+        let done = 0;
+        for (const [at, name] of pasting.names.entries()) {
+            // Cut and pasted where it already is: nothing to do
+            if (pasting.cut && pasting.folder === here) continue;
+            setBusy(`${pasting.cut ? "Moving" : "Copying"} ${name} (${at + 1} of ${pasting.names.length})`);
+            try {
+                if (pasting.cut) {
+                    await renameFile(share.share, join(pasting.folder, name), join(here, name));
+                } else {
+                    await copyFile(share.share, join(pasting.folder, name), join(here, name));
+                }
+                done += 1;
+            } catch (error) {
+                refused.push(`${name}: ${(error as Error).message}`);
+            }
+        }
+        setBusy("");
+        setSaid(`${done} ${pasting.cut ? "moved" : "copied"} here`);
+        if (refused.length) setTrouble(`${refused.length} refused: ${refused.join("; ")}`);
+        // What was moved isn't where Cut found it any more
+        if (pasting.cut) setClip(null);
+        folder.reload();
+    };
+    const moveTo = async (entries: FileEntry[], destination: string) => {
+        setDoing(null);
+        setTrouble(null);
+        const refused: string[] = [];
+        let done = 0;
+        for (const entry of entries) {
+            try {
+                await renameFile(share.share, join(here, entry.name), join(destination, entry.name));
+                done += 1;
+            } catch (error) {
+                refused.push(`${entry.name}: ${(error as Error).message}`);
+            }
+        }
+        setSaid(`${done} moved to ${destination || share.share}`);
+        if (refused.length) setTrouble(`${refused.length} refused: ${refused.join("; ")}`);
+        again();
+    };
+    const isCut = (entry: FileEntry) => !!pasting && pasting.cut && pasting.folder === here && pasting.names.includes(entry.name);
     const sortBy = (by: Sort["by"]) => setSort(old => ({ by, down: old.by === by ? !old.down : false }));
     const ariaSort = (by: Sort["by"]) =>
         sort.by === by ? (sort.down ? "descending" : "ascending") : "none" as const;
@@ -340,6 +402,12 @@ function Browser({ share, view, setView }: {
         } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
             event.preventDefault();
             setPicked(new Set(items.map(item => item.name)));
+        } else if ((event.ctrlKey || event.metaKey) && ["c", "x", "v"].includes(event.key.toLowerCase())) {
+            event.preventDefault();
+            const key = event.key.toLowerCase();
+            if (key === "c") setAside(pickedItems, false);
+            else if (key === "x" && changing) setAside(pickedItems, true);
+            else if (key === "v" && changing) paste();
         } else if (event.key === "Enter" && chosen) {
             event.preventDefault();
             open(chosen);
@@ -376,6 +444,12 @@ function Browser({ share, view, setView }: {
                 <input class="files-filter" type="search" placeholder="Filter this folder"
                        aria-label="Filter this folder" value={filter}
                        onInput={event => setFilter(event.currentTarget.value)} />
+                {changing && pasting && (
+                    <button type="button" class="tool-text" onClick={paste}
+                            title={`${pasting.cut ? "Move" : "Copy"} ${pasting.names.join(", ")} here`}>
+                        Paste {pasting.names.length}
+                    </button>
+                )}
                 {changing && (
                     <button type="button" class="tool-text" onClick={() => setDoing({ kind: "mkdir" })}>
                         New folder
@@ -410,6 +484,10 @@ function Browser({ share, view, setView }: {
                           busy={false} trouble={trouble}
                           onCancel={() => { setDoing(null); setTrouble(null); }}
                           onDone={name => newName(doing.entry, name)} />
+            )}
+            {doing && doing.kind === "move" && (
+                <MovePicker share={share.share} here={here} entries={doing.entries}
+                            onCancel={() => setDoing(null)} onMove={to => moveTo(doing.entries, to)} />
             )}
             {doing && doing.kind === "delete" && doing.entries.length === 1 && (
                 <Confirm title={`Delete ${doing.entries[0].name}`} phrase={doing.entries[0].name}
@@ -472,7 +550,7 @@ function Browser({ share, view, setView }: {
                                     <tbody>
                                         {items.map(entry => (
                                             <tr key={entry.name}
-                                                class={`file-row ${entry.dir ? "is-folder" : ""} ${picked.has(entry.name) ? "picked" : ""}`}
+                                                class={`file-row ${entry.dir ? "is-folder" : ""} ${picked.has(entry.name) ? "picked" : ""} ${isCut(entry) ? "is-cut" : ""}`}
                                                 aria-selected={picked.has(entry.name)}
                                                 draggable={changing}
                                                 onDragStart={event => event.dataTransfer?.setData("text/plain",
@@ -511,6 +589,19 @@ function Browser({ share, view, setView }: {
                                                                        href={fileUrl(share.share, join(here, entry.name), true)}
                                                                        download={entry.name}>Download</a>
                                                                 )}
+                                                                <button type="button" role="menuitem"
+                                                                    onClick={() => { setMenuFor(null); setAside(picked.has(entry.name) ? pickedItems : [entry], false); }}>
+                                                                    Copy
+                                                                </button>
+                                                                {changing && <button type="button" role="menuitem"
+                                                                    onClick={() => { setMenuFor(null); setAside(picked.has(entry.name) ? pickedItems : [entry], true); }}>
+                                                                    Cut
+                                                                </button>}
+                                                                {changing && <button type="button" role="menuitem"
+                                                                    onClick={() => { setMenuFor(null); setTrouble(null);
+                                                                        setDoing({ kind: "move", entries: picked.has(entry.name) ? pickedItems : [entry] }); }}>
+                                                                    Move to…
+                                                                </button>}
                                                                 {changing && <button type="button" role="menuitem"
                                                                     onClick={() => { setMenuFor(null); setTrouble(null); setDoing({ kind: "rename", entry }); }}>
                                                                     Rename…
@@ -532,7 +623,7 @@ function Browser({ share, view, setView }: {
                                     {items.map(entry => (
                                         <li key={entry.name}>
                                             <button type="button"
-                                                    class={`file-tile ${picked.has(entry.name) ? "picked" : ""}`}
+                                                    class={`file-tile ${picked.has(entry.name) ? "picked" : ""} ${isCut(entry) ? "is-cut" : ""}`}
                                                     aria-pressed={picked.has(entry.name)}
                                                     onClick={event => pick(entry, event)}
                                                     onDblClick={() => open(entry)}>
@@ -565,6 +656,8 @@ function Browser({ share, view, setView }: {
                         {pickedItems.length > 1 && (
                             <Picked share={share} folder={here} entries={pickedItems} changing={changing}
                                     onDelete={() => { setTrouble(null); setDoing({ kind: "delete", entries: pickedItems }); }}
+                                    onCopy={() => setAside(pickedItems, false)} onCut={() => setAside(pickedItems, true)}
+                                    onMove={() => { setTrouble(null); setDoing({ kind: "move", entries: pickedItems }); }}
                                     onClose={forget} />
                         )}
                     </div>
@@ -586,9 +679,9 @@ function draggedNames(carried: string | undefined): string[] {
 }
 
 /** Several things picked: how many, how big, and what can be done with them all. */
-function Picked({ share, folder, entries, changing, onDelete, onClose }: {
+function Picked({ share, folder, entries, changing, onDelete, onCopy, onCut, onMove, onClose }: {
     share: FileShare; folder: string; entries: FileEntry[]; changing: boolean;
-    onDelete: () => void; onClose: () => void;
+    onDelete: () => void; onCopy: () => void; onCut: () => void; onMove: () => void; onClose: () => void;
 }) {
     const folders = entries.filter(entry => entry.dir).length;
     const files = entries.length - folders;
@@ -608,11 +701,62 @@ function Picked({ share, folder, entries, changing, onDelete, onClose }: {
                 <p class="muted small">Ctrl-click (Cmd on a Mac) adds or takes one away; Shift-click picks a run.</p>
             </div>
             <div class="preview-foot">
+                <div class="row">
+                    <Button onClick={onCopy}>Copy</Button>
+                    {changing && <Button onClick={onCut}>Cut</Button>}
+                    {changing && <Button onClick={onMove}>Move to…</Button>}
+                </div>
                 {changing && <Button onClick={onDelete}>Delete…</Button>}
                 <a class="button button-primary" href={zipUrl(share.share, folder, entries.map(entry => entry.name))}>
                     Download as zip</a>
             </div>
         </aside>
+    );
+}
+
+/** Where to move something, picked from the share's folders: a way to move that
+    needs no dragging, which a phone can't do. The folder it is in now, and a folder
+    being moved with anything inside it, can't be picked. */
+function MovePicker({ share, here, entries, onCancel, onMove }: {
+    share: string; here: string; entries: FileEntry[]; onCancel: () => void; onMove: (to: string) => void;
+}) {
+    const tree = useLoad(() => folderTree(share));
+    const moving = entries.filter(entry => entry.dir).map(entry => join(here, entry.name));
+    const blocked = (folder: string) => folder === here
+        || moving.some(path => folder === path || folder.startsWith(`${path}/`));
+    const [to, setTo] = useState<string | null>(null);
+    return (
+        <div class="files-form">
+            <p><strong>Move {entries.length === 1 ? entries[0].name : plural(entries.length, "item")} to…</strong></p>
+            <Loading loaded={tree}>
+                {() => (
+                    <div class="move-tree" role="listbox" aria-label="Folders">
+                        {["", ...tree.data!.folders].map(folder => {
+                            const depth = folder ? folder.split("/").length : 0;
+                            const off = blocked(folder);
+                            return (
+                                <button key={folder || "top"} type="button" role="option" disabled={off}
+                                        aria-selected={to === folder}
+                                        class={`move-folder ${to === folder ? "current" : ""}`}
+                                        style={{ paddingLeft: `${8 + depth * 18}px` }}
+                                        onClick={() => setTo(folder)}>
+                                    <Icon of="folder" />
+                                    <span>{folder ? folder.split("/").pop() : share}</span>
+                                    {folder === here && <span class="muted small"> (here now)</span>}
+                                </button>
+                            );
+                        })}
+                        {tree.data!.cut && <p class="muted small">Only the first {tree.data!.folders.length} folders are
+                            listed. Move it a step at a time, or drag it, to reach one further in.</p>}
+                    </div>
+                )}
+            </Loading>
+            <div class="row row-end">
+                <Button onClick={onCancel}>Cancel</Button>
+                <Button kind="primary" disabled={to === null} onClick={() => to !== null && onMove(to)}>
+                    Move here</Button>
+            </div>
+        </div>
     );
 }
 

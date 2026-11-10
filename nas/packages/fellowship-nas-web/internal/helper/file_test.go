@@ -359,3 +359,52 @@ func TestAZipChecksEveryNameBeforeTheChildRuns(t *testing.T) {
 		t.Errorf("the child was asked %v", f.childed)
 	}
 }
+
+func TestACopyIsCheckedBeforeTheChildRuns(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true}]`
+	for _, made := range []error{os.Mkdir(filepath.Join(dir, "photos"), 0o755),
+		os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644)} {
+		if made != nil {
+			t.Fatal(made)
+		}
+	}
+	token := login(t, h, "kim").Token
+	for _, c := range []struct{ from, to, says string }{
+		{"photos", "photos/inside", "into itself"},
+		{"photos", "notes.txt", "already here"},
+		{"photos", "../elsewhere", "outside"},
+		{"gone", "here", "isn't in media"},
+	} {
+		response := h.Handle(protocol.Request{Op: protocol.OpFileCopy, Session: token, Share: "media",
+			Path: c.from, To: c.to})
+		if response.Code == "" || !strings.Contains(response.Error, c.says) {
+			t.Errorf("copying %s to %s answered %q %q", c.from, c.to, response.Code, response.Error)
+		}
+	}
+	if len(f.childed) != 0 {
+		t.Errorf("a child was run for a refused copy: %v", f.childed)
+	}
+	f.body = "{}\n"
+	if response := h.Handle(protocol.Request{Op: protocol.OpFileCopy, Session: token, Share: "media",
+		Path: "photos", To: "photos copy"}); response.Code != "" {
+		t.Fatalf("a copy answered %q %q", response.Code, response.Error)
+	}
+	if len(f.childed) != 1 || f.childed[0] != "copy photos photos copy" {
+		t.Errorf("the child was asked %v", f.childed)
+	}
+}
+
+func TestAReadOnlyShareGivesATreeButNoCopy(t *testing.T) {
+	f, h, _ := newFileFake(t)
+	token := login(t, h, "kim").Token
+	if response := h.Handle(protocol.Request{Op: protocol.OpFileCopy, Session: token, Share: "media",
+		Path: "a", To: "b"}); !strings.Contains(response.Error, "read only") {
+		t.Errorf("a copy on a read-only share answered %q", response.Error)
+	}
+	f.body = `{"folders":["photos","photos/2025"],"cut":false}` + "\n"
+	response := h.Handle(protocol.Request{Op: protocol.OpFileTree, Session: token, Share: "media"})
+	if response.Code != "" || !strings.Contains(response.Output, "photos/2025") {
+		t.Errorf("the tree answered %q %q %q", response.Code, response.Error, response.Output)
+	}
+}

@@ -391,6 +391,84 @@ func (h *Helper) fileRename(user string, request protocol.Request) protocol.Resp
 	return protocol.Response{}
 }
 
+// fileCopy copies a file, or a folder with everything in it, to a new name in the
+// same share. Copying between shares would mean two roots, and is not offered.
+func (h *Helper) fileCopy(user string, request protocol.Request) protocol.Response {
+	root, err := h.writable(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	from, err := files.Resolve([]files.Root{root}, request.Share, request.Path)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	to, err := files.ResolveNew([]files.Root{root}, request.Share, request.To)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	_, fromInside, err := files.Relative(root, from)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	_, toInside, err := files.Relative(root, to)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	if toInside == fromInside || strings.HasPrefix(toInside, fromInside+"/") {
+		return failure(protocol.CodeForbidden, "a folder can't be copied into itself")
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	out, err := h.child(account, nil, "copy", root, from, 0, 0, toInside)
+	if err != nil {
+		return failure(protocol.CodeFailed, "that can't be copied right now")
+	}
+	defer out.Close()
+	if answer := childSaid(out); answer != "" {
+		return failure(protocol.CodeFailed, answer)
+	}
+	return protocol.Response{}
+}
+
+// fileTree answers with the folders beneath one, for picking where something goes.
+// Reading is enough: the move itself checks the share can be changed.
+func (h *Helper) fileTree(user string, request protocol.Request) protocol.Response {
+	root, err := h.fileRoots(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	folder, err := files.Resolve([]files.Root{root}, request.Share, request.Path)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	out, err := h.child(account, nil, "tree", root, folder, 0, 0)
+	if err != nil {
+		return failure(protocol.CodeFailed, "the folders can't be listed right now")
+	}
+	defer out.Close()
+	var answer struct {
+		Error string `json:"error"`
+		filechild.Tree
+	}
+	if err := json.NewDecoder(io.LimitReader(out, 8<<20)).Decode(&answer); err != nil {
+		return failure(protocol.CodeFailed, "the folders can't be listed right now")
+	}
+	if answer.Error != "" {
+		return failure(protocol.CodeFailed, answer.Error)
+	}
+	text, err := json.Marshal(answer.Tree)
+	if err != nil {
+		return failure(protocol.CodeFailed, "the folders can't be listed right now")
+	}
+	return protocol.Response{Output: string(text)}
+}
+
 // fileDelete removes something, taking a folder's contents with it only when
 // that was asked for.
 func (h *Helper) fileDelete(user string, request protocol.Request) protocol.Response {

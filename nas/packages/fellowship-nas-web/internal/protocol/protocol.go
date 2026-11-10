@@ -30,6 +30,8 @@ const (
 	OpFileRename = "file-rename"
 	OpFileDelete = "file-delete"
 	OpFileZip    = "file-zip"
+	OpFileCopy   = "file-copy"
+	OpFileTree   = "file-tree"
 	OpSessions   = "sessions"
 	OpEndSession = "end-session"
 )

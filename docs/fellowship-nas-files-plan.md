@@ -58,6 +58,9 @@ than one name.
 
 ## 3. Slice B: copy and paste, and moving without a mouse
 
+**Built** (Nov 10), as below. Pasting a copy onto a name that is there is refused, as
+planned, so duplicating within one folder needs a rename first.
+
 Dragging is a mouse gesture; the phone gate says "rename, move and delete by
 tapping". Both need the same operation, so add a clipboard and a picker.
 

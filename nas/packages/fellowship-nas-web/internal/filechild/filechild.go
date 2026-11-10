@@ -94,7 +94,7 @@ func Run(args []string) int {
 		if err := os.Mkdir(target, 0o775); err != nil {
 			return say(out, explain(err).Error())
 		}
-		if err := os.Chmod(target, 0o775); err != nil {
+		if err := forTheGroup(target); err != nil {
 			return say(out, explain(err).Error())
 		}
 	case "rename":
@@ -149,6 +149,22 @@ func Run(args []string) int {
 			return say(out, err.Error())
 		}
 		if err := out.Encode(Folder{Entries: entries}); err != nil {
+			return 1
+		}
+		return 0
+	case "copy":
+		if len(rest) < 1 {
+			return say(out, "a copy needs what to copy and where it goes")
+		}
+		if err := copyInto(root, inside, rest[0]); err != nil {
+			return say(out, err.Error())
+		}
+	case "tree":
+		found, err := tree(root, inside)
+		if err != nil {
+			return say(out, err.Error())
+		}
+		if err := out.Encode(found); err != nil {
 			return 1
 		}
 		return 0
@@ -328,6 +344,230 @@ func write(path string, body io.Reader, replace bool) (int64, error) {
 		return 0, explain(err)
 	}
 	return wrote, nil
+}
+
+// Temporary names this child makes while it works, which nothing else should show
+const workingPrefix = ".fnas-"
+
+// copyInto copies a file, or a folder with everything in it, to a name that must
+// not exist yet. The copy is made under a temporary name beside it and renamed
+// into place, so a copy that fails part way leaves nothing half made. A link is
+// never followed: one inside a copied folder is left out.
+func copyInto(root int, from, to string) error {
+	if to == from || strings.HasPrefix(to, from+"/") {
+		return errors.New("a folder can't be copied into itself")
+	}
+	kind, err := kindOf(root, from)
+	if err != nil {
+		return err
+	}
+	target, release, err := named(root, to)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if _, err := os.Lstat(target); err == nil {
+		return errors.New("something with that name is already here")
+	}
+	folder := filepath.Dir(target)
+	switch kind {
+	case syscall.S_IFREG:
+		source, err := beneath(root, from, syscall.O_RDONLY)
+		if err != nil {
+			return explain(err)
+		}
+		reader := os.NewFile(uintptr(source), through(source))
+		defer reader.Close()
+		temp, err := os.CreateTemp(folder, workingPrefix+"copy-*")
+		if err != nil {
+			return explain(err)
+		}
+		defer os.Remove(temp.Name())
+		if _, err := io.Copy(temp, reader); err != nil {
+			temp.Close()
+			return errors.New("the copy stopped before it finished")
+		}
+		if err := temp.Close(); err != nil {
+			return explain(err)
+		}
+		if err := os.Chmod(temp.Name(), 0o664); err != nil {
+			return explain(err)
+		}
+		return placed(temp.Name(), target)
+	case syscall.S_IFDIR:
+		temp, err := os.MkdirTemp(folder, workingPrefix+"copy-*")
+		if err != nil {
+			return explain(err)
+		}
+		if err := forTheGroup(temp); err != nil {
+			os.RemoveAll(temp)
+			return explain(err)
+		}
+		into, err := syscall.Open(temp, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			os.RemoveAll(temp)
+			return explain(err)
+		}
+		err = copyTree(root, from, into)
+		syscall.Close(into)
+		if err != nil {
+			os.RemoveAll(temp)
+			return err
+		}
+		if err := placed(temp, target); err != nil {
+			os.RemoveAll(temp)
+			return err
+		}
+		return nil
+	}
+	return errors.New("only files and folders can be copied")
+}
+
+// forTheGroup opens a new folder to its group, past the umask. A share's folders
+// carry the setgid bit, which the kernel hands to a folder made in one so what is
+// made in it keeps the share's group; a plain chmod would clear it, leaving what
+// is made inside to the person's own group, so it is kept.
+func forTheGroup(folder string) error {
+	info, err := os.Stat(folder)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(folder, 0o775|(info.Mode()&os.ModeSetgid))
+}
+
+// placed renames a finished copy onto its name, unless something took the name meanwhile.
+func placed(temp, target string) error {
+	if _, err := os.Lstat(target); err == nil {
+		return errors.New("something with that name is already here")
+	}
+	if err := os.Rename(temp, target); err != nil {
+		return explain(err)
+	}
+	return nil
+}
+
+// kindOf is what is at a path beneath the share, without following a link.
+func kindOf(root int, inside string) (uint32, error) {
+	fd, err := beneath(root, inside, oPath)
+	if err != nil {
+		return 0, explain(err)
+	}
+	defer syscall.Close(fd)
+	var info syscall.Stat_t
+	if err := syscall.Fstat(fd, &info); err != nil {
+		return 0, explain(err)
+	}
+	return info.Mode & syscall.S_IFMT, nil
+}
+
+// copyTree copies what a folder holds into an open folder, working through the
+// folders it opened itself so nothing it writes can be sent elsewhere.
+func copyTree(root int, from string, into int) error {
+	names, err := listed(root, from)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		inside := path.Join(from, name)
+		kind, err := kindOf(root, inside)
+		if err != nil {
+			// A link, or something gone since the folder was read
+			continue
+		}
+		made := filepath.Join(through(into), name)
+		switch kind {
+		case syscall.S_IFREG:
+			source, err := beneath(root, inside, syscall.O_RDONLY)
+			if err != nil {
+				continue
+			}
+			reader := os.NewFile(uintptr(source), through(source))
+			writer, err := os.OpenFile(made, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o664)
+			if err != nil {
+				reader.Close()
+				return explain(err)
+			}
+			_, err = io.Copy(writer, reader)
+			reader.Close()
+			if closed := writer.Close(); err == nil {
+				err = closed
+			}
+			if err != nil {
+				return errors.New("the copy stopped before it finished")
+			}
+			if err := os.Chmod(made, 0o664); err != nil {
+				return explain(err)
+			}
+		case syscall.S_IFDIR:
+			if err := os.Mkdir(made, 0o775); err != nil {
+				return explain(err)
+			}
+			if err := forTheGroup(made); err != nil {
+				return explain(err)
+			}
+			sub, err := syscall.Open(made, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+			if err != nil {
+				return explain(err)
+			}
+			err = copyTree(root, inside, sub)
+			syscall.Close(sub)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Tree is the answer to "tree": the folders in a share, for a picker of where to
+// move something, and whether there were more than it lists.
+type Tree struct {
+	Folders []string `json:"folders"`
+	Cut     bool     `json:"cut"`
+}
+
+// The most a tree lists, and how deep it goes, so a huge share can't hold a
+// picker, or the disks, for long
+var (
+	MaxTree      = 500
+	MaxTreeDepth = 8
+)
+
+// tree lists the folders beneath one, by their paths in the share. Links and the
+// child's own temporary folders are left out.
+func tree(root int, from string) (Tree, error) {
+	found := Tree{Folders: []string{}}
+	var walk func(inside string, depth int) error
+	walk = func(inside string, depth int) error {
+		names, err := listed(root, inside)
+		if err != nil {
+			if inside == from {
+				return err
+			}
+			return nil
+		}
+		for _, name := range names {
+			if strings.HasPrefix(name, workingPrefix) {
+				continue
+			}
+			child := path.Join(inside, name)
+			if kind, err := kindOf(root, child); err != nil || kind != syscall.S_IFDIR {
+				continue
+			}
+			if len(found.Folders) >= MaxTree {
+				found.Cut = true
+				return nil
+			}
+			found.Folders = append(found.Folders, child)
+			if depth+1 < MaxTreeDepth {
+				if err := walk(child, depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return found, walk(from, 0)
 }
 
 // MaxZip is the most a zip may hold, before compression. It is counted before a

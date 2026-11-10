@@ -81,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/mkdir", s.withSession(true, s.mkdir))
 	mux.HandleFunc("POST /api/files/rename", s.withSession(true, s.rename))
 	mux.HandleFunc("POST /api/files/delete", s.withSession(true, s.remove))
+	mux.HandleFunc("POST /api/files/copy", s.withSession(true, s.copyFile))
+	mux.HandleFunc("GET /api/files/tree", s.withSession(false, s.tree))
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }
@@ -548,6 +550,32 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, session *protoco
 		}
 		return ""
 	})
+}
+
+func (s *Server) copyFile(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	s.filesChange(w, r, token, protocol.OpFileCopy, func(body changeRequest) protocol.Request {
+		return protocol.Request{Share: body.Share, Path: body.Path, To: body.To}
+	}, func(body changeRequest) string {
+		if body.Path == "" || body.To == "" {
+			return "say what to copy and where it goes"
+		}
+		return ""
+	})
+}
+
+// tree answers with a share's folders, for a picker of where to move something.
+func (s *Server) tree(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	if query.Get("share") == "" {
+		writeError(w, http.StatusBadRequest, "say which share")
+		return
+	}
+	response, ok := s.call(w, protocol.Request{Op: protocol.OpFileTree, Session: token,
+		Share: query.Get("share"), Path: query.Get("path")})
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, json.RawMessage(response.Output))
 }
 
 func (s *Server) remove(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {

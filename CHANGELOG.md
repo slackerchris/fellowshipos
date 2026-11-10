@@ -14,6 +14,13 @@ bump.
 
 ### Added
 
+- Files, slice B: **Copy** and **Cut** (row menu, the pane for several, Ctrl-C and
+  Ctrl-X) set things aside, and **Paste** in another folder of the same share copies or
+  moves them there (Ctrl-V). A copy of a file or a whole folder is made under a
+  temporary name and renamed into place, so one that fails leaves nothing half made; it
+  never follows a link, and a folder can't be copied into itself. **Move to…** picks a
+  destination from the share's folders (at most 500, eight deep), so moving needs no
+  dragging, which a phone can't do.
 - Files, slice A: pick several things at once (Ctrl-click or Cmd-click adds or takes one
   away, Shift-click and Shift with the arrows pick a run, Ctrl-A picks everything shown,
   Escape lets go), with a pane that says how many and how big. Delete them together
@@ -206,6 +213,9 @@ bump.
 
 ### Fixed
 
+- A folder made in Files lost the share's setgid bit, since setting its mode cleared
+  it, so what was then made inside belonged to the person's own group and others in the
+  share's group couldn't change it. New and copied folders keep the bit.
 - Found by a RAID 6 test in the VM, with two of four disks pulled out: an array missing
   disks read as healthy everywhere but the pool card's table, since a disk that has gone
   isn't listed among the array's members. The pool, the Storage and Health widgets and
