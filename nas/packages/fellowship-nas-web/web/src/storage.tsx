@@ -1,7 +1,8 @@
 import { useState } from "preact/hooks";
 import { PoolDetailsView } from "./pooldetails";
 import {
-    Disk, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fnas, fnasJson, humanSize, leaves,
+    Disk, Engine, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fill, fnas, fnasJson, humanSize,
+    leaves, loadEngines,
 } from "./api";
 import { useJobsFinished } from "./jobs";
 import { CreatePool, DiskPicker, ImportPools, erasePhrase, usableDisks } from "./pools";
@@ -79,7 +80,7 @@ export function RunningJobs({ jobs }: { jobs: Job[] }) {
 
 /** Pick a disk to take the place of one that failed, or is failing. */
 function Replace({ pool, engine, vdev, disks, done, cancel }: {
-    pool: string; engine: string; vdev: Vdev; disks: Disk[]; done: (text: string) => void; cancel: () => void;
+    pool: string; engine: Engine; vdev: Vdev; disks: Disk[]; done: (text: string) => void; cancel: () => void;
 }) {
     const free = usableDisks(disks).filter(disk => !vdev.size || disk.size >= vdev.size);
     const [chosen, setChosen] = useState<string[]>([]);
@@ -96,9 +97,7 @@ function Replace({ pool, engine, vdev, disks, done, cancel }: {
                      done(jobStarted(await fnas(["pool", "replace", pool, vdev.path || vdev.name, disk.by_id || disk.path,
                                                  "--confirm", typed, ...(wipe ? ["--wipe"] : [])])));
                  })}>
-            <p>Replacing <strong>{vdevName(vdev, disks)}</strong> in {pool}. {engine === "mdadm"
-                ? "The array rebuilds that disk's data onto the new one from the other disks; it stays in use meanwhile."
-                : "ZFS copies its data onto the new disk; the pool stays in use meanwhile."}</p>
+            <p>Replacing <strong>{vdevName(vdev, disks)}</strong> in {pool}. {engine.replace_text}</p>
             {free.length
                 ? <DiskPicker disks={free} chosen={chosen} setChosen={setChosen} single />
                 : <Notice kind="warning">No free disk is large enough. Connect one{vdev.size ? ` of at least ${humanSize(vdev.size)}` : ""}, then
@@ -117,29 +116,22 @@ type Growth = { how: "group" | "expand" | "mirror" | "spare"; target?: string; c
 
 const SPARES_TEXT = "Add hot spares, which stand in for a failed disk at once";
 
-/** The ways this pool can take more disks, given what it's made of. */
-function growths(status: PoolStatus, disks: Disk[], engine: string): Growth[] {
+/** The ways this pool can take more disks: those its engine has, that fit what it's made of. */
+function growths(status: PoolStatus, disks: Disk[], engine: Engine): Growth[] {
+    const ways = new Set(engine.grow || []);
     const found: Growth[] = [];
-    if (engine === "mdadm") {
-        // An array is one group: it takes one more disk at a time, or spares
-        if (status.groups[0]?.type !== "mirror") {
-            found.push({ how: "expand", count: 1, text: "Add one disk to the array. Its data is spread onto the new disk (a "
-                + "reshape, which can take many hours), and the space appears when that finishes" });
-        }
-        found.push({ how: "spare", count: 0, text: SPARES_TEXT });
-        return found;
-    }
     const kinds = new Set(status.groups.map(group => `${group.type}:${group.disks?.length || 1}`));
     const [type, width] = [...kinds][0]?.split(":") || [];
-    if (kinds.size === 1 && type !== "single") {
+    if (ways.has("group") && kinds.size === 1 && type !== "single") {
         found.push({ how: "group", count: Number(width),
                      text: `Add another ${LAYOUT_NAMES[type as LayoutOption["layout"]] || type} group of ${width} disks` });
     }
     for (const group of status.groups) {
-        if (group.type.startsWith("raidz") && status.expandable) {
-            found.push({ how: "expand", target: group.name, count: 1, text: `Add one disk to ${group.name}` });
+        // Parity groups take one more disk where the engine says the pool can; copies don't
+        if (ways.has("expand") && status.expandable && group.type !== "single" && group.type !== "mirror") {
+            found.push({ how: "expand", target: group.name, count: 1, text: fill(engine.expand_text, { group: group.name }) });
         }
-        if (group.type === "single" || group.type === "mirror") {
+        if (ways.has("mirror") && (group.type === "single" || group.type === "mirror")) {
             const first = leaves(group)[0];
             found.push({ how: "mirror", target: first.path, count: 1,
                          text: group.type === "single"
@@ -148,14 +140,14 @@ function growths(status: PoolStatus, disks: Disk[], engine: string): Growth[] {
                              : `Add a third copy to ${group.name}` });
         }
     }
-    if (status.groups.some(group => group.type !== "single")) {
+    if (ways.has("spare") && status.groups.some(group => group.type !== "single")) {
         found.push({ how: "spare", count: 0, text: SPARES_TEXT });
     }
     return found;
 }
 
 function Grow({ pool, engine, status, disks, done, cancel }: {
-    pool: string; engine: string; status: PoolStatus; disks: Disk[]; done: (text: string) => void; cancel: () => void;
+    pool: string; engine: Engine; status: PoolStatus; disks: Disk[]; done: (text: string) => void; cancel: () => void;
 }) {
     const options = growths(status, disks, engine);
     const free = usableDisks(disks);
@@ -256,8 +248,9 @@ function Member({ member, disks, readonly, replace }: {
     );
 }
 
-function PoolCard({ pool, disks, reload, details }: {
+function PoolCard({ pool, engine, disks, reload, details }: {
     pool: Pool;
+    engine: Engine;
     disks: Disk[];
     reload: () => void;
     details: () => void;
@@ -267,7 +260,6 @@ function PoolCard({ pool, disks, reload, details }: {
     const [growing, setGrowing] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [repairing, setRepairing] = useState(false);
-    const array = pool.engine === "mdadm";
     const action = useAction(() => { status.reload(); reload(); });
     const exportAction = useAction(reload);
     const finished = (text: string) => {
@@ -279,7 +271,7 @@ function PoolCard({ pool, disks, reload, details }: {
 
     return (
         <Card title={pool.name} actions={<>
-            <Badge kind="neutral">{pool.engine === "mdadm" ? "Traditional RAID" : "ZFS"}</Badge>
+            <Badge kind="neutral">{engine.title}</Badge>
             {pool.readonly && <Badge kind="neutral">read-only</Badge>}
             {healthBadge(pool.health)}
             <Button onClick={details}>Details and history</Button>
@@ -338,19 +330,19 @@ function PoolCard({ pool, disks, reload, details }: {
                                     )}
                                 </table>
                             </div>
-                            {array && mismatched > 0 && !pool.readonly && (
+                            {engine.repair && mismatched > 0 && !pool.readonly && (
                                 <Notice kind="warning">
                                     <div class="stack">
-                                        <span>The last check found {mismatched} blocks that don't match across the array. A repair
+                                        <span>The last check found {mismatched} blocks that don't match across {pool.name}. A repair
                                             rewrites them from parity or the other copy, but it can't tell which copy was right,
                                             so restore anything important from a backup first if you can.</span>
-                                        <div class="row"><Button onClick={() => setRepairing(true)}>Repair the array</Button></div>
+                                        <div class="row"><Button onClick={() => setRepairing(true)}>Repair {pool.name}</Button></div>
                                     </div>
                                 </Notice>
                             )}
-                            {growing && <Grow pool={pool.name} engine={pool.engine} status={s} disks={disks} done={finished}
+                            {growing && <Grow pool={pool.name} engine={engine} status={s} disks={disks} done={finished}
                                               cancel={() => setGrowing(false)} />}
-                            {replacing && <Replace pool={pool.name} engine={pool.engine} vdev={replacing} disks={disks} done={finished}
+                            {replacing && <Replace pool={pool.name} engine={engine} vdev={replacing} disks={disks} done={finished}
                                                    cancel={() => setReplacing(null)} />}
                         </div>
                     );
@@ -360,17 +352,11 @@ function PoolCard({ pool, disks, reload, details }: {
                     {!pool.readonly && !growing && <Button onClick={() => setGrowing(true)}>Add disks</Button>}
                     {!pool.readonly && (
                         <Button busy={action.busy} onClick={() => action.run(async () =>
-                            jobStarted(await fnas(["pool", "scrub", pool.name])))}>{array ? "Check array" : "Check for damage"}</Button>
+                            jobStarted(await fnas(["pool", "scrub", pool.name])))}>{engine.check_button}</Button>
                     )}
                     <Button onClick={() => setExporting(true)}>Export</Button>
                 </div>
-                {!pool.readonly && !array && <p class="muted small">Check for damage (a scrub) reads every block on {pool.name} and
-                    checks it against its checksum. Damaged blocks are repaired from another copy or parity where the pool
-                    has one, and reported where it doesn't. It runs by itself once a month; shares stay usable while it
-                    does.</p>}
-                {!pool.readonly && array && <p class="muted small">Check array reads every block on {pool.name} and compares it
-                    with the parity or the other copy. It changes nothing: blocks that don't match are counted, and a repair,
-                    which you start yourself, rewrites them. Shares stay usable while it runs.</p>}
+                {!pool.readonly && <p class="muted small">{fill(engine.check_text, { pool: pool.name })}</p>}
                 {repairing && (
                     <Confirm title="Repair" phrase={`repair ${pool.name}`} busy={action.busy} outcome={action.outcome}
                              onCancel={() => { setRepairing(false); action.clear(); }}
@@ -379,8 +365,8 @@ function PoolCard({ pool, disks, reload, details }: {
                                  setRepairing(false);
                                  return output;
                              })}>
-                        <p>The repair rewrites every block that doesn't match, from parity or the other copy. An array can't
-                            tell which copy was right, so it may keep the wrong one.</p>
+                        <p>The repair rewrites every block that doesn't match, from parity or the other copy. It can't tell
+                            which copy was right, so it may keep the wrong one.</p>
                     </Confirm>
                 )}
                 <Result outcome={exportAction.outcome} />
@@ -434,6 +420,7 @@ function Disks({ disks }: { disks: Disk[] }) {
 export function Storage() {
     const pools = useLoad(() => fnasJson<Pool[]>(["pool", "list"]));
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list", "--all"]));
+    const engines = useLoad(loadEngines);
     const [creating, setCreating] = useState(false);
     const [created, setCreated] = useState("");
     const [viewing, setViewing] = useState<string | null>(null);
@@ -446,15 +433,15 @@ export function Storage() {
     return (
         <Page intro="Pools hold your shares. Each pool is made from one or more disks.">
             <RunningJobs jobs={jobs} />
-            <Loading loaded={pools}>{() => <Loading loaded={disks}>{() => (
+            <Loading loaded={pools}>{() => <Loading loaded={disks}>{() => <Loading loaded={engines}>{() => (
                 <div class="stack">
                     {!pools.data!.length && (
                         <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from attached disks.</p></Card>
                     )}
-                    {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} disks={disks.data!} reload={reload}
-                                                       details={() => setViewing(pool.name)} />)}
+                    {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} engine={engines.data![pool.engine]}
+                                                       disks={disks.data!} reload={reload} details={() => setViewing(pool.name)} />)}
                 </div>
-            )}</Loading>}</Loading>
+            )}</Loading>}</Loading>}</Loading>
             {created && <Result outcome={{ kind: "done", text: `Created pool ${created}` }} />}
             {creating
                 ? <CreatePool taken={(pools.data || []).map(pool => pool.name)}

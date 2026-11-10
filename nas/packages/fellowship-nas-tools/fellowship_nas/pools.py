@@ -11,8 +11,17 @@ POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 ENGINES = {"zfs": zfs, "mdadm": mdadm}
 # Every engine in the plan, built or not, so the desktop can show them all:
 # name, title, and the plan phase that builds it
-CATALOGUE = [("zfs", "ZFS", None), ("mergerfs", "Unraid-style", 11), ("mdadm", "Traditional RAID", None),
-             ("btrfs", "Btrfs", 14)]
+# Every engine, built or not: its name, title, the phase that builds it, and
+# what it's for, as Create pool shows it
+CATALOGUE = [
+    ("zfs", "ZFS", None, "Best for important files. Checks and repairs every block as it reads it, and "
+                         "takes snapshots. Disks should be the same size."),
+    ("mergerfs", "Unraid-style", 11, "Best for large media libraries on disks of any size. Each disk holds whole "
+                                     "files and stays readable on its own; parity disks are updated every night."),
+    ("mdadm", "Traditional RAID", None, "Classic RAID 1, 5, 6 or 10, then formatted with ext4 or XFS. Fast, and "
+                                        "any Linux machine can read it; no snapshots or self-repair."),
+    ("btrfs", "Btrfs", 14, "Mirrors with checksums and snapshots, on disks of any size."),
+]
 # Every pool is mounted at /mnt/NAME, on every engine, so no pool name can
 # collide with a folder the system uses
 ROOT = "/mnt"
@@ -29,10 +38,17 @@ def check_pool_name(name):
 def engines():
     """Every engine, and why it can't be used here if it can't."""
     shown = []
-    for name, title, phase in CATALOGUE:
+    for name, title, phase, summary in CATALOGUE:
         reason = ENGINES[name].unavailable() if name in ENGINES else f"Not built yet (Phase {phase})"
-        shown.append({"name": name, "title": title, "available": not reason, "reason": reason})
+        shown.append({"name": name, "title": title, "available": not reason, "reason": reason, "summary": summary,
+                      # An engine not built yet has nothing to present
+                      **(ENGINES[name].PRESENTATION if name in ENGINES else {})})
     return shown
+
+
+def engine_title(name):
+    """What the desktop calls an engine, such as Traditional RAID for mdadm."""
+    return next(title for engine, title, _, _ in CATALOGUE if engine == name)
 
 
 def usable_engines():

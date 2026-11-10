@@ -14,6 +14,11 @@ bump.
 
 ### Added
 
+- Health reports read, write and checksum errors ZFS counted on disks still in a pool.
+  Before, a pool with errors and every disk online raised nothing until a disk dropped
+  out.
+- The role's postinst turns Debian's monthly array check on if mdadm's preset left it
+  off, and says so when it can't.
 - mdadm's array events reach alerts the moment `mdmonitor` sees them, rather than at
   the next hourly check: a failed disk, a degraded or vanished array and a missing spare
   are alerts, and a finished rebuild is a note. `fnas` points mdadm at
@@ -67,6 +72,14 @@ bump.
 
 ### Changed
 
+- Each engine describes how the desktop presents its pools: the check button and its
+  wording, the ways it grows, its formats, and whether it has snapshots, backup,
+  compression and a separate repair. `fnas pool engines` sends that, shares carry a
+  `snapshots` flag, and the desktop no longer branches on an engine's name, so Phase
+  11's engine needs no desktop edits for those. Health's pool cards name the engine
+  ("Traditional RAID") rather than printing "MDADM".
+- The array check's alert no longer says to back up first, since the backup job
+  covers ZFS pools only; it says to copy what matters elsewhere.
 - Health's storage check names when each engine checks itself (Debian's ZFS scrub on the
   second Sunday, mdcheck from the first), and an array never checked falls due 40 days
   after it was made instead of at once.

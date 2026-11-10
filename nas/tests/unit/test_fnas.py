@@ -1020,7 +1020,7 @@ class Sharing(Base):
         nested = "tank/shares/media/old\t/tank/shares/media/old\toff\toff\t-\t-\t-\n"
         self.fake(volume_line("media") + volume_line("plain") + nested)
         self.assertEqual(fnas.list_shares(), [{
-            "name": "media", "pool": "tank", "engine": "zfs", "dataset": "tank/shares/media",
+            "name": "media", "pool": "tank", "engine": "zfs", "snapshots": True, "dataset": "tank/shares/media",
             "path": "/tank/shares/media", "mode": "everyone", "access": self.everyone(), "nfs": True, "smb": True,
             "policy": fnas.DEFAULT_POLICY, "smb_options": fnas.DEFAULT_SMB, "nfs_options": fnas.DEFAULT_NFS,
             "readonly": False}])
@@ -1241,7 +1241,12 @@ class ProtectionFake(ShareFake):
 
     def __call__(self, *command, check=True, stdin=None, timeout=None):
         ok = SimpleNamespace(stdout="", stderr="", returncode=0)
-        if command[:2] == ("zpool", "status"):
+        if command[:2] == ("zpool", "status") and "-j" in command:
+            # A pool of one disk with no errors
+            name = command[-1]
+            ok.stdout = json.dumps({"pools": {name: {"state": "ONLINE", "vdevs": {name: {"vdevs": {
+                "disk1": {"name": "disk1", "vdev_type": "disk", "state": "ONLINE"}}}}}}})
+        elif command[:2] == ("zpool", "status"):
             ok.stdout = self.status
         elif command[:3] == ("zfs", "list", "-Hp"):
             ok.stdout = self.dated_snapshots
@@ -1651,12 +1656,24 @@ class Protection(Base):
 
     def test_a_pool_never_checked_falls_due_after_it_was_made(self):
         engine = SimpleNamespace(CHECK_WORD="check", CHECK_SCHEDULE="monthly", last_scrub=lambda pool: 0,
-                                 created=lambda pool: 1000, mismatches=lambda pool: 0)
+                                 created=lambda pool: 1000, damage=lambda pool: None)
         with patch("engine_of", lambda pool: engine):
             self.assertEqual(fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE - 1), [])
             found = fnas.scrub_findings(["vault"], 1000 + fnas.SCRUB_MAX_AGE + 1)
         self.assertEqual(len(found), 1)
         self.assertIn("since it was made", found[0]["message"])
+
+    def test_zfs_errors_on_disks_still_in_the_pool_are_a_finding(self):
+        zfs = importlib.import_module("fellowship_nas.engines.zfs")
+        disk = {"name": "a", "type": "disk", "state": "ONLINE", "errors": 0}
+        status = {"groups": [{"name": "mirror-0", "type": "mirror", "state": "ONLINE", "errors": 0,
+                              "disks": [dict(disk), dict(disk, name="b")]}]}
+        with mock.patch.object(zfs, "pool_status", lambda pool: status):
+            self.assertIsNone(zfs.damage("tank"))
+            status["groups"][0]["disks"][1]["errors"] = 3
+            title, message = zfs.damage("tank")
+        self.assertEqual(title, "Pool tank: 3 read, write or checksum errors")
+        self.assertIn("sudo fnas pool status tank", message)
 
     def test_resilver_is_not_a_scrub(self):
         self.healthy(status="  scan: resilvered 1G in 00:01:00 with 0 errors on Sun Nov  8 00:24:01 2026\n",
@@ -2095,6 +2112,22 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
                 found = self.engine.share_volumes("vault")
         self.assertEqual(found, {"docs": {"dataset": "vault/shares/docs", "readonly": False,
                                           "path": os.path.join(directory, "vault", "shares", "docs")}})
+
+    def test_every_engine_describes_itself_for_the_desktop(self):
+        pools = importlib.import_module("fellowship_nas.pools")
+        zfs = importlib.import_module("fellowship_nas.engines.zfs")
+        keys = set(zfs.PRESENTATION)
+        self.assertEqual(set(self.engine.PRESENTATION), keys)
+        with mock.patch.object(zfs, "unavailable", lambda: ""), \
+                mock.patch.object(self.engine, "unavailable", lambda: "mdadm isn't installed"):
+            shown = {engine["name"]: engine for engine in pools.engines()}
+        self.assertEqual(list(shown), ["zfs", "mergerfs", "mdadm", "btrfs"])
+        self.assertTrue(all(engine["summary"] for engine in shown.values()))
+        self.assertEqual(shown["mdadm"]["check_button"], "Check array")
+        self.assertEqual([f["name"] for f in shown["mdadm"]["filesystems"] if f["recommended"]], ["xfs"])
+        # An engine not built yet has only its name, state and summary
+        self.assertNotIn("grow", shown["mergerfs"])
+        self.assertEqual(pools.engine_title("mdadm"), "Traditional RAID")
 
     def test_saved_arrays_carry_no_spare_count(self):
         scan = "ARRAY /dev/md/vault metadata=1.2 spares=1 UUID=d6a1:3cf5\n"

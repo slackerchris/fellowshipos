@@ -183,6 +183,8 @@ def list_shares():
                 if settings["access"] is None:
                     settings["access"] = folder_owner(volume["path"])
                 found.append({"name": name, "pool": pool["name"], "engine": pool["engine"],
+                              # So the desktop needn't know which engines keep earlier versions
+                              "snapshots": engine.PRESENTATION["snapshots"],
                               "readonly": pool["readonly"] or readonly, **volume, **settings})
     return sorted(found, key=lambda share: share["name"].lower())
 

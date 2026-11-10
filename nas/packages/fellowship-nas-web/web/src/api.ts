@@ -229,6 +229,8 @@ export interface Share {
     name: string;
     pool: string;
     engine: string;
+    // Whether the share's engine keeps earlier versions
+    snapshots: boolean;
     dataset: string;
     path: string;
     mode: "everyone" | "chosen";
@@ -375,6 +377,8 @@ export interface SystemStatus {
 }
 
 export interface PoolDetail extends Pool {
+    // What the desktop calls the engine, such as Traditional RAID
+    engine_title: string;
     shares: number;
     last_scrub: number | null;
     last_snapshot: number | null;
@@ -445,12 +449,49 @@ export interface PoolDetails {
     projection: { days?: number; per_day?: number; reason?: string };
 }
 
+export interface EngineFilesystem {
+    name: string;
+    title: string;
+    recommended: boolean;
+    text: string;
+}
+
+/** A storage engine, and how the desktop presents its pools, so no screen asks which engine it is. */
 export interface Engine {
     name: "zfs" | "mergerfs" | "mdadm" | "btrfs";
     title: string;
     available: boolean;
     reason: string;
+    summary: string;
+    // An engine not built yet has none of these
+    snapshots?: boolean;
+    backup?: boolean;
+    compresses?: boolean;
+    repair?: boolean;
+    grow?: ("group" | "expand" | "mirror" | "spare")[];
+    // These may hold {pool} or {group}; fill() puts the names in
+    expand_text?: string;
+    check_button?: string;
+    check_name?: string;
+    check_text?: string;
+    errors_label?: string;
+    replace_text?: string;
+    filesystems?: EngineFilesystem[];
 }
+
+let engineList: Promise<Record<string, Engine>> | null = null;
+
+/** Every engine by name. They change only with a new fnas, so this asks once per page load. */
+export function loadEngines(): Promise<Record<string, Engine>> {
+    engineList ??= fnasJson<Engine[]>(["pool", "engines"]).then(
+        list => Object.fromEntries(list.map(engine => [engine.name, engine])),
+        error => { engineList = null; throw error; });
+    return engineList;
+}
+
+/** An engine's text with the pool's or group's name put in. */
+export const fill = (text: string | undefined, names: { pool?: string; group?: string }) =>
+    (text || "").replace(/\{(pool|group)\}/g, (_, key: "pool" | "group") => names[key] || "");
 
 export interface SetupStatus {
     done: boolean;

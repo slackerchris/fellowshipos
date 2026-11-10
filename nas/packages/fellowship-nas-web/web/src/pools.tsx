@@ -1,7 +1,7 @@
 // Pool creation and import, shared by the Storage page and the setup wizard
 import { useEffect, useState } from "preact/hooks";
 import {
-    Disk, Engine, ImportablePool, LAYOUT_NAMES, LayoutOption, SavedConfig, diskName, fnas, fnasJson, humanSize, plural, when,
+    Disk, Engine, ImportablePool, loadEngines, LAYOUT_NAMES, LayoutOption, SavedConfig, diskName, fnas, fnasJson, humanSize, plural, when,
 } from "./api";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Result, useAction, useLoad } from "./ui";
 
@@ -75,17 +75,6 @@ export function DiskPicker({ disks, chosen, setChosen, single }: {
 
 export const usableDisks = (disks: Disk[]) => disks.filter(disk => disk.state === "empty" || disk.state === "has-data");
 
-/** What each engine is for, as the first step of creating a pool shows it. */
-const ENGINE_INFO: Record<Engine["name"], string> = {
-    zfs: "Best for important files. Checks and repairs every block as it reads it, and takes snapshots. "
-        + "Disks should be the same size.",
-    mergerfs: "Best for large media libraries on disks of any size. Each disk holds whole files and stays "
-        + "readable on its own; parity disks are updated every night.",
-    mdadm: "Classic RAID 1, 5, 6 or 10, then formatted with ext4 or XFS. Fast, and any Linux machine can read it; "
-        + "no snapshots or self-repair.",
-    btrfs: "Mirrors with checksums and snapshots, on disks of any size.",
-};
-
 const COMPARISON: [string, string, string, string, string][] = [
     ["", "ZFS", "Unraid-style", "Traditional RAID", "Btrfs"],
     ["Protection", "Mirrors, RAIDZ1/2/3, spares", "1–6 parity disks", "RAID 1, 5, 6, 10, spares", "Two or three copies"],
@@ -118,7 +107,7 @@ function EnginePicker({ engines, chosen, setChosen }: {
                     <span>
                         <strong>{engine.title}</strong>{" "}
                         {!engine.available && <Badge kind="neutral">{engine.reason}</Badge>}<br />
-                        <span class="small">{ENGINE_INFO[engine.name]}</span>
+                        <span class="small">{engine.summary}</span>
                     </span>
                 </label>
             ))}
@@ -141,9 +130,10 @@ function EnginePicker({ engines, chosen, setChosen }: {
 
 export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string) => void; taken?: string[] }) {
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list"]));
-    const engines = useLoad(() => fnasJson<Engine[]>(["pool", "engines"]));
+    const engines = useLoad(() => loadEngines().then(found => Object.values(found)));
     const [engine, setEngine] = useState("");
-    const [filesystem, setFilesystem] = useState<"xfs" | "ext4">("xfs");
+    // Until one is picked, the engine's recommended format
+    const [filesystem, setFilesystem] = useState("");
     const [name, setName] = useState(["tank", "data", "media", "backup"].find(free => !taken.includes(free)) || "");
     const [chosen, setChosen] = useState<string[]>([]);
     const [options, setOptions] = useState<LayoutOption[] | null>(null);
@@ -157,6 +147,8 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
     const selected = usable.filter(disk => chosen.includes(disk.path));
     // Each engine has its own layouts, so ask the chosen one
     const chosenEngine = engine || engines.data?.find(found => found.available)?.name || "";
+    const formats = engines.data?.find(found => found.name === chosenEngine)?.filesystems || [];
+    const format = formats.find(found => found.name === filesystem) || formats.find(found => found.recommended) || formats[0];
     const key = selected.map(disk => disk.path).join(" ");
     useEffect(() => {
         setOptions(null);
@@ -233,21 +225,17 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                                 <span>Erase the data on the disks marked ⚠. Check they aren't from another pool you want first.</span>
                             </label>
                         )}
-                        {chosenEngine === "mdadm" && (
+                        {formats.length > 0 && (
                             <div class="field">
                                 <span class="field-label">Format</span>
-                                <label class="choice">
-                                    <input type="radio" name="filesystem" checked={filesystem === "xfs"} onChange={() => setFilesystem("xfs")} />
-                                    <span><strong>XFS</strong> <Badge kind="good">Recommended</Badge><br />
-                                        <span class="muted small">Built for large files and large arrays, and grows quickly when a
-                                            disk is added. It can't be made smaller later.</span></span>
-                                </label>
-                                <label class="choice">
-                                    <input type="radio" name="filesystem" checked={filesystem === "ext4"} onChange={() => setFilesystem("ext4")} />
-                                    <span><strong>ext4</strong><br />
-                                        <span class="muted small">The most common Linux format, readable almost anywhere. Slower to
-                                            check after a crash on a big array.</span></span>
-                                </label>
+                                {formats.map(each => (
+                                    <label class="choice" key={each.name}>
+                                        <input type="radio" name="filesystem" checked={format?.name === each.name}
+                                               onChange={() => setFilesystem(each.name)} />
+                                        <span><strong>{each.title}</strong>{each.recommended && <> <Badge kind="good">Recommended</Badge></>}<br />
+                                            <span class="muted small">{each.text}</span></span>
+                                    </label>
+                                ))}
                             </div>
                         )}
                         {problem && (selected.length > 0 || !chosenEngine) && <p class="muted small">{problem}</p>}
@@ -262,13 +250,13 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                                          await fnas(["pool", "create", name, option.layout, "--engine", chosenEngine,
                                                      ...selected.map(disk => disk.by_id || disk.path),
                                                      "--width", String(option.width), "--spares", String(option.spares),
-                                                     ...(chosenEngine === "mdadm" ? ["--filesystem", filesystem] : []),
+                                                     ...(format ? ["--filesystem", format.name] : []),
                                                      "--confirm", typed, ...(wipe ? ["--wipe"] : [])]);
                                          setConfirming(false);
                                          onCreated(name);
                                      })}>
                                 <p>{describeLayout(option)} ({technicalLayout(option)}
-                                    {chosenEngine === "mdadm" ? `, formatted ${filesystem === "xfs" ? "XFS" : "ext4"}` : ""}).
+                                    {format ? `, formatted ${format.title}` : ""}).
                                     Everything on these disks will be erased:</p>
                                 <ul>{selected.map(disk => <li key={disk.path} class="mono small">{diskName(disk)}</li>)}</ul>
                             </Confirm>

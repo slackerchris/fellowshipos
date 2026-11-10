@@ -28,6 +28,33 @@ FILESYSTEMS = ("xfs", "ext4")
 CHECK_WORD = "check"
 # When Debian's mdcheck timers check every array by themselves
 CHECK_SCHEDULE = "from the first Sunday of each month, six hours a night until done"
+# How the desktop presents a pool on this engine; see the ZFS engine's
+PRESENTATION = {
+    "snapshots": False,
+    "backup": False,
+    "compresses": False,
+    "repair": True,
+    # One group: it takes one more disk at a time, or spares
+    "grow": ["expand", "spare"],
+    "expand_text": ("Add one disk to the array. Its data is spread onto the new disk (a reshape, which can "
+                    "take many hours), and the space appears when that finishes"),
+    "check_button": "Check array",
+    "check_name": "array check",
+    "check_text": ("Check array reads every block on {pool} and compares it with the parity or the other copy. "
+                   "It changes nothing: blocks that don't match are counted, and a repair, which you start "
+                   f"yourself, rewrites them. It runs by itself {CHECK_SCHEDULE}; shares stay usable while it does."),
+    "errors_label": "Blocks that didn't match at the last check",
+    "replace_text": ("The array rebuilds that disk's data onto the new one from the other disks; it stays in "
+                     "use meanwhile."),
+    "filesystems": [
+        {"name": "xfs", "title": "XFS", "recommended": True,
+         "text": "Built for large files and large arrays, and grows quickly when a disk is added. "
+                 "It can't be made smaller later."},
+        {"name": "ext4", "title": "ext4", "recommended": False,
+         "text": "The most common Linux format, readable almost anywhere. Slower to check after a crash "
+                 "on a big array."},
+    ],
+}
 # XFS is the recommendation: it grows while mounted, and mends itself
 RECOMMENDED_FILESYSTEM = "xfs"
 MKFS = {"xfs": ("mkfs.xfs", "-f"), "ext4": ("mkfs.ext4", "-F")}
@@ -509,7 +536,8 @@ def pool_status(name):
                         "size": 0, "errors": missed(device), "note": "",
                         "disks": [describe_disk(row, links) for row in members]}],
             "spares": [describe_disk(row, links) for row in spares],
-            "scan": sync_from(device), "expand": None, "expandable": True}
+            # A mirror stays two disks; every other level reshapes onto one more
+            "scan": sync_from(device), "expand": None, "expandable": level != "mirror"}
 
 
 def member_disks(status):
@@ -540,6 +568,18 @@ def mismatches(name):
         return int(md_file(name, "mismatch_cnt")) if md_file(name, "last_sync_action") == "check" else 0
     except (OSError, ValueError, FnasError):
         return 0
+
+
+def damage(name):
+    """Blocks the last check found that don't match, as a Health finding's
+    title and message, or None."""
+    count = mismatches(name)
+    if not count:
+        return None
+    return (f"Pool {name}: {count} blocks don't match",
+            f"The last check found them. Repair them from Storage, or sudo fnas pool repair {name}. "
+            "A repair can keep the wrong copy, and the backup job covers ZFS pools only, "
+            "so copy what matters elsewhere first.")
 
 
 def mdcheck_paused(name):
@@ -584,7 +624,8 @@ def mdcheck_stopped(now=None):
         if found:
             alerts.send_alert("medium", f"Pool {name}: the monthly check found {found} blocks that don't match",
                               f"Repair them from Storage in the desktop, or sudo fnas pool repair {name}. "
-                              "A repair can keep the wrong copy, so back up what matters first.")
+                              "A repair can keep the wrong copy, and the backup job covers ZFS pools only, "
+                              "so copy what matters elsewhere first.")
         else:
             alerts.send_alert("info", f"Pool {name}: monthly check finished", "No problems found.")
     checks[WATCHING] = still

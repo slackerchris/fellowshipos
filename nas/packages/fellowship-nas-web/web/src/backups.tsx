@@ -1,6 +1,6 @@
 // Snapshots of each share, the nightly backup to another pool, and restoring from it
 import { useState } from "preact/hooks";
-import { BackupCopy, BackupStatus, Policy, Pool, Share, Snapshot, fnas, fnasJson, jobStarted, plural, when } from "./api";
+import { BackupCopy, BackupStatus, Policy, Pool, Share, Snapshot, fnas, fnasJson, jobStarted, loadEngines, plural, when } from "./api";
 import { Badge, Button, Card, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const PERIODS: (keyof Policy)[] = ["hourly", "daily", "monthly"];
@@ -9,7 +9,7 @@ export const NO_SNAPSHOTS = "This pool doesn't support snapshots";
 export const NO_BACKUP = "The current backup engine only supports ZFS pools";
 
 /** Snapshots need ZFS or, later, Btrfs; a share on an array keeps no history. */
-export const snapshotsWork = (share: Share) => share.engine === "zfs" || share.engine === "btrfs";
+export const snapshotsWork = (share: Share) => share.snapshots;
 
 export function PolicyEditor({ share, onDone }: { share: Share; onDone: () => void }) {
     if (!snapshotsWork(share)) {
@@ -47,7 +47,7 @@ function PolicyForm({ share, onDone }: { share: Share; onDone: () => void }) {
 
 /** The nightly backup: what it copies where, how the last run went, and setting it up. */
 export function BackupJob({ onChange }: { onChange?: () => void }) {
-    const pools = useLoad(() => fnasJson<Pool[]>(["pool", "list"]));
+    const pools = useLoad(() => Promise.all([fnasJson<Pool[]>(["pool", "list"]), loadEngines()]));
     const status = useLoad(() => fnasJson<BackupStatus>(["backup", "show"]));
     const [source, setSource] = useState("");
     const [target, setTarget] = useState("");
@@ -77,8 +77,10 @@ export function BackupJob({ onChange }: { onChange?: () => void }) {
                         </div>
                     );
                 }
-                const writable = pools.data!.filter(pool => !pool.readonly && pool.engine === "zfs").map(pool => pool.name);
-                const others = pools.data!.filter(pool => !pool.readonly && pool.engine !== "zfs").map(pool => pool.name);
+                const [found, engines] = pools.data!;
+                const backs = (pool: Pool) => !!engines[pool.engine]?.backup;
+                const writable = found.filter(pool => !pool.readonly && backs(pool)).map(pool => pool.name);
+                const others = found.filter(pool => !pool.readonly && !backs(pool)).map(pool => pool.name);
                 const from = source || writable[0] || "";
                 const to = target || writable.find(pool => pool !== from) || "";
                 const missing = writable.length < 2;

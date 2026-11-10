@@ -93,12 +93,9 @@ def scrub_findings(names, now):
             found.append(finding(f"scrub-old-{pool}", "low", f"Pool {pool} hasn't {word}",
                                  f"{since}. One runs by itself {engine.CHECK_SCHEDULE}. "
                                  f"Start one now from Storage, or sudo fnas pool scrub {pool}"))
-        count = engine.mismatches(pool)
-        if count:
-            found.append(finding(f"mismatch-{pool}", "medium",
-                                 f"Pool {pool}: {count} blocks don't match",
-                                 f"The last {engine.CHECK_WORD} found them. Repair them from Storage, "
-                                 f"or sudo fnas pool repair {pool}"))
+        damaged = engine.damage(pool)
+        if damaged:
+            found.append(finding(f"damage-{pool}", "medium", *damaged))
     return found
 
 
@@ -344,6 +341,7 @@ def pool_details(found, histories=None):
         backed_up = settings and settings["source"] == pool["name"]
         recorded = histories.get(pool["name"], {})
         shown.append({**pool,
+                      "engine_title": pools.engine_title(pool["engine"]),
                       "shares": len([s for s in found_shares if s["pool"] == pool["name"]]),
                       "last_scrub": pools.ENGINES[pool["engine"]].last_scrub(pool["name"]) or None,
                       "last_snapshot": newest_snapshot(pool["name"], found_shares) if zfs_pool else None,

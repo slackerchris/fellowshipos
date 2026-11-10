@@ -1,6 +1,6 @@
 // One pool in detail: what uses its space, how full it has been over time, and when it fills
 import { useState } from "preact/hooks";
-import { PoolDetails, UsagePoint, fnasJson, humanSize, plural, when } from "./api";
+import { PoolDetails, UsagePoint, fnasJson, humanSize, loadEngines, plural, when } from "./api";
 import { NO_SNAPSHOTS } from "./backups";
 import { Button, Card, Loading, Notice, useLoad } from "./ui";
 import { chartDay as day, useWidth } from "./charts";
@@ -96,7 +96,7 @@ function SpaceBar({ details }: { details: PoolDetails }) {
 }
 
 export function PoolDetailsView({ name, back }: { name: string; back: () => void }) {
-    const details = useLoad(() => fnasJson<PoolDetails>(["pool", "details", name]));
+    const details = useLoad(() => Promise.all([fnasJson<PoolDetails>(["pool", "details", name]), loadEngines()]));
     const [range, setRange] = useState<"hourly" | "daily">("hourly");
     return (
         <div class="stack">
@@ -105,10 +105,11 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                 <Button onClick={details.reload}>Refresh</Button>
             </div>
             <Loading loaded={details}>{() => {
-                const pool = details.data!;
+                const [pool, engines] = details.data!;
+                const engine = engines[pool.engine];
                 const space = pool.space;
-                const array = pool.engine === "mdadm";
-                const format = pool.filesystem === "ext4" ? "ext4" : "XFS";
+                // The format an engine put on top of its disks, by its own name for it
+                const format = engine.filesystems?.find(each => each.name === pool.filesystem)?.title;
                 const points = pool.history[range];
                 const fill = pool.projection;
                 return <>
@@ -123,8 +124,8 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                                 <span class="small muted">{fill.days === undefined ? fill.reason
                                     : `at ${humanSize(fill.per_day!)} a day, the recent rate`}</span></div>
                             <div class="stat"><span class="small muted">Compression</span>
-                                <strong>{array ? "–" : `${pool.compression.toFixed(2)}×`}</strong>
-                                <span class="small muted">{array ? `${format} doesn't compress`
+                                <strong>{!engine.compresses ? "–" : `${pool.compression.toFixed(2)}×`}</strong>
+                                <span class="small muted">{!engine.compresses ? `${format || engine.title} doesn't compress`
                                     : pool.logical > space.used ? `saves ${humanSize(pool.logical - space.used)}`
                                     : "saves nothing yet"}</span></div>
                         </div>
@@ -158,16 +159,16 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                     <Card title="About this pool">
                         <div class="table-wrap">
                             <table><tbody>
-                                <tr><th scope="row">Kind of storage</th><td>{array ? `Traditional RAID, formatted ${format}` : "ZFS"}</td></tr>
+                                <tr><th scope="row">Kind of storage</th><td>{engine.title}{format ? `, formatted ${format}` : ""}</td></tr>
                                 <tr><th scope="row">Created</th><td>{pool.created ? when(pool.created) : "–"}</td></tr>
-                                <tr><th scope="row">{array ? "Last array check" : "Last check for damage"}</th>
+                                <tr><th scope="row">Last {engine.check_name}</th>
                                     <td>{pool.last_scrub ? when(pool.last_scrub) : "never"}</td></tr>
-                                <tr><th scope="row">{array ? "Blocks that didn't match at the last check" : "Read, write and checksum errors"}</th>
+                                <tr><th scope="row">{engine.errors_label}</th>
                                     <td>{pool.errors}</td></tr>
                                 <tr><th scope="row">Fragmentation of free space</th><td>{pool.fragmentation === null
-                                    ? <span class="muted small">{array ? `${format} doesn't report it` : "–"}</span>
+                                    ? <span class="muted small">{format ? `${format} doesn't report it` : "–"}</span>
                                     : <>{pool.fragmentation}%<span class="muted small"> (higher slows writes as a pool fills)</span></>}</td></tr>
-                                {array && <tr><th scope="row">Snapshots</th><td class="muted small">{NO_SNAPSHOTS}</td></tr>}
+                                {!engine.snapshots && <tr><th scope="row">Snapshots</th><td class="muted small">{NO_SNAPSHOTS}</td></tr>}
                             </tbody></table>
                         </div>
                     </Card>

@@ -256,7 +256,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - the filesystem aligned to the array's stripe
 - **Boot:** the array is recorded in `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID (from `/etc/fstab`; see the open question on a systemd mount unit).
 - **Alerts:** `fnas` adds a `PROGRAM` line to `mdadm.conf`, so Debian's `mdmonitor` service runs `/usr/lib/fellowship-nas/md-alert` for each event, within its one-minute poll. A failed disk, a degraded or vanished array and a missing spare are alerts; a finished rebuild is a note.
-- **Checks:** Debian's `mdcheck` timers check every array from the first Sunday of each month, six hours a night until done. A drop-in on those services tells `fnas` which arrays they started and finished, so Health records them beside the checks `fnas` starts, and a check's mismatch count is a Health finding.
+- **Checks:** Debian's `mdcheck` timers check every array from the first Sunday of each month, six hours a night until done. mdadm's preset turns them on, and the role's postinst turns them on if not, saying so when it can't. A drop-in on those services tells `fnas` which arrays they started and finished, so Health records them beside the checks `fnas` starts, and a check's mismatch count is a Health finding. On ZFS the same finding reports read, write and checksum errors on disks still in the pool.
 - **Shares and settings:** shares are folders in `/mnt/NAME/shares`; settings in `/mnt/NAME/fellowship-config`.
 - **No snapshots:** shares show "No snapshots on this engine".
 - **Growing:** one disk at a time. The reshape runs as a job; the filesystem is grown when it finishes.
@@ -308,7 +308,8 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
   - XFS is used because SnapRAID keeps each parity level in one file, and ext4 caps a file at 16 TiB.
   - Parity disks are XFS too, and must be at least as large as the largest data disk.
 - **Shares and settings:** shares are folders in `/mnt/NAME/shares`, as on every engine, so the settings folder beside them isn't taken for a share; settings are in `/mnt/NAME/fellowship-config`, copied to every data disk so the pool can be rebuilt after a reinstall.
-- **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, which jobs don't have yet.
+- **Jobs:** the nightly sync and a sync started by hand run as a `sync` job, which `jobs.KINDS` doesn't have yet; it goes through `jobs.work` like the others, with an alert when a sync finishes or fails.
+- **Packages:** `mergerfs` and `snapraid` are dependencies of `fellowship-nas-tools`, added in the same commit as the engine, as `mdadm` and `xfsprogs` are.
 - **Schedules:** `fnas` writes the mergerfs mount and `snapraid.conf`. A nightly `snapraid sync` runs, then a weekly partial `snapraid scrub`. The sync is skipped with an alert if too many files were deleted, a sign of a missing disk.
 - **Repairs:** a failed data disk is rebuilt onto its replacement with `snapraid fix`, through a guided flow in the Storage app.
 - **Protection is visible:** the Storage app says plainly that files changed since the last sync aren't protected yet, and when the last sync ran.
@@ -658,7 +659,7 @@ nas/
   packages/
     fellowship-nas/          meta-package: every engine's and protocol's tools, schedules, kernel hook, alert hooks
     fellowship-nas-smb/      Samba and discovery
-    fellowship-nas-tools/    fnas, its fellowship_nas package (engines/ holds one module per engine), and fellowship-nas-notify
+    fellowship-nas-tools/    fnas, its fellowship_nas package (engines/ holds one module per engine), fellowship-nas-notify, and each engine's packages and hooks
     fellowship-nas-web/      Go server and helpers, plus the desktop (web/)
   theme/                     icons, wallpaper, colour tokens
   tests/
@@ -757,7 +758,7 @@ Web and access:
 | Wrong disk chosen in the installer | Data loss | Partitioning is never preseeded; docs recommend unplugging data disks |
 | Existing pool or array mistaken for empty disks | Data loss | Pool and array scan runs first; disks with labels or filesystems are flagged and need `--wipe` |
 | A security hole in our own web server or WebDAV | Someone on the LAN gets root or another user's files | Privilege split, `fnas` as the only root door, file helper as the user, LAN-only firewall, tests for every login and session rule, security review before release |
-| Four engines and five protocols multiply the work | Phases take longer | One engine layer and one share-settings file in `fnas`; each engine and each protocol has its own gate |
+| Four engines and five protocols multiply the work | Phases take longer | One engine layer and one share-settings file in `fnas`. Each engine module carries a `PRESENTATION` that `fnas pool engines` sends to the desktop (its check button and wording, ways to grow, formats, and whether it has snapshots, backup, compression and a separate repair), so the desktop never branches on an engine's name and a new engine doesn't edit it. Each engine and each protocol has its own gate |
 | RAID 5 on large disks | A second failure during a rebuild loses the array | Warning on 8 TB and larger disks; RAID 6 recommended |
 | mdadm can't tell which copy is right on a mismatch | Silent corruption goes unrepaired | Monthly check shown in Health; the comparison table says so before the engine is chosen |
 | SnapRAID's unsynced window | Recent files lost with a disk | Nightly sync, the last sync shown in Storage, overdue alerts |

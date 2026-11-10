@@ -295,7 +295,7 @@ function PoolCard({ pool, range }: { pool: PoolDetail; range: "hourly" | "daily"
                 {pool.health === "ONLINE" ? "healthy" : pool.health.toLowerCase()}</Badge>}>
             <div class="stats">
                 <div class="stat"><span class="small muted">Full</span><strong>{fill}%</strong>
-                    <span class="small muted">{pool.engine.toUpperCase()}, {plural(pool.shares, "share")}
+                    <span class="small muted">{pool.engine_title}, {plural(pool.shares, "share")}
                         {pool.readonly ? ", read-only" : ""}</span></div>
                 <div class="stat"><span class="small muted">Free</span><strong>{humanSize(pool.free)}</strong>
                     <span class="small muted">of {humanSize(pool.size)}</span></div>

@@ -1,6 +1,6 @@
 # FellowshipNAS project overview
 
-Baseline as of November 9, 2026 · `nas-edition` after `8223f61`
+Baseline as of November 10, 2026 · `nas-edition`, through the commit after `07976d6`
 
 FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS. FellowshipOS builds a bootable ISO and a Proxmox LXC template. The NAS role runs on a full install on a physical machine or a VM. At this baseline, it manages ZFS pools and traditional RAID arrays, serves files over SMB and NFS, and provides a browser desktop for administration.
 
@@ -21,7 +21,7 @@ FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS.
 ## How the running system fits together
 
 - The **Preact and TypeScript desktop** runs in the browser. It calls the Go web front over HTTPS. The front runs as `fnas-web`, serves static assets and routes authenticated requests. The root helper listens on a local socket, uses PAM to authenticate local accounts, maintains sessions and runs allowed `fnas` commands. Management requires `nas-admins`; a regular account can use its own account settings.
-- **`fnas`**, implemented in Python, handles storage, system settings, users and shares for both the desktop and CLI. The storage engine interface dispatches to ZFS (`engines/zfs.py`) or traditional RAID (`engines/mdadm.py`). The CLI validates disks and typed confirmations before destructive operations. Long-running operations report progress separately from the browser window.
+- **`fnas`**, implemented in Python, handles storage, system settings, users and shares for both the desktop and CLI. The storage engine interface dispatches to ZFS (`engines/zfs.py`) or traditional RAID (`engines/mdadm.py`). Each engine also describes how the desktop presents its pools, sent with `fnas pool engines`, so the desktop holds no engine names. The CLI validates disks and typed confirmations before destructive operations. Long-running operations report progress separately from the browser window.
 - **Samba and the Linux NFS server** serve files directly. `fnas` turns share definitions into Samba configuration and `/etc/exports.d/fellowship.exports`. OpenSSH handles shell access under its own `nas-ssh` policy.
 - **systemd, Sanoid, syncoid, SMART and ZFS event monitoring** handle scheduled work and health signals. The hourly NAS check records pool usage and tracks health findings. A separate persistent timer runs the configured backup at 03:00 local time.
 
@@ -56,7 +56,7 @@ The key editor validates public keys and rejects leading authorized-key options 
 
 ## Decisions and roadmap
 
-Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arrived in Phase 5. Phases 6 and 7 added the graphical installer and expanded ZFS management. Phases 8 and 9 made feature states visible and added user, group and share controls. After Phase 9, `7f80680` added the Health overview, browser cache update fix and login text. `3b3c6a6` added pool history and SSH lockdown. `d5b4488` rebuilt Health around gauges, charts and a drive bay map. `b2a8b52` made traditional RAID a working storage engine, and `e8a4450` added its desktop screens and fixed seven bugs a real-disk test in the VM found.
+Cockpit was the Phase 4 prototype. The shipped desktop and privilege split arrived in Phase 5. Phases 6 and 7 added the graphical installer and expanded ZFS management. Phases 8 and 9 made feature states visible and added user, group and share controls. After Phase 9, `7f80680` added the Health overview, browser cache update fix and login text. `3b3c6a6` added pool history and SSH lockdown. `d5b4488` rebuilt Health around gauges, charts and a drive bay map. `b2a8b52` made traditional RAID a working storage engine, and `e8a4450` added its desktop screens and fixed seven bugs a real-disk test in the VM found. `07976d6` sent mdadm's events to alerts and had Health record Debian's monthly array checks. The commit after it moved each engine's differences out of the desktop into the engine, and made ZFS disk errors a Health finding.
 
 | Phase | Planned work |
 | --- | --- |
@@ -83,7 +83,7 @@ For desktop development, run `npm ci` and `npm run build` in `nas/packages/fello
 
 [CI](../.github/workflows/ci.yml) runs the Python and Go suites, `gofmt` and `go vet`, both frontend builds and ShellCheck on every push. The phase gates below still run by hand in a VM.
 
-**Checked for this overview.** The checked-out branch is `nas-edition`, after `8223f61`. All 231 Python unit tests passed on a fresh run, and the desktop type-checks.
+**Checked for this overview.** The checked-out branch is `nas-edition`, through the commit after `07976d6`. All 233 Python unit tests passed on a fresh run, and the desktop type-checks.
 
 **Running development VM.** On the host, [https://localhost:8443/](https://localhost:8443/) forwards to the VM's HTTPS port. On November 9, the signed-in desktop showed both `tank` and `usb`. The `tank` details rendered the space breakdown, per-share table and diagnostics. Both Week and Year showed insufficient history to draw a chart, so chart hover remains unverified. Settings showed SSH and password authentication enabled. The guest's exact revision was not checked. The RAID test later added a third pool, `vault`, a RAID 5 array on four disks.
 

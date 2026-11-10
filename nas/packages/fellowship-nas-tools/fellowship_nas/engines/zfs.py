@@ -27,6 +27,25 @@ SCRUB_DONE = re.compile(r"scrub (?:repaired|canceled).* on (\w{3} \w{3} +\d+ [\d
 CHECK_WORD = "scrub"
 # When Debian's zfsutils-linux cron job scrubs every healthy pool by itself
 CHECK_SCHEDULE = "on the second Sunday of each month"
+# How the desktop presents a pool on this engine, so it never asks which engine
+# it is. {pool} and {group} are filled in where they're shown.
+PRESENTATION = {
+    "snapshots": True,
+    "backup": True,
+    "compresses": True,
+    # Damage is mended as it's found, so there is no separate repair to start
+    "repair": False,
+    "grow": ["group", "expand", "mirror", "spare"],
+    "expand_text": "Add one disk to {group}",
+    "check_button": "Check for damage",
+    "check_name": "check for damage",
+    "check_text": ("Check for damage (a scrub) reads every block on {pool} and checks it against its checksum. "
+                   "Damaged blocks are repaired from another copy or parity where the pool has one, and reported "
+                   f"where it doesn't. It runs by itself {CHECK_SCHEDULE}; shares stay usable while it does."),
+    "errors_label": "Read, write and checksum errors",
+    "replace_text": "ZFS copies its data onto the new disk; the pool stays in use meanwhile.",
+    "filesystems": [],
+}
 MODULE_DIR = "/sys/module/zfs"
 SIZE_ONLY = re.compile(r"^\s*(mirror|raidz) contains devices of different sizes$")
 CONFIG_DATASET = "fellowship-config"
@@ -573,9 +592,17 @@ def created(pool):
     return created_at(pool)
 
 
-def mismatches(pool):
-    """A scrub's errors show in the pool's own state, which Health reads already."""
-    return 0
+def damage(pool):
+    """Errors ZFS counted on a pool's disks while every disk stays in it, as a
+    Health finding's title and message, or None. A pool that lost a disk is
+    reported by its state instead."""
+    count = sum(disk["errors"] for group in pool_status(pool)["groups"] for disk in leaves(group))
+    if not count:
+        return None
+    return (f"Pool {pool}: {count} read, write or checksum errors",
+            "ZFS mended what it could from the pool's other copies, but a disk returned bad data. "
+            f"See which one with sudo fnas pool status {pool}, run a scrub, and replace the disk "
+            "if the errors come back.")
 
 
 def scrub_pool(name):
