@@ -83,6 +83,9 @@ tapping". Both need the same operation, so add a clipboard and a picker.
 
 ## 4. Slice C: search
 
+**Built** (Nov 10), as below. It searches the whole share from its top rather than from
+the folder being shown, which is what "in this share" promises.
+
 The filter box stays for one folder. Searching needs the walk in the child.
 
 - New op `file-search <root> <query> <limit>` running `filepath.WalkDir` as the

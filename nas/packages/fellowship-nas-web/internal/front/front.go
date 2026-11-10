@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/delete", s.withSession(true, s.remove))
 	mux.HandleFunc("POST /api/files/copy", s.withSession(true, s.copyFile))
 	mux.HandleFunc("GET /api/files/tree", s.withSession(false, s.tree))
+	mux.HandleFunc("GET /api/files/search", s.withSession(false, s.search))
 	mux.HandleFunc("/", s.static)
 	return headers(mux)
 }
@@ -561,6 +562,21 @@ func (s *Server) copyFile(w http.ResponseWriter, r *http.Request, session *proto
 		}
 		return ""
 	})
+}
+
+// search answers with what in a share has a name holding the query.
+func (s *Server) search(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	query := r.URL.Query()
+	if query.Get("share") == "" || query.Get("q") == "" {
+		writeError(w, http.StatusBadRequest, "say which share and what to look for")
+		return
+	}
+	response, ok := s.call(w, protocol.Request{Op: protocol.OpFileSearch, Session: token,
+		Share: query.Get("share"), Path: query.Get("path"), Query: query.Get("q")})
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, json.RawMessage(response.Output))
 }
 
 // tree answers with a share's folders, for a picker of where to move something.

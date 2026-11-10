@@ -3,8 +3,8 @@
 // can be done with several at once.
 import { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { FileEntry, FileShare, copyFile, deleteFile, fileShares, fileUrl, folderIn, folderTree, humanSize,
-    makeFolder, renameFile, uploadFile, zipUrl } from "./api";
+import { FileEntry, FileHit, FileShare, copyFile, deleteFile, fileShares, fileUrl, folderIn, folderTree, humanSize,
+    makeFolder, renameFile, searchShare, uploadFile, zipUrl } from "./api";
 import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const IMAGE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"];
@@ -169,6 +169,11 @@ function Browser({ share, view, setView, clip, setClip }: {
     const [anchor, setAnchor] = useState<string | null>(null);
     const [lead, setLead] = useState<string | null>(null);
     const [said, setSaid] = useState("");
+    // A search across the share shows in place of the folder until the person goes back
+    const [found, setFound] = useState<{ query: string; hits: FileHit[]; stopped?: string } | null>(null);
+    const [looking, setLooking] = useState(false);
+    // A file opened from the search: picked once its folder has loaded
+    const [toPick, setToPick] = useState<{ folder: string; name: string } | null>(null);
     const [sort, setSort] = useState<Sort>({ by: "name", down: false });
     const [filter, setFilter] = useState("");
     const [doing, setDoing] = useState<Doing>(null);
@@ -230,6 +235,34 @@ function Browser({ share, view, setView, clip, setClip }: {
         setPath(to);
         forget();
         setSaid("");
+        setFound(null);
+    };
+    useEffect(() => {
+        if (toPick && folder.data && folder.data.path === toPick.folder) {
+            only(toPick.name);
+            setToPick(null);
+        }
+    }, [folder.data, toPick]);
+    const look = async (query: string) => {
+        setLooking(true);
+        setTrouble(null);
+        try {
+            const answer = await searchShare(share.share, query);
+            setFound({ query, hits: answer.hits, stopped: answer.stopped });
+        } catch (error) {
+            setTrouble((error as Error).message);
+        }
+        setLooking(false);
+    };
+    const openHit = (hit: FileHit) => {
+        // The words searched for would only hide the rest of the folder it opens
+        setFilter("");
+        if (hit.dir) {
+            go(hit.path);
+        } else {
+            go(parentOf(hit.path));
+            setToPick({ folder: parentOf(hit.path), name: hit.name });
+        }
     };
     const up = () => go(parentOf(path));
     const back = () => {
@@ -419,7 +452,7 @@ function Browser({ share, view, setView, clip, setClip }: {
             event.preventDefault();
             up();
         } else if (event.key === "Escape") {
-            forget();
+            if (found) setFound(null); else forget();
         }
     };
 
@@ -441,9 +474,16 @@ function Browser({ share, view, setView, clip, setClip }: {
                         </span>
                     ))}
                 </div>
-                <input class="files-filter" type="search" placeholder="Filter this folder"
-                       aria-label="Filter this folder" value={filter}
-                       onInput={event => setFilter(event.currentTarget.value)} />
+                <input class="files-filter" type="search" placeholder="Filter or search…"
+                       aria-label="Filter this folder, or press Enter to search the whole share" value={filter}
+                       title="Typing filters this folder. Press Enter, with at least 3 letters, to search the whole share."
+                       onInput={event => setFilter(event.currentTarget.value)}
+                       onKeyDown={event => {
+                           if (event.key === "Enter" && filter.trim().length >= 3) {
+                               event.preventDefault();
+                               look(filter.trim());
+                           }
+                       }} />
                 {changing && pasting && (
                     <button type="button" class="tool-text" onClick={paste}
                             title={`${pasting.cut ? "Move" : "Copy"} ${pasting.names.join(", ")} here`}>
@@ -523,7 +563,10 @@ function Browser({ share, view, setView, clip, setClip }: {
                                  if (event.dataTransfer?.files.length) send(event.dataTransfer.files);
                              }}>
                             <div class="file-scroll">
-                            {items.length === 0 ? (
+                            {found || looking ? (
+                                <SearchResults share={share.share} found={found} looking={looking}
+                                               onOpen={openHit} onBack={() => setFound(null)} />
+                            ) : items.length === 0 ? (
                                 <p class="files-blank"><Icon of="folder" size={30} />This folder is empty.</p>
                             ) : view === "list" ? (
                                 <table class="file-table">
@@ -638,12 +681,14 @@ function Browser({ share, view, setView, clip, setClip }: {
                             <p class="files-status">
                                 <span>
                                     {busy ? busy
+                                        : looking ? `Searching ${share.share}…`
+                                        : found ? `${plural(found.hits.length, "match", "matches")} in ${share.share}`
                                         : items.length === 0
                                             ? (filter ? `Nothing matches “${filter}”` : "Nothing here")
                                             : pickedItems.length > 1
                                                 ? `${pickedItems.length} of ${plural(items.length, "item")} picked`
                                                 : plural(items.length, "item")}
-                                    {!busy && pickedItems.length <= 1 && folders > 0 && `, ${plural(folders, "folder")}`}
+                                    {!busy && !found && pickedItems.length <= 1 && folders > 0 && `, ${plural(folders, "folder")}`}
                                     {!busy && said && ` · ${said}`}
                                 </span>
                                 <span>{trouble ? trouble : share.level === "read" ? "Read only" : ""}</span>
@@ -664,6 +709,49 @@ function Browser({ share, view, setView, clip, setClip }: {
                 )}
             </Loading>
         </>
+    );
+}
+
+const STOPPED: Record<string, string> = {
+    hits: "Showing the first 500. Search for something longer to narrow it down.",
+    time: "The search stopped after 2 seconds, so there may be more. Search for something longer.",
+    depth: "Folders more than 8 deep weren't searched.",
+};
+
+/** What a search across the share found, each with the folder it is in. */
+function SearchResults({ share, found, looking, onOpen, onBack }: {
+    share: string; found: { query: string; hits: FileHit[]; stopped?: string } | null; looking: boolean;
+    onOpen: (hit: FileHit) => void; onBack: () => void;
+}) {
+    if (looking || !found) {
+        return <p class="files-blank">Searching {share}…</p>;
+    }
+    return (
+        <div class="search-results">
+            <div class="search-head">
+                <button type="button" class="tool-text" onClick={onBack}>← Back to the folder</button>
+                <span>{plural(found.hits.length, "match", "matches")} for “{found.query}” in {share}</span>
+            </div>
+            {found.stopped && <p class="muted small search-note">{STOPPED[found.stopped]}</p>}
+            {found.hits.length === 0 ? (
+                <p class="files-blank">Nothing in {share} has “{found.query}” in its name.</p>
+            ) : (
+                <table class="file-table">
+                    <thead><tr><th>Name</th><th>In</th><th class="file-size">Size</th><th class="file-when">Changed</th></tr></thead>
+                    <tbody>
+                        {found.hits.map(hit => (
+                            <tr key={hit.path} class={`file-row ${hit.dir ? "is-folder" : ""}`}
+                                onClick={() => onOpen(hit)} title={`Open ${hit.path}`}>
+                                <td class="file-name"><Icon of={kindOf(hit)} /><span>{hit.name}</span></td>
+                                <td class="muted small">{parentOf(hit.path) || share}</td>
+                                <td class="file-size">{hit.dir ? "" : humanSize(hit.size)}</td>
+                                <td class="file-when">{new Date(hit.modified).toLocaleDateString()}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+        </div>
     );
 }
 

@@ -32,6 +32,7 @@ const (
 	OpFileZip    = "file-zip"
 	OpFileCopy   = "file-copy"
 	OpFileTree   = "file-tree"
+	OpFileSearch = "file-search"
 	OpSessions   = "sessions"
 	OpEndSession = "end-session"
 )
@@ -73,6 +74,8 @@ type Request struct {
 	Recursive bool `json:"recursive,omitempty"`
 	// Several things in the folder Path names, by name alone, as a zip downloads them
 	Names []string `json:"names,omitempty"`
+	// What a search looks for in names
+	Query string `json:"query,omitempty"`
 }
 
 type Session struct {

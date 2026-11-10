@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // share makes a share's folder holding a file, a folder, a link out to a secret
@@ -278,5 +279,53 @@ func TestNewFoldersKeepTheSharesGroupBit(t *testing.T) {
 		if err != nil || info.Mode()&os.ModeSetgid == 0 || info.Mode().Perm() != 0o775 {
 			t.Errorf("%s ended up %v, %v", folder, info.Mode(), err)
 		}
+	}
+}
+
+func TestASearchFindsNamesAndNeverLeavesTheShare(t *testing.T) {
+	root, dir := share(t)
+	for _, made := range []error{
+		os.MkdirAll(filepath.Join(dir, "photos", "2025", "Cats"), 0o755),
+		os.WriteFile(filepath.Join(dir, "photos", "2025", "Cats", "big cat.png"), []byte("meow"), 0o644),
+		os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644),
+	} {
+		if made != nil {
+			t.Fatal(made)
+		}
+	}
+	found := search(root, "", "CAT", time.Now())
+	var paths []string
+	for _, hit := range found.Hits {
+		paths = append(paths, hit.Path)
+	}
+	// Any case; folders and files; through photos but not through the pictures link,
+	// and never the secret beside the share
+	if strings.Join(paths, " ") != "photos/cat.png photos/2025/Cats photos/2025/Cats/big cat.png" || found.Stopped != "" {
+		t.Errorf("a search for CAT found %v, stopped %q", paths, found.Stopped)
+	}
+	if found.Hits[2].Size != 4 || found.Hits[1].Dir != true {
+		t.Errorf("the hits were %+v", found.Hits)
+	}
+	// A query is only compared with names, so a path in it finds nothing
+	for _, query := range []string{"../secret", "photos/cat", "secret"} {
+		if hits := search(root, "", query, time.Now()).Hits; len(hits) != 0 {
+			t.Errorf("%q found %+v", query, hits)
+		}
+	}
+}
+
+func TestASearchStopsInTimeAndSaysWhy(t *testing.T) {
+	root, _ := share(t)
+	kept := MaxHits
+	MaxHits = 1
+	found := search(root, "", "c", time.Now())
+	MaxHits = kept
+	if len(found.Hits) != 1 || found.Stopped != "hits" {
+		t.Errorf("a capped search answered %+v", found)
+	}
+	// One that has run out of time still answers, with what it had
+	found = search(root, "", "cat", time.Now().Add(-time.Hour))
+	if found.Stopped != "time" || found.Hits == nil {
+		t.Errorf("a late search answered %+v", found)
 	}
 }

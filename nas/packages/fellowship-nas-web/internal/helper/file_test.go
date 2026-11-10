@@ -408,3 +408,29 @@ func TestAReadOnlyShareGivesATreeButNoCopy(t *testing.T) {
 		t.Errorf("the tree answered %q %q %q", response.Code, response.Error, response.Output)
 	}
 }
+
+func TestASearchNeedsAQueryAndAShareThePersonHas(t *testing.T) {
+	f, h, _ := newFileFake(t)
+	token := login(t, h, "kim").Token
+	for _, c := range []struct{ share, query, says string }{
+		{"media", "a", "characters"},
+		{"media", "   ", "characters"},
+		{"private", "holiday", "isn't a share you can use"},
+	} {
+		response := h.Handle(protocol.Request{Op: protocol.OpFileSearch, Session: token, Share: c.share, Query: c.query})
+		if response.Code == "" || !strings.Contains(response.Error, c.says) {
+			t.Errorf("searching %s for %q answered %q %q", c.share, c.query, response.Code, response.Error)
+		}
+	}
+	if len(f.childed) != 0 {
+		t.Errorf("a child was run for a refused search: %v", f.childed)
+	}
+	f.body = `{"hits":[{"path":"photos/holiday.png","name":"holiday.png","dir":false,"size":5}]}` + "\n"
+	response := h.Handle(protocol.Request{Op: protocol.OpFileSearch, Session: token, Share: "media", Query: " holiday "})
+	if response.Code != "" || !strings.Contains(response.Output, "photos/holiday.png") {
+		t.Errorf("the search answered %q %q %q", response.Code, response.Error, response.Output)
+	}
+	if len(f.childed) != 1 || f.childed[0] != "search  holiday" {
+		t.Errorf("the child was asked %v", f.childed)
+	}
+}

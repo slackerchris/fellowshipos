@@ -170,6 +170,11 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 			return h.fileCopy(found.user, request)
 		}
 		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFileSearch:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.fileSearch(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	case protocol.OpFileTree:
 		if found := h.find(request.Session, request.Touch); found != nil {
 			return h.fileTree(found.user, request)

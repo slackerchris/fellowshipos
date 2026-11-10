@@ -693,6 +693,9 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .move-folder:hover:not(:disabled) { background: var(--raised); }
 .move-folder.current { background: var(--selection, var(--raised)); outline: 1px solid var(--gold); }
 .move-folder:disabled { opacity: 0.45; cursor: not-allowed; }
+/* A search across the share, in place of the folder */
+.search-head { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.search-note { padding: 6px 10px; }
 .file-row td {
     padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     vertical-align: middle; white-space: nowrap;

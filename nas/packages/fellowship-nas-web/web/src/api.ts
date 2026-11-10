@@ -660,6 +660,16 @@ export const renameFile = (share: string, path: string, to: string) =>
 export const copyFile = (share: string, path: string, to: string) =>
     request<{ done: boolean }>("POST", "/api/files/copy", { share, path, to });
 
+/** One thing a search found, by its path in the share. */
+export interface FileHit extends FileEntry {
+    path: string;
+}
+
+/** What in a share has a name holding the query. stopped says why it didn't look everywhere. */
+export const searchShare = (share: string, query: string) =>
+    request<{ hits: FileHit[]; stopped?: "time" | "hits" | "depth" }>(
+        "GET", `/api/files/search?share=${encodeURIComponent(share)}&path=&q=${encodeURIComponent(query)}`);
+
 /** The folders in a share, for picking where to move something. cut says there were more than it lists. */
 export const folderTree = (share: string) =>
     request<{ folders: string[]; cut: boolean }>("GET", `/api/files/tree?share=${encodeURIComponent(share)}&path=`);

@@ -14,6 +14,11 @@ bump.
 
 ### Added
 
+- Files, slice C: type three or more letters in the filter box and press Enter to
+  search the whole share by name, in any case. Results show in place of the folder with
+  the folder each is in, and opening one goes there and picks it. The search walks as
+  the person, never through a link, and stops at 500 matches, eight folders deep or two
+  seconds, saying so, so it can't tie up the disks.
 - Files, slice B: **Copy** and **Cut** (row menu, the pane for several, Ctrl-C and
   Ctrl-X) set things aside, and **Paste** in another folder of the same share copies or
   moves them there (Ctrl-V). A copy of a file or a whole folder is made under a

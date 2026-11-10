@@ -432,6 +432,55 @@ func (h *Helper) fileCopy(user string, request protocol.Request) protocol.Respon
 	return protocol.Response{}
 }
 
+// MinQuery and MaxQuery bound what a search may look for: too short matches most
+// of a share, and a name is never longer than the longest
+const (
+	MinQuery = 2
+	MaxQuery = 255
+)
+
+// fileSearch answers with what in a folder, and the folders beneath it, has a name
+// holding the query. The child walks as the person and stops itself early, so a
+// search can't hold the disks.
+func (h *Helper) fileSearch(user string, request protocol.Request) protocol.Response {
+	query := strings.TrimSpace(request.Query)
+	if len([]rune(query)) < MinQuery || len(query) > MaxQuery || strings.ContainsRune(query, 0) {
+		return failure(protocol.CodeBadRequest, fmt.Sprintf("search for %d to %d characters", MinQuery, MaxQuery))
+	}
+	root, err := h.fileRoots(user, request.Share)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	folder, err := files.Resolve([]files.Root{root}, request.Share, request.Path)
+	if err != nil {
+		return failure(protocol.CodeForbidden, err.Error())
+	}
+	account, err := h.config.Lookup(user)
+	if err != nil {
+		return failure(protocol.CodeFailed, "your account can't be read right now")
+	}
+	out, err := h.child(account, nil, "search", root, folder, 0, 0, query)
+	if err != nil {
+		return failure(protocol.CodeFailed, "the search can't run right now")
+	}
+	defer out.Close()
+	var answer struct {
+		Error string `json:"error"`
+		filechild.Found
+	}
+	if err := json.NewDecoder(io.LimitReader(out, 8<<20)).Decode(&answer); err != nil {
+		return failure(protocol.CodeFailed, "the search can't run right now")
+	}
+	if answer.Error != "" {
+		return failure(protocol.CodeFailed, answer.Error)
+	}
+	text, err := json.Marshal(answer.Found)
+	if err != nil {
+		return failure(protocol.CodeFailed, "the search can't run right now")
+	}
+	return protocol.Response{Output: string(text)}
+}
+
 // fileTree answers with the folders beneath one, for picking where something goes.
 // Reading is enough: the move itself checks the share can be changed.
 func (h *Helper) fileTree(user string, request protocol.Request) protocol.Response {

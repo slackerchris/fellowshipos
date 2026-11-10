@@ -168,6 +168,14 @@ func Run(args []string) int {
 			return 1
 		}
 		return 0
+	case "search":
+		if len(rest) < 1 {
+			return say(out, "a search needs something to look for")
+		}
+		if err := out.Encode(search(root, inside, rest[0], time.Now())); err != nil {
+			return 1
+		}
+		return 0
 	case "zip":
 		// The rest are names inside the folder, each put in the zip with what it holds
 		items, total, err := gather(root, inside, rest)
@@ -568,6 +576,90 @@ func tree(root int, from string) (Tree, error) {
 		return nil
 	}
 	return found, walk(from, 0)
+}
+
+// Found is the answer to "search": what matched, by path in the share, and
+// whether it stopped before looking everywhere, and why.
+type Found struct {
+	Hits    []Hit  `json:"hits"`
+	Stopped string `json:"stopped,omitempty"`
+}
+
+// Hit is one thing whose name matched, with what the desktop lists about it.
+type Hit struct {
+	Path string `json:"path"`
+	Entry
+}
+
+// What one search may take, so it can't hold the disks: this many matches, this
+// deep, and this long
+var (
+	MaxHits     = 500
+	MaxDepth    = 8
+	SearchLimit = 2 * time.Second
+)
+
+// search walks beneath a folder looking for names that hold the query, without
+// regard to case. The query is only ever compared with names, so a slash or ".."
+// in it is text. Links are never followed. It answers what it found even when it
+// stops early, and says why it stopped.
+func search(root int, from, query string, started time.Time) Found {
+	found := Found{Hits: []Hit{}}
+	wanted := strings.ToLower(query)
+	var walk func(inside string, depth int) bool
+	walk = func(inside string, depth int) bool {
+		fd, err := beneath(root, inside, syscall.O_RDONLY|syscall.O_DIRECTORY)
+		if err != nil {
+			return true
+		}
+		// Kept open while each entry's details are read, since they are read through it
+		dir := os.NewFile(uintptr(fd), through(fd))
+		entries, _ := dir.ReadDir(-1)
+		sort.Slice(entries, func(a, b int) bool { return entries[a].Name() < entries[b].Name() })
+		var folders []string
+		for _, entry := range entries {
+			if time.Since(started) > SearchLimit {
+				dir.Close()
+				found.Stopped = "time"
+				return false
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, workingPrefix) || entry.Type()&fs.ModeSymlink != 0 {
+				continue
+			}
+			child := path.Join(inside, name)
+			if strings.Contains(strings.ToLower(name), wanted) {
+				hit := Hit{Path: child, Entry: Entry{Name: name, Dir: entry.IsDir()}}
+				if info, err := entry.Info(); err == nil {
+					hit.Size, hit.Modified = info.Size(), info.ModTime()
+				}
+				found.Hits = append(found.Hits, hit)
+				if len(found.Hits) >= MaxHits {
+					dir.Close()
+					found.Stopped = "hits"
+					return false
+				}
+			}
+			if entry.IsDir() {
+				folders = append(folders, child)
+			}
+		}
+		dir.Close()
+		if depth+1 >= MaxDepth {
+			if len(folders) > 0 {
+				found.Stopped = "depth"
+			}
+			return true
+		}
+		for _, folder := range folders {
+			if !walk(folder, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	walk(from, 0)
+	return found
 }
 
 // MaxZip is the most a zip may hold, before compression. It is counted before a
