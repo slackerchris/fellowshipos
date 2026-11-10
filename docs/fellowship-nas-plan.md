@@ -262,13 +262,13 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **Replacing:** a failed disk is marked failed, removed and replaced through the same guided flow as ZFS. The rebuild runs as a job, and a hot spare takes over by itself.
 - **Importing:** an array from another Linux machine is assembled read-only first, then mounted.
 
-**As built after Phase 10's engine work**
+**As built in Phase 10 so far**
 
 - **One array per pool.** An mdadm pool is a single array of every disk it has, so the
   layout list offers one group rather than ZFS's several: RAID 5 up to six disks, RAID 6
   above that, and RAID 10 with the standard two-copy layout. A mirror of two disks with
   the rest waiting as spares is offered when the disks outnumber what the layout needs.
-- **Filesystem:** XFS is preselected in the CLI and ext4 sits beside it. The choice is
+- **Filesystem:** XFS is preselected in the CLI and the desktop, and ext4 sits beside it. The choice is
   recorded by the mount itself, so growing knows which tool to use.
 - **Creating:** the array is made with an internal write-intent bitmap, recorded in
   `/etc/mdadm/mdadm.conf` and the initramfs, and mounted by filesystem UUID from
@@ -286,10 +286,20 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 - **No snapshots:** a share on an array keeps no history, so Previous Versions has
   nothing to offer, and the backup engine still covers ZFS pools only. Both stay visible
   in the desktop with that reason rather than disappearing.
-- **Not yet verified:** the whole feature is tested only against a fake, with no array
-  on a real disk. Creating, growing, replacing, checking and importing are all written
-  from mdadm's documented behaviour. The four-disk and sixteen-disk gate below is what
-  turns that into a proven feature.
+- **Desktop:** Create pool names each layout in full ("Two copies of everything, striped
+  across 4 disks", with "RAID 10 · Two copies, 4 disks" in small print) and asks for the
+  format, XFS preselected. An array's card has a Traditional RAID label, Check array,
+  Repair when a check found mismatches, and only the ways an array grows: one more disk,
+  or spares. Pool details reads "Traditional RAID, formatted XFS" and shows that XFS
+  doesn't compress rather than a ratio.
+- **Shares and settings:** shares are plain folders in `/mnt/NAME/shares`, and the saved
+  configuration is `/mnt/NAME/fellowship-config`, the same names ZFS uses for datasets.
+- **Verified on real disks** (VM, four disks, all from the desktop): a RAID 5 array on
+  XFS was created, shared over SMB, checked, had a disk failed and replaced, grew by a
+  fifth disk, and came back after two reboots, with a test file's checksum intact. That
+  run found seven bugs, all fixed and covered by tests. RAID 6, sixteen disks and
+  importing an array made on another machine are still only written from mdadm's
+  documented behaviour.
 
 **Unraid-style (mergerfs + SnapRAID)** (absorbs the old storage node)
 
@@ -756,10 +766,8 @@ Web and access:
 | Features decided without Chris | Rework and lost trust, as in revisions 2 and 3 | Rule 7: his reference list is the scope; anything cut is put to him first |
 | Look drifts too close to Synology | Legal trouble if sold | Own icons, palette and layout from the start |
 
-**Next step:** the desktop's screens for arrays. Create pool needs the filesystem choice
-with XFS preselected and "RAID 10 · Two copies" named in full; Snapshots, Previous
-Versions and Backup stay visible but disabled, saying "This pool doesn't support
-snapshots" and "The current backup engine only supports ZFS pools"; and the pool view
-needs a Check array button beside ZFS's Scrub. Then the four-disk and sixteen-disk gate.
+**Next step:** finish Phase 10's gate: RAID 6, sixteen disks and importing an array made
+on another machine; wire `mdadm --monitor` into notifications; and have Health learn of the
+checks Debian's own `mdcheck` timer runs. Then Phase 11, Unraid-style.
 Phase 1 still needs the read-only import of a real TrueNAS pool, and Phase 2 still needs
 a real Windows client: mount a share, then check Previous Versions.

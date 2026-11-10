@@ -4,51 +4,53 @@ These come from testing the desktop in a VM. They go into the next plan revision
 
 **The rule for every screen:** show every feature and its state, even when it can't be used yet, with the reason. Disable rather than hide. Say plainly what isn't built.
 
-Status: **Agreed** (Chris asked for it), **Open** (needs Chris's answer), **Found** (found in the audit, not raised by Chris yet).
+Status: **Agreed** (Chris asked for it), **Open** (needs Chris's answer), **Found** (found in the audit, not raised by Chris yet), **Built** (done, with the commit or phase).
+
+All the Open questions have since been answered; the plan's Open questions section records them.
 
 ## Storage
 
-1. **Agreed:** three storage engines, chosen per pool:
+1. **Agreed:** three storage engines, chosen per pool. ZFS and traditional RAID are **built** (Phase 10); Unraid-style is next:
    - ZFS
    - Unraid-style: each disk formatted on its own, with parity disks (mergerfs + SnapRAID)
    - Traditional RAID: build RAID 1, 5, 6 or 10 with mdadm, then format it
-2. **Agreed:** Create pool asks for the engine first, then shows only that engine's options. Engines that aren't built are shown as "Not built yet".
-3. **Agreed:** layout labels in plain words: what you get, how much space, and how many disks can fail. The technical name goes in small print.
-4. **Agreed:** drop layouts nobody would pick, such as a 3-disk mirror.
+2. **Agreed, built** in Phase 8: Create pool asks for the engine first, then shows only that engine's options. Engines that aren't built are shown as "Not built yet".
+3. **Agreed, built** in Phase 8: layout labels in plain words: what you get, how much space, and how many disks can fail. The technical name goes in small print.
+4. **Agreed, built** in Phase 8: drop layouts nobody would pick, such as a 3-disk mirror.
 5. **Agreed:** Btrfs stays as a fourth engine (mirrors only: `raid1`, `raid1c3`, `raid10`).
-6. **Agreed:** Unraid-style disks are XFS, as on Unraid. ext4 caps a single file at 16 TiB, and SnapRAID keeps each parity level in one file, so ext4 can't hold full parity for disks over 16 TiB. **Open:** traditional RAID offers ext4 and XFS, with XFS recommended.
+6. **Agreed:** Unraid-style disks are XFS, as on Unraid. ext4 caps a single file at 16 TiB, and SnapRAID keeps each parity level in one file, so ext4 can't hold full parity for disks over 16 TiB. **Agreed:** traditional RAID offers ext4 and XFS, with XFS recommended. **Built** in Phase 10.
 
 ## Sharing
 
-7. **Agreed:** an always-visible "Ways to share" section, with each protocol's state, what it's for, how to connect, and its own settings.
-8. **Agreed:** add SFTP, FTP and WebDAV now. DLNA and iSCSI come later. **Open:** plain FTP sends passwords unencrypted; offer FTP with TLS (FTPS) by default and plain FTP only as an opt-in?
-9. **Found:** no per-user permissions on shares. A share is either "shared" (everyone writes as one account) or "matched" (one owner). There's no "Alice can read, Bob can write".
+7. **Agreed, built** in Phase 8: an always-visible "Ways to share" section, with each protocol's state, what it's for, how to connect, and its own settings.
+8. **Agreed:** add SFTP, FTP and WebDAV now. DLNA and iSCSI come later. FTP uses TLS (FTPS) by default, and plain FTP, which sends passwords unencrypted, is an opt-in.
+9. **Built** in Phase 9, **found** in the audit: no per-user permissions on shares. A share is either "shared" (everyone writes as one account) or "matched" (one owner). There's no "Alice can read, Bob can write".
 
 ## Users
 
-10. **Found:** no Users app. Accounts can't be created, removed or grouped from the desktop; only an SMB password can be set for an account that already exists.
+10. **Built** in Phase 9, **found** in the audit: no Users app. Accounts can't be created, removed or grouped from the desktop; only an SMB password can be set for an account that already exists.
 
 ## Health
 
-11. **Agreed:** every check on its own line, with its result (passed, warning, failed, or doesn't apply yet and why) and when it last ran. No more "Everything looks fine" when there is nothing to check.
-12. **Agreed:** add services (SMB, NFS and each new protocol; the web server; the scheduler; ZFS's event daemon).
-13. **Agreed:** add the system (system disk, memory, load, temperatures, uptime, updates, reboot needed).
-14. **Agreed:** per pool: state, space, last scrub, last snapshot, last backup.
-15. **Agreed:** show whether alerts are set up and when the last one was sent.
+11. **Agreed, built** in Phase 8: every check on its own line, with its result (passed, warning, failed, or doesn't apply yet and why) and when it last ran. No more "Everything looks fine" when there is nothing to check.
+12. **Agreed, built** in Phase 8: add services (SMB, NFS and each new protocol; the web server; the scheduler; ZFS's event daemon).
+13. **Agreed, built** in Phase 8: add the system (system disk, memory, load, temperatures, uptime, updates, reboot needed).
+14. **Agreed, built** in Phase 8: per pool: state, space, last scrub, last snapshot, last backup.
+15. **Agreed, built** in Phase 8: show whether alerts are set up and when the last one was sent.
 
 ## Alerts
 
 16. **Agreed:** send through Apprise (100+ services: Discord, Telegram, Pushover, Gotify, Home Assistant, Slack, Matrix, webhooks, email, ntfy and more). Existing email and ntfy settings carry over.
 17. **Agreed:** as many channels as wanted, each with a test button, routed by severity.
 18. **Agreed:** history showing what was sent, where, and whether it got through; alerts also appear in the desktop's notification centre.
-19. **Agreed:** by default, alerts go to the desktop's notification centre, with no outside service needed. Email, ntfy and the Apprise services are extra channels on top; which ones to offer is sorted out later.
+19. **Agreed, built** in Phase 8: by default, alerts go to the desktop's notification centre, with no outside service needed. Email, ntfy and the Apprise services are extra channels on top; which ones to offer is sorted out later.
 
 ## Setup and Settings
 
-20. **Agreed:** Setup opens by itself on an admin's first login, with "Skip for now". Afterwards it is gone from the desktop and launcher.
-21. **Agreed:** each setup step lives in its own app. Settings gets "Run setup again".
-22. **Agreed:** after a reinstall, Setup first offers to restore settings found on a pool.
-23. **Found:** the nightly backup can only be set up in Setup and the Shares page. Removing Setup must not take it away: it needs a home (a Backup section or app) showing every job, its last run and its next run.
+20. **Agreed, built** in Phase 8: Setup opens by itself on an admin's first login, with "Skip for now". Afterwards it is gone from the desktop and launcher.
+21. **Agreed, built** in Phase 8: each setup step lives in its own app. Settings gets "Run setup again".
+22. **Agreed, built** in Phase 8: after a reinstall, Setup first offers to restore settings found on a pool.
+23. **Built** in Phase 8 (the Snapshots and backup app), **found** in the audit: the nightly backup can only be set up in Setup and the Shares page. Removing Setup must not take it away: it needs a home (a Backup section or app) showing every job, its last run and its next run.
 24. **Found:** Settings has no network settings (IP address, static or DHCP, DNS, gateway) and no updates screen.
 
 ## Snapshots and files

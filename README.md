@@ -1,6 +1,6 @@
 # FellowshipOS
 
-FellowshipOS builds a Debian Trixie live ISO and a Proxmox LXC template for amd64 homelab systems. **FellowshipNAS** is its full-install NAS role. It manages disks, ZFS pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances.
+FellowshipOS builds a Debian Trixie live ISO and a Proxmox LXC template for amd64 homelab systems. **FellowshipNAS** is its full-install NAS role. It manages disks, ZFS pools and traditional RAID arrays, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances.
 
 [Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
@@ -33,10 +33,10 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 
 | App | What you can do |
 | --- | --- |
-| **Storage** | Create, scan, import, scrub, and grow ZFS pools. Replace or identify disks and follow background jobs. **Details and history** shows space use, compression, a Week or Year chart, and a fill estimate after at least three days of history if usage is rising. |
+| **Storage** | Create, scan, import, check, and grow ZFS pools and RAID arrays, choosing XFS or ext4 for an array. Repair an array's mismatched blocks after a check. Replace or identify disks and follow background jobs. **Details and history** shows space use, compression, a Week or Year chart, and a fill estimate after at least three days of history if usage is rising. |
 | **Users** | Manage local accounts, groups, administrators, and SSH eligibility. Password changes through FellowshipNAS set the Linux and Samba passwords together. |
 | **Shares** | Share over SMB, NFS, or both. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
-| **Snapshots & backup** | Set snapshot retention and schedule a backup to a second ZFS pool. Restore a missing share from that backup. |
+| **Snapshots & backup** | Set snapshot retention and schedule a backup to a second ZFS pool. Restore a missing share from that backup. Array shares show these controls disabled, with the reason. |
 | **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
 | **Settings** | Manage your password, sessions, certificates, system disk space, SSH, and power controls. |
 
@@ -51,6 +51,8 @@ sudo fnas disk list
 sudo fnas pool scan
 sudo fnas pool layouts SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5
 sudo fnas pool create tank raidz2 SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5 --width 4 --spares 1 --confirm "erase 5 disks"
+sudo fnas pool create vault raid6 SERIAL1 SERIAL2 SERIAL3 SERIAL4 --engine mdadm --filesystem xfs --confirm "erase 4 disks"
+sudo fnas pool scrub vault
 sudo fnas job list
 ```
 
@@ -82,7 +84,7 @@ The network-facing `fellowship-nas-web` process runs as an unprivileged account.
 
 ### Snapshots, backup, and recovery
 
-ZFS shares default to 24 hourly, 30 daily, and 6 monthly snapshots. With SMB Previous Versions enabled, Windows can expose those snapshots. The single scheduled backup job copies a source pool's shares to a second ZFS pool at 03:00 local time. A share restore leaves an existing share in place.
+ZFS shares default to 24 hourly, 30 daily, and 6 monthly snapshots. Traditional RAID arrays have no snapshots, and the backup job covers ZFS pools only. With SMB Previous Versions enabled, Windows can expose those snapshots. The single scheduled backup job copies a source pool's shares to a second ZFS pool at 03:00 local time. A share restore leaves an existing share in place.
 
 ```bash
 sudo fnas snapshot list media
