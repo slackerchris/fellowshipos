@@ -15,7 +15,10 @@ const PARITY_NAMES = ["", "Striped with parity", "Striped with double parity", "
 
 /** What a layout gives, in plain words: "Striped with double parity, in 2 groups of 8 disks" */
 export function describeLayout(option: LayoutOption) {
-    const text = option.layout === "single" ? "One disk, no protection"
+    const text = option.layout === "parity1" || option.layout === "parity2"
+            ? `Whole files on ${plural(option.width, "data disk")}, each readable on its own, plus `
+              + plural(option.survives, "parity disk")
+        : option.layout === "single" ? "One disk, no protection"
         : option.layout === "raid10" ? `Two copies of everything, striped across ${option.width} disks`
         : option.layout === "raid5" || option.layout === "raid6"
             ? `${PARITY_NAMES[option.layout === "raid5" ? 1 : 2]} across ${option.width} disks`
@@ -31,6 +34,7 @@ export function technicalLayout(option: LayoutOption) {
     const name = LAYOUT_NAMES[option.layout];
     const groups = option.layout === "single" ? name
         : option.layout === "raid10" ? `${name} · Two copies, ${option.width} disks`
+        : option.layout === "parity1" || option.layout === "parity2" ? `mergerfs + ${name} · ${plural(option.width, "data disk")}`
         : `${option.groups > 1 ? `${option.groups} × ` : ""}${name} of ${option.width} disks`;
     return groups + (option.spares ? `, ${plural(option.spares, "hot spare")}` : "");
 }
@@ -40,7 +44,10 @@ export function survival(option: LayoutOption) {
         return "Losing the disk loses the pool";
     }
     const disks = option.survives === 1 ? "1 disk" : `${option.survives} disks`;
-    const where = option.layout === "raid10" ? "Any 1 disk can fail, and more if they hold different copies"
+    const where = option.layout === "parity1" || option.layout === "parity2"
+            ? `Any ${disks} can fail, though files changed since the last nightly sync can't be rebuilt; with more `
+              + "lost, only those disks' files go"
+        : option.layout === "raid10" ? "Any 1 disk can fail, and more if they hold different copies"
         : option.groups === 1 ? `Any ${disks} can fail`
         : `${disks[0].toUpperCase()}${disks.slice(1)} in each ${option.layout === "mirror" ? "pair" : "group"} can fail`;
     return where + (option.spares ? ", and a spare takes over by itself" : "");
@@ -209,7 +216,9 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                                             <span class="small">{humanSize(choice.usable)} usable · {survival(choice)}</span><br />
                                             <span class="small muted">{technicalLayout(choice)}</span>
                                             {choice.unused > 0 && <><br /><span class="small muted">
-                                                The disks differ in size, so {humanSize(choice.unused)} goes unused.</span></>}
+                                                {choice.layout === "parity1" || choice.layout === "parity2"
+                                                    ? `Parity needs only as much room as the largest data disk, so ${humanSize(choice.unused)} of the parity disks goes unused.`
+                                                    : `The disks differ in size, so ${humanSize(choice.unused)} goes unused.`}</span></>}
                                         </span>
                                     </label>
                                 ))}

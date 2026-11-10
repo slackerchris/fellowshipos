@@ -4,4 +4,4 @@ After=zfs.target local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/fnas pool scrub-all %i
+ExecStart=/usr/sbin/fnas pool scrub-all %i --scheduled

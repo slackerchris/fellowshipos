@@ -36,6 +36,7 @@ PRESENTATION = {
     "repair": True,
     # One group: it takes one more disk at a time, or spares
     "grow": ["expand", "spare"],
+    "grow_text": {},
     "expand_text": ("Add one disk to the array. Its data is spread onto the new disk (a reshape, which can "
                     "take many hours), and the space appears when that finishes"),
     "check_button": "Check array",
@@ -44,6 +45,11 @@ PRESENTATION = {
                    "It changes nothing: blocks that don't match are counted, and a repair, which you start "
                    "yourself, rewrites them. Shares stay usable while it runs."),
     "errors_label": "Blocks that didn't match at the last check",
+    "repair_notice": ("The last check found {count} blocks that don't match across {pool}. A repair rewrites "
+                      "them from parity or the other copy, but it can't tell which copy was right, so restore "
+                      "anything important from a backup first if you can."),
+    "repair_text": ("The repair rewrites every block that doesn't match, from parity or the other copy. It can't "
+                    "tell which copy was right, so it may keep the wrong one."),
     "replace_text": ("The array rebuilds that disk's data onto the new one from the other disks; it stays in "
                      "use meanwhile."),
     "filesystems": [
@@ -660,7 +666,12 @@ def follow(job):
     return None, 1.0
 
 
-def scrub_pool(name):
+def problems(name, now):
+    """Anything else Health should say about this array; its state and damage cover it."""
+    return []
+
+
+def scrub_pool(name, scheduled=False):
     """Check every block against the array's parity, changing nothing."""
     return start_sync(name, "check", "Checking {name}")
 

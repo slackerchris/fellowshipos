@@ -277,6 +277,8 @@ function Ssh() {
 
 const DAYS = { mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday" };
 const WEEKS = ["first", "second", "third", "fourth"];
+const EVERY = { weekly: "Every week", monthly: "Every month", quarterly: "Every three months (January, April, July, October)" };
+const hourText = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
 
 /** Change when an engine fnas schedules checks its pools: how often, which day of the month, and the hour. */
 function ScheduleForm({ row, done }: { row: CheckSchedule; done: () => void }) {
@@ -297,15 +299,14 @@ function ScheduleForm({ row, done }: { row: CheckSchedule; done: () => void }) {
             <div class="grid-2">
                 <Field label="How often">
                     <select value={every} onChange={event => setEvery(event.currentTarget.value as typeof every)}>
-                        <option value="monthly">Every month</option>
-                        <option value="quarterly">Every three months (January, April, July, October)</option>
+                        {(row.choices || []).map(choice => <option key={choice} value={choice}>{EVERY[choice]}</option>)}
                     </select>
                 </Field>
-                <Field label="Which week">
+                {every !== "weekly" && <Field label="Which week">
                     <select value={week} onChange={event => setWeek(Number(event.currentTarget.value))}>
                         {WEEKS.map((name, index) => <option key={name} value={index + 1}>The {name}</option>)}
                     </select>
-                </Field>
+                </Field>}
                 <Field label="Day">
                     <select value={day} onChange={event => setDay(event.currentTarget.value as typeof day)}>
                         {Object.entries(DAYS).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
@@ -313,7 +314,7 @@ function ScheduleForm({ row, done }: { row: CheckSchedule; done: () => void }) {
                 </Field>
                 <Field label="Starting at" hint="A check takes hours on large pools; shares stay usable meanwhile">
                     <select value={hour} onChange={event => setHour(Number(event.currentTarget.value))}>
-                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourText(h)}</option>)}
                     </select>
                 </Field>
             </div>
@@ -364,6 +365,41 @@ function ScheduleRow({ row, reload }: { row: CheckSchedule; reload: () => void }
                             onClick={() => action.run(async () => jobStarted(await fnas(["pool", "scrub-all", row.engine]),
                                                                              "in Storage"))}>Check now</Button>
                 </div>}
+            {row.sync !== undefined && <ParitySync row={row} reload={reload} />}
+            <Result outcome={action.outcome} />
+        </div>
+    );
+}
+
+/** An engine's nightly parity sync and disk spin-down, which sit beside its checks. */
+function ParitySync({ row, reload }: { row: CheckSchedule; reload: () => void }) {
+    const action = useAction(reload);
+    const set = (...args: string[]) => action.run(() => fnas(["pool", "schedule", row.engine, ...args]));
+    return (
+        <div class="stack">
+            <label class="check">
+                <input type="checkbox" checked={row.sync} disabled={action.busy}
+                       onChange={event => set("--sync", onOff(event.currentTarget.checked))} />
+                <span>Sync parity every night{row.sync && row.sync_next ? ` (next: ${when(row.sync_next)})` : ""}
+                    <span class="muted small"> Files changed since the last sync aren't protected yet. With the sync
+                        off, parity is only brought up to date when you sync from Storage.</span></span>
+            </label>
+            <div class="grid-2">
+                <Field label="Sync starts at" hint="Before the 03:00 backup, so the backup copies synced files">
+                    <select value={row.sync_hour} disabled={!row.sync || action.busy}
+                            onChange={event => set("--sync-hour", event.currentTarget.value)}>
+                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourText(h)}</option>)}
+                    </select>
+                </Field>
+                <Field label="Spin down idle disks" hint="Saves power and noise; the first read after waits a few seconds">
+                    <select value={row.spin_down} disabled={action.busy}
+                            onChange={event => set("--spin-down", event.currentTarget.value)}>
+                        {(row.spin_down_choices || []).map(minutes => (
+                            <option key={minutes} value={minutes}>{minutes ? `After ${minutes} minutes` : "Never"}</option>
+                        ))}
+                    </select>
+                </Field>
+            </div>
             <Result outcome={action.outcome} />
         </div>
     );

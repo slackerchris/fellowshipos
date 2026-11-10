@@ -1,8 +1,8 @@
 import { useState } from "preact/hooks";
 import { PoolDetailsView } from "./pooldetails";
 import {
-    Disk, Engine, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fill, fnas, fnasJson, humanSize,
-    leaves, loadEngines,
+    Disk, Engine, Growth, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fill, fnas, fnasJson, humanSize,
+    leaves, loadEngines, when,
 } from "./api";
 import { useJobsFinished } from "./jobs";
 import { CreatePool, DiskPicker, ImportPools, erasePhrase, usableDisks } from "./pools";
@@ -41,6 +41,9 @@ function vdevName(vdev: Vdev, disks: Disk[]) {
 }
 
 function groupTitle(group: Vdev) {
+    if (group.title) {
+        return group.title;
+    }
     const count = group.disks?.length || 1;
     if (group.type === "single") {
         return "One disk, no redundancy";
@@ -112,13 +115,12 @@ function Replace({ pool, engine, vdev, disks, done, cancel }: {
     );
 }
 
-type Growth = { how: "group" | "expand" | "mirror" | "spare"; target?: string; count: number; text: string };
-
 const SPARES_TEXT = "Add hot spares, which stand in for a failed disk at once";
 
 /** The ways this pool can take more disks: those its engine has, that fit what it's made of. */
 function growths(status: PoolStatus, disks: Disk[], engine: Engine): Growth[] {
-    const ways = new Set(engine.grow || []);
+    // An engine that knows from the pool's disks which ways are open says so; otherwise the shape decides
+    const ways = new Set(status.growable || engine.grow || []);
     const found: Growth[] = [];
     const kinds = new Set(status.groups.map(group => `${group.type}:${group.disks?.length || 1}`));
     const [type, width] = [...kinds][0]?.split(":") || [];
@@ -142,6 +144,12 @@ function growths(status: PoolStatus, disks: Disk[], engine: Engine): Growth[] {
     }
     if (ways.has("spare") && status.groups.some(group => group.type !== "single")) {
         found.push({ how: "spare", count: 0, text: SPARES_TEXT });
+    }
+    // Ways the engine words itself: any number of disks, or one
+    for (const how of ["data", "parity"] as const) {
+        if (ways.has(how) && engine.grow_text?.[how]) {
+            found.push({ how, count: how === "parity" ? 1 : 0, text: engine.grow_text[how]! });
+        }
     }
     return found;
 }
@@ -288,9 +296,19 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                     return (
                         <div class="stack">
                             {s.status && <Notice kind="warning">{s.status}</Notice>}
+                            {s.last_sync !== undefined && !pool.readonly && (
+                                <div class="row">
+                                    <span class="small">Parity last synced: {s.last_sync ? when(s.last_sync) : "never"}. Files
+                                        changed since then aren't protected until the next sync.</span>
+                                    <Button busy={action.busy} disabled={s.scan?.state === "scanning"}
+                                            onClick={() => action.run(async () => jobStarted(await fnas(["pool", "sync", pool.name])))}>
+                                        Sync now</Button>
+                                </div>
+                            )}
                             {s.scan?.state === "scanning" && (
                                 <ProgressBar value={s.scan.progress}
-                                             label={s.scan.function === "resilver" ? "Copying data onto the new disk" : "Checking every block"} />
+                                             label={s.scan.function === "resilver" ? "Copying data onto the new disk"
+                                                 : s.scan.function === "sync" ? "Bringing parity up to date" : "Checking every block"} />
                             )}
                             {s.expand?.state === "scanning" && <ProgressBar value={s.expand.progress} label="Spreading data onto the added disk" />}
                             {lone && !pool.readonly && (
@@ -333,9 +351,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                             {engine.repair && mismatched > 0 && !pool.readonly && (
                                 <Notice kind="warning">
                                     <div class="stack">
-                                        <span>The last check found {mismatched} blocks that don't match across {pool.name}. A repair
-                                            rewrites them from parity or the other copy, but it can't tell which copy was right,
-                                            so restore anything important from a backup first if you can.</span>
+                                        <span>{fill(engine.repair_notice, { pool: pool.name, count: mismatched })}</span>
                                         <div class="row"><Button onClick={() => setRepairing(true)}>Repair {pool.name}</Button></div>
                                     </div>
                                 </Notice>
@@ -365,8 +381,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                                  setRepairing(false);
                                  return output;
                              })}>
-                        <p>The repair rewrites every block that doesn't match, from parity or the other copy. It can't tell
-                            which copy was right, so it may keep the wrong one.</p>
+                        <p>{engine.repair_text}</p>
                     </Confirm>
                 )}
                 <Result outcome={exportAction.outcome} />

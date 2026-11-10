@@ -3,10 +3,12 @@ limited to. Each pool keeps its shares' settings in shares.json in its config
 folder, the same on every engine, and fnas writes both protocols'
 configuration from them."""
 import grp
+import hashlib
 import ipaddress
 import os
 import pwd
 import re
+import uuid
 
 from .common import ACCOUNT_NAME, FnasError, read_json, run, write_file, write_json
 from . import pools, snapshots
@@ -247,6 +249,9 @@ def nfs_clients(share, subnet):
     for client in clients:
         writable = client["access"] == "rw" and not options["readonly"] and not share["readonly"]
         flags = ["rw" if writable else "ro", "async" if options["async"] else "sync", "no_subtree_check"]
+        if share.get("engine") == "mergerfs":
+            # A FUSE filesystem has no device number for NFS to name it by, so it gets a fixed one
+            flags.append("fsid=" + str(uuid.UUID(hashlib.md5(share["path"].encode()).hexdigest())))
         lines.append(f"{client['host']}({','.join(flags + nfs_mapping(share))})")
     return " ".join(lines)
 

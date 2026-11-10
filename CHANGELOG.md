@@ -14,6 +14,19 @@ bump.
 
 ### Added
 
+- Unraid-style pools (Phase 11): whole files on each XFS disk, joined at `/mnt/NAME` by
+  mergerfs, with one or two SnapRAID parity disks. Disks may differ in size, new files go
+  to the disk with the most free space, and with more disks lost than parity only those
+  disks' files go. Create, grow by data disks or a second parity disk, replace, repair,
+  export and import (pools fnas made), from the desktop and `fnas`.
+- A nightly parity sync (`fellowship-nas-sync@mergerfs.timer`, 01:00) and a weekly partial
+  scrub, both on the Unraid-style row of Settings → Storage checks, with idle-disk
+  spin-down through hd-idle (30 minutes by default). Storage shows when parity was last
+  synced, with **Sync now**. A sync is skipped, with an alert, when over 50 files went
+  missing since the last one.
+- `fnas pool sync`, `fnas pool sync-all` and `fnas pool scrub-all --scheduled`, and a
+  `sync` job kind. `mergerfs`, `snapraid` and `hd-idle` are dependencies of
+  `fellowship-nas-tools`.
 - Three themes beside the default forest and gold, chosen in the account menu with
   light, dark or the system's: **Silverwater** (slate blue, the waterfall city),
   **Hearthfield** (warm parchment and rust, the hill homes) and **Highwatch** (mauve
@@ -123,6 +136,9 @@ bump.
 
 ### Fixed
 
+- Found in the VM while building Unraid-style pools: a sync failed whenever fnas saved
+  its settings during it, since SnapRAID stops when a file changes under it. The settings
+  folder is kept out of parity and copied to every data disk after each sync instead.
 - A Light or Dark choice only took effect once the account menu was opened, so a reload
   went back to the system's; the chosen mode and theme now apply before the page draws.
 - Traditional RAID, found by running it on real disks in the VM:

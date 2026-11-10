@@ -114,8 +114,9 @@ export interface Pool {
 }
 
 export interface LayoutOption {
-    // single and raidz are ZFS's; raid5, raid6 and raid10 are traditional RAID's; both have mirror
-    layout: "single" | "mirror" | "raidz1" | "raidz2" | "raidz3" | "raid5" | "raid6" | "raid10";
+    // single and raidz are ZFS's; raid5, raid6 and raid10 are traditional RAID's; both have mirror;
+    // parity1 and parity2 are Unraid-style, with that many parity disks
+    layout: "single" | "mirror" | "raidz1" | "raidz2" | "raidz3" | "raid5" | "raid6" | "raid10" | "parity1" | "parity2";
     width: number;
     groups: number;
     spares: number;
@@ -136,6 +137,8 @@ export interface Vdev {
     errors: number;
     note: string;
     disks?: Vdev[];
+    // An engine's own name for a group, such as "Parity disks: 1"
+    title?: string;
 }
 
 export interface Progress {
@@ -152,14 +155,25 @@ export interface PoolStatus {
     action: string;
     groups: Vdev[];
     spares: Vdev[];
-    scan: (Progress & { function: "scrub" | "resilver"; errors: number }) | null;
+    scan: (Progress & { function: "scrub" | "resilver" | "sync"; errors: number }) | null;
     expand: Progress | null;
     expandable: boolean;
+    // The ways the pool can grow right now, where its engine decides that from its disks
+    growable?: Growth["how"][];
+    // When parity was last brought up to date, on an engine that syncs it
+    last_sync?: number | null;
+}
+
+export interface Growth {
+    how: "group" | "expand" | "mirror" | "spare" | "data" | "parity";
+    target?: string;
+    count: number;
+    text: string;
 }
 
 export interface Job {
     id: string;
-    kind: "resilver" | "scrub" | "expand" | "backup";
+    kind: "resilver" | "scrub" | "expand" | "sync" | "backup";
     title: string;
     pool: string | null;
     state: "running" | "done" | "failed";
@@ -435,6 +449,8 @@ export interface PoolDetails {
     logical: number;
     created: number;
     last_scrub: number | null;
+    // When parity was last brought up to date, on an engine that syncs it
+    last_sync?: number | null;
     errors: number;
     space: {
         used: number;
@@ -468,9 +484,12 @@ export interface Engine {
     backup?: boolean;
     compresses?: boolean;
     repair?: boolean;
-    grow?: ("group" | "expand" | "mirror" | "spare")[];
-    // These may hold {pool} or {group}; fill() puts the names in
+    grow?: Growth["how"][];
+    // These may hold {pool}, {group} or {count}; fill() puts them in
+    grow_text?: Partial<Record<Growth["how"], string>>;
     expand_text?: string;
+    repair_notice?: string;
+    repair_text?: string;
     check_button?: string;
     check_name?: string;
     check_text?: string;
@@ -489,12 +508,20 @@ export interface CheckSchedule {
     timed: boolean;
     pools: string[];
     enabled?: boolean;
-    every?: "monthly" | "quarterly";
+    every?: "weekly" | "monthly" | "quarterly";
+    // How often this engine can check
+    choices?: ("weekly" | "monthly" | "quarterly")[];
     week?: number;
     day?: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
     hour?: number;
     description?: string;
     next?: number | null;
+    // An engine with a parity sync: whether it runs nightly, its hour, and when idle disks spin down
+    sync?: boolean;
+    sync_hour?: number;
+    sync_next?: number | null;
+    spin_down?: number;
+    spin_down_choices?: number[];
 }
 
 let engineList: Promise<Record<string, Engine>> | null = null;
@@ -508,8 +535,8 @@ export function loadEngines(): Promise<Record<string, Engine>> {
 }
 
 /** An engine's text with the pool's or group's name put in. */
-export const fill = (text: string | undefined, names: { pool?: string; group?: string }) =>
-    (text || "").replace(/\{(pool|group)\}/g, (_, key: "pool" | "group") => names[key] || "");
+export const fill = (text: string | undefined, names: { pool?: string; group?: string; count?: number }) =>
+    (text || "").replace(/\{(pool|group|count)\}/g, (_, key: "pool" | "group" | "count") => String(names[key] ?? ""));
 
 export interface SetupStatus {
     done: boolean;
@@ -570,6 +597,8 @@ export const LAYOUT_NAMES: Record<LayoutOption["layout"], string> = {
     raid5: "RAID 5",
     raid6: "RAID 6",
     raid10: "RAID 10",
+    parity1: "SnapRAID, 1 parity disk",
+    parity2: "SnapRAID, 2 parity disks",
 };
 
 export function plural(count: number, word: string) {

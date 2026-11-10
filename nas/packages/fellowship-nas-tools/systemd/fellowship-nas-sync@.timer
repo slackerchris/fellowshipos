@@ -1,0 +1,11 @@
+# fnas writes the sync hour from Settings → Storage checks into
+# fellowship-nas-sync@ENGINE.timer.d/schedule.conf, which replaces this one
+[Unit]
+Description=Sync parity on every %i pool each night
+
+[Timer]
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

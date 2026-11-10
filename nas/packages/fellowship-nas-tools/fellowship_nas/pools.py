@@ -4,11 +4,11 @@ import os
 import re
 
 from .common import FnasError
-from .engines import mdadm, zfs
+from .engines import mdadm, mergerfs, zfs
 
 
 POOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-ENGINES = {"zfs": zfs, "mdadm": mdadm}
+ENGINES = {"zfs": zfs, "mergerfs": mergerfs, "mdadm": mdadm}
 # Every engine in the plan, built or not, so the desktop can show them all:
 # name, title, and the plan phase that builds it
 # Every engine, built or not: its name, title, the phase that builds it, and

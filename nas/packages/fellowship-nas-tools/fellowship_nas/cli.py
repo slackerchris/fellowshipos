@@ -16,7 +16,7 @@ from .engines import mdadm
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
                      "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys",
                      "array-checks", "watch-events", "schedules",
-                     "apply-schedules", "scrub-all"}
+                     "apply-schedules", "scrub-all", "sync-all", "sync"}
 ON_OFF = ("on", "off")
 
 
@@ -347,9 +347,9 @@ def build_parser():
     create.add_argument("--wipe", action="store_true", help="erase disks that hold old data")
     grow = pool.add_parser("grow", help="add disks to a pool")
     grow.add_argument("name")
-    grow.add_argument("how", choices=("group", "expand", "mirror", "spare"),
-                      help="a new group like the others, one more disk in a RAIDZ group, "
-                           "a mirror for a disk, or hot spares")
+    grow.add_argument("how", choices=("group", "expand", "mirror", "spare", "data", "parity"),
+                      help="a new group like the others, one more disk in a RAIDZ group or array, "
+                           "a mirror for a disk, hot spares, or an Unraid-style pool's data or parity disks")
     grow.add_argument("disks", nargs="+", metavar="disk")
     grow.add_argument("--target", help="the group (expand) or disk (mirror) the new disk joins")
     grow.add_argument("--confirm", default="", help='type "erase N disks"')
@@ -384,12 +384,21 @@ def build_parser():
     schedule = pool.add_parser("schedule", help="set when an engine checks its pools by itself")
     schedule.add_argument("engine")
     schedule.add_argument("--checks", choices=ON_OFF, help="check automatically")
-    schedule.add_argument("--every", choices=("monthly", "quarterly"))
+    schedule.add_argument("--every", choices=("weekly", "monthly", "quarterly"))
     schedule.add_argument("--week", type=int, choices=range(1, 5), help="the first to fourth of that day in the month")
     schedule.add_argument("--day", choices=("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
     schedule.add_argument("--hour", type=int, choices=range(24))
+    schedule.add_argument("--sync", choices=ON_OFF, help="sync parity every night")
+    schedule.add_argument("--sync-hour", type=int, choices=range(24))
+    schedule.add_argument("--spin-down", type=int, metavar="MINUTES", help="idle minutes before a disk spins down, 0 for never")
     pool.add_parser("apply-schedules", help="bring the check timers in line with the saved schedules")
-    pool.add_parser("scrub-all", help="check every healthy pool on one engine now").add_argument("engine")
+    scrub_all = pool.add_parser("scrub-all", help="check every healthy pool on one engine now")
+    scrub_all.add_argument("engine")
+    scrub_all.add_argument("--scheduled", action="store_true", help="the timer's check, which may read only part")
+    sync = pool.add_parser("sync", help="bring an Unraid-style pool's parity up to date now")
+    sync.add_argument("name")
+    sync.add_argument("--force", action="store_true", help="sync even though many files went missing")
+    pool.add_parser("sync-all", help="sync parity on every healthy pool of one engine").add_argument("engine")
 
     share = area.add_parser("share", help="manage shares").add_subparsers(dest="action", required=True)
     share.add_parser("list", help="list shares")
@@ -696,10 +705,12 @@ def dispatch_pool(args, show):
         sizes = [disks.find_disk(found, wanted)["size"] for wanted in args.disks]
         show(pools.engine_named(args.engine).layouts(sizes), print_layouts)
     elif args.action == "create":
-        pools.engine_named(args.engine).create_pool(args.name, args.layout, args.disks, args.confirm,
-                                                    args.wipe, args.width, args.spares,
-                                                    filesystem=args.filesystem)
+        job = pools.engine_named(args.engine).create_pool(args.name, args.layout, args.disks, args.confirm,
+                                                          args.wipe, args.width, args.spares,
+                                                          filesystem=args.filesystem)
         print(f"Created pool {args.name}")
+        # An Unraid-style pool syncs its parity for the first time
+        started(job)
     elif args.action == "grow":
         job = pools.engine_for(args.name).grow(args.name, args.how, args.disks, args.confirm,
                                                args.wipe, args.target)
@@ -736,7 +747,8 @@ def dispatch_pool(args, show):
         show(storage_checks.status(), print_schedules)
     elif args.action == "schedule":
         storage_checks.set_schedule(args.engine, None if args.checks is None else args.checks == "on",
-                                    args.every, args.week, args.day, args.hour)
+                                    args.every, args.week, args.day, args.hour,
+                                    None if args.sync is None else args.sync == "on", args.sync_hour, args.spin_down)
         print(f"{pools.engine_title(args.engine)}: " + (
             f"checks run by themselves {storage_checks.describe(args.engine)}"
             if storage_checks.describe(args.engine) else "automatic checks are off"))
@@ -744,13 +756,24 @@ def dispatch_pool(args, show):
         for problem in storage_checks.apply():
             print(f"fnas: {problem}", file=sys.stderr)
     elif args.action == "scrub-all":
-        jobs_started, skipped = storage_checks.scrub_all(args.engine)
+        jobs_started, skipped = storage_checks.scrub_all(args.engine, args.scheduled)
         for job in jobs_started:
             started(job)
         for reason in skipped:
             print(f"Skipped {reason}")
         if not jobs_started and not skipped:
             print(f"No {pools.engine_title(args.engine)} pools to check")
+    elif args.action == "sync":
+        engine = pools.engine_for(args.name)
+        if not hasattr(engine, "sync_pool"):
+            raise FnasError(f"{args.name} keeps its redundancy up to date as it writes: there is nothing to sync")
+        started(engine.sync_pool(args.name, args.force))
+    elif args.action == "sync-all":
+        jobs_started, skipped = storage_checks.sync_all(args.engine)
+        for job in jobs_started:
+            started(job)
+        for reason in skipped:
+            print(f"Skipped {reason}")
 
 
 def dispatch_job(args, show):

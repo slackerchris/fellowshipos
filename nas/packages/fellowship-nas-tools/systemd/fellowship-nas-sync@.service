@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync parity on every %i pool
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fnas pool sync-all %i

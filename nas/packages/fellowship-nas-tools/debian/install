@@ -6,3 +6,5 @@ systemd/mdcheck_start.service.d usr/lib/systemd/system
 systemd/mdcheck_continue.service.d usr/lib/systemd/system
 systemd/fellowship-nas-scrub@.service usr/lib/systemd/system
 systemd/fellowship-nas-scrub@.timer usr/lib/systemd/system
+systemd/fellowship-nas-sync@.service usr/lib/systemd/system
+systemd/fellowship-nas-sync@.timer usr/lib/systemd/system

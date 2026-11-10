@@ -40,6 +40,8 @@ class Package:
 fnas = Package()
 zfs = importlib.import_module("fellowship_nas.engines.zfs")
 mdadm = importlib.import_module("fellowship_nas.engines.mdadm")
+mergerfs = importlib.import_module("fellowship_nas.engines.mergerfs")
+fnas_checks = importlib.import_module("fellowship_nas.storage_checks")
 
 
 class patch:
@@ -143,9 +145,10 @@ class Base(unittest.TestCase):
         for patcher in (patch("run", fake),
                         patch("by_id_links", links),
                         patch("unavailable", lambda: ""),
-                        # These tests are the ZFS world; the array engine has its
-                        # own class, and would ask the fake about arrays otherwise
+                        # These tests are the ZFS world; the array and Unraid-style engines
+                        # have their own classes, and would ask the fake about theirs otherwise
                         mock.patch.object(mdadm, "unavailable", lambda: "mdadm isn't installed"),
+                        mock.patch.object(mergerfs, "unavailable", lambda: "mergerfs isn't installed"),
                         patch("bays", dict)):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -1659,7 +1662,7 @@ class Protection(Base):
 
     def test_a_pool_never_checked_falls_due_after_it_was_made(self):
         engine = SimpleNamespace(CHECK_WORD="check", last_scrub=lambda pool: 0,
-                                 created=lambda pool: 1000, damage=lambda pool: None)
+                                 created=lambda pool: 1000, damage=lambda pool: None, problems=lambda pool, now: [])
         with patch("engine_of", lambda pool: engine), patch("find_pool", lambda pool: {"engine": "mdadm"}):
             self.assertEqual(fnas.scrub_findings(["vault"], 1000 + fnas.MAX_AGE["monthly"] - 1), [])
             found = fnas.scrub_findings(["vault"], 1000 + fnas.MAX_AGE["monthly"] + 1)
@@ -1880,6 +1883,145 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class Unraid(unittest.TestCase):
+    """Unraid-style pools: whole files on each disk, joined by mergerfs, with SnapRAID parity."""
+
+    engine = mergerfs
+
+    def pool(self):
+        disk = lambda role, name, serial: {"role": role, "name": name, "by_id": f"/dev/disk/by-id/ata-{serial}",
+                                           "serial": serial, "uuid": f"uuid-{serial}",
+                                           "mount": f"/srv/disks/{serial}"}
+        return {"name": "media", "id": "0123456789abcdef", "created": 1000,
+                "disks": [disk("data", "d1", "A1"), disk("data", "d2", "B2"), disk("parity", "parity", "P1")]}
+
+    def test_the_largest_disks_hold_parity(self):
+        self.assertEqual(self.engine.plan("parity1", [4, 8, 6]), ([[0, 2]], [1]))
+        self.assertEqual(self.engine.plan("parity2", [4, 8, 6, 8]), ([[0, 2]], [1, 3]))
+        with self.assertRaisesRegex(fnas.FnasError, "at least one data disk"):
+            self.engine.plan("parity2", [4, 8])
+        with self.assertRaisesRegex(fnas.FnasError, "parity disks rather than spares"):
+            self.engine.plan("parity1", [4, 8], spares=1)
+
+    def test_one_parity_disk_up_to_five_data_disks_then_two(self):
+        self.assertIsNone(self.engine.recommended(1))
+        self.assertEqual(self.engine.recommended(2), ("parity1", 1, 0))
+        self.assertEqual(self.engine.recommended(6), ("parity1", 5, 0))
+        # Seven disks would be six data disks with one parity, so the second parity comes in
+        self.assertEqual(self.engine.recommended(7), ("parity2", 5, 0))
+        self.assertEqual(self.engine.recommended(8), ("parity2", 6, 0))
+        options = self.engine.layouts([4 * GB, 4 * GB, 8 * GB])
+        best = options[0]
+        self.assertEqual((best["layout"], best["width"], best["usable"], best["survives"]), ("parity1", 2, 8 * GB, 1))
+        # Mixed sizes waste nothing on the data disks; a parity disk larger than any data disk does
+        self.assertEqual(best["unused"], 4 * GB)
+
+    def test_snapraid_conf_names_every_disk(self):
+        with mock.patch.object(self.engine, "CONTENT_DIR", "/var/lib/fellowship-nas/snapraid"):
+            conf = self.engine.snapraid_conf(self.pool())
+        self.assertIn("parity /srv/disks/P1/snapraid.parity\n", conf)
+        self.assertIn("content /var/lib/fellowship-nas/snapraid/media.content\n", conf)
+        self.assertIn("content /srv/disks/A1/snapraid.content\n", conf)
+        self.assertIn("data d2 /srv/disks/B2/files/\n", conf)
+        self.assertNotIn("/srv/disks/P1/snapraid.content", conf)
+
+    def test_writing_the_mounts_twice_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fstab = os.path.join(directory, "fstab")
+            with open(fstab, "w") as file:
+                file.write("UUID=root / ext4 defaults 0 1\n")
+            ran = []
+            with mock.patch.object(self.engine, "FSTAB", fstab), \
+                    patch("run", lambda *command, check=True, timeout=None: ran.append(command)
+                          or SimpleNamespace(stdout="", stderr="", returncode=0)):
+                self.engine.write_fstab(self.pool())
+                with open(fstab) as file:
+                    first = file.read()
+                reloads = len(ran)
+                self.engine.write_fstab(self.pool())
+                with open(fstab) as file:
+                    self.assertEqual(file.read(), first)
+                # Nothing changed, so systemd isn't asked to read it again
+                self.assertEqual(len(ran), reloads)
+                self.engine.write_fstab(self.pool(), remove=True)
+                with open(fstab) as file:
+                    self.assertEqual(file.read(), "UUID=root / ext4 defaults 0 1\n")
+        lines = first.splitlines()
+        self.assertEqual(lines[1], "UUID=uuid-A1 /srv/disks/A1 xfs noatime,nofail,x-systemd.device-timeout=15s 0 2")
+        pool_line = lines[-1].split()
+        self.assertEqual(pool_line[:3], ["/srv/disks/A1/files:/srv/disks/B2/files", "/mnt/media", "fuse.mergerfs"])
+        self.assertIn("posix_acl=true", pool_line[3])
+        self.assertIn("x-systemd.after=srv-disks-P1.mount", pool_line[3])
+        self.assertIn("nofail", pool_line[3])
+
+    def test_disks_are_found_by_their_label(self):
+        output = ("DEVNAME=/dev/sdb\nLABEL=fn-012345678\nUUID=1\nTYPE=xfs\n\n"
+                  "DEVNAME=/dev/sdc\nLABEL=photos\nTYPE=xfs\n\n"
+                  "DEVNAME=/dev/sdd\nLABEL=fn-012345678\nTYPE=ext4\n")
+        with patch("run", lambda *command, check=True: SimpleNamespace(stdout=output, stderr="", returncode=0)):
+            self.assertEqual(self.engine.labelled(), ["/dev/sdb"])
+
+    def test_a_sync_stops_when_many_files_went_missing(self):
+        diff = "Comparing...\n     120 equal\n       3 added\n      80 removed\n       0 updated\n"
+        sent = []
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(self.engine, "STATE_FILE", os.path.join(directory, "state.json")), \
+                mock.patch.object(self.engine, "record", lambda name: self.pool()), \
+                mock.patch.object(self.engine, "present", lambda disk: True), \
+                mock.patch.object(self.engine.alerts, "send_alert", lambda *alert: sent.append(alert)), \
+                patch("run", lambda *command, check=True, timeout=None: SimpleNamespace(stdout=diff, stderr="",
+                                                                                     returncode=2)):
+            self.assertEqual(self.engine.deleted_since_sync("media"), 80)
+            with self.assertRaisesRegex(fnas.FnasError, "80 files went missing"):
+                self.engine.sync_pool("media")
+            self.assertEqual(sent[0][:2], ("high", "Pool media: parity sync skipped"))
+            [problem] = self.engine.problems("media", 2000)
+            self.assertEqual(problem[:2], ("sync-skipped", "high"))
+
+    def test_a_late_sync_is_a_health_finding(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(self.engine, "STATE_FILE", os.path.join(directory, "state.json")), \
+                mock.patch.object(self.engine, "record", lambda name: self.pool()), \
+                mock.patch.object(fnas_checks, "SETTINGS_FILE", os.path.join(directory, "checks.json")):
+            self.engine.set_state("media", last_sync=1000)
+            self.assertEqual(self.engine.problems("media", 1000 + 29 * 3600), [])
+            [problem] = self.engine.problems("media", 1000 + 31 * 3600)
+            self.assertEqual(problem[:2], ("sync-late", "medium"))
+            fnas.write_json(fnas_checks.SETTINGS_FILE, {"mergerfs": {**fnas_checks.DEFAULTS["mergerfs"], "sync": False}})
+            # With the nightly sync turned off, an old sync is a choice
+            self.assertEqual(self.engine.problems("media", 1000 + 31 * 3600), [])
+
+    def test_files_changed_during_a_sync_dont_fail_it(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.engine, "LOG_DIR", directory):
+            job = {"id": "abc", "kind": "sync"}
+            with open(self.engine.log_path(job), "w") as file:
+                file.write("WARNING! You cannot modify data disk during a sync.\n  1 file errors\n"
+                           "       0 io errors\n       0 data errors\n")
+            self.assertTrue(self.engine.changed_during_sync(job))
+            with open(self.engine.log_path(job), "a") as file:
+                file.write("       2 io errors\n")
+            # A disk that failed to read is a real failure, whatever else changed
+            self.assertFalse(self.engine.changed_during_sync(job))
+        with mock.patch.object(self.engine, "CONTENT_DIR", "/c"):
+            self.assertIn("exclude /fellowship-config/\n", self.engine.snapraid_conf(self.pool()))
+
+    def test_a_scrub_reports_damage_from_its_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = os.path.join(directory, "scrub.log")
+            with open(log, "w") as file:
+                file.write("Scrubbing...\n 50%\r100% completed\n     3 file errors\n     1 io error\n")
+            self.assertEqual(self.engine.scrub_errors(log), 4)
+
+    def test_nfs_gets_a_fixed_id_for_a_fuse_pool(self):
+        share = {"path": "/mnt/media/shares/films", "engine": "mergerfs", "readonly": False,
+                 "nfs_options": {**fnas.DEFAULT_NFS, "clients": [{"host": "192.168.1.0/24", "access": "rw"}]},
+                 "mode": "everyone", "access": {"users": {}, "groups": {}}}
+        first = fnas.nfs_clients(share, "192.168.1.0/24")
+        self.assertRegex(first, r"fsid=[0-9a-f-]{36}")
+        self.assertEqual(fnas.nfs_clients(share, "192.168.1.0/24"), first)
+        self.assertNotIn("fsid", fnas.nfs_clients({**share, "engine": "zfs"}, "192.168.1.0/24"))
+
+
 class StorageChecks(unittest.TestCase):
     """When each engine checks its pools by itself, from Settings → Storage checks."""
 
@@ -1891,13 +2033,14 @@ class StorageChecks(unittest.TestCase):
         self.dir = directory.name
         self.ran = []
         for name, value in (("SETTINGS_FILE", os.path.join(self.dir, "checks.json")),
-                            ("DROP_IN_DIR", os.path.join(self.dir, "{engine}.d"))):
+                            ("DROP_IN_DIR", os.path.join(self.dir, "{engine}.d")),
+                            ("SYNC_DROP_IN_DIR", os.path.join(self.dir, "sync-{engine}.d"))):
             patcher = mock.patch.object(self.checks, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
         for patcher in (mock.patch.object(self.checks, "run", lambda *command, check=True: self.ran.append(command)
                                           or SimpleNamespace(stdout="", stderr="", returncode=0)),
-                        mock.patch.object(self.checks.pools, "usable_engines", lambda: {"mdadm": None}),
+                        mock.patch.object(self.checks.pools, "usable_engines", lambda: {"zfs": None, "mdadm": None}),
                         mock.patch.object(self.checks.pools, "list_pools", lambda: [])):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -2109,7 +2252,7 @@ class Engines(unittest.TestCase):
         with patch("unavailable", lambda: ""):
             found = fnas.engines()
         self.assertEqual([(e["name"], e["title"], e["available"]) for e in found],
-                         [("zfs", "ZFS", True), ("mergerfs", "Unraid-style", False),
+                         [("zfs", "ZFS", True), ("mergerfs", "Unraid-style", True),
                           ("mdadm", "Traditional RAID", True), ("btrfs", "Btrfs", False)])
         self.assertEqual(found[3]["reason"], "Not built yet (Phase 14)")
 
@@ -2189,6 +2332,7 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         zfs = importlib.import_module("fellowship_nas.engines.zfs")
         keys = set(zfs.PRESENTATION)
         self.assertEqual(set(self.engine.PRESENTATION), keys)
+        self.assertEqual(set(mergerfs.PRESENTATION), keys)
         with mock.patch.object(zfs, "unavailable", lambda: ""), \
                 mock.patch.object(self.engine, "unavailable", lambda: "mdadm isn't installed"):
             shown = {engine["name"]: engine for engine in pools.engines()}
@@ -2197,7 +2341,7 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         self.assertEqual(shown["mdadm"]["check_button"], "Check array")
         self.assertEqual([f["name"] for f in shown["mdadm"]["filesystems"] if f["recommended"]], ["xfs"])
         # An engine not built yet has only its name, state and summary
-        self.assertNotIn("grow", shown["mergerfs"])
+        self.assertNotIn("grow", shown["btrfs"])
         self.assertEqual(pools.engine_title("mdadm"), "Traditional RAID")
 
     def test_saved_arrays_carry_no_spare_count(self):

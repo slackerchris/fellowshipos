@@ -85,6 +85,8 @@ def scrub_findings(names, now):
         damaged = engine.damage(pool)
         if damaged:
             found.append(finding(f"damage-{pool}", "medium", *damaged))
+        for key, severity, title, message in engine.problems(pool, now):
+            found.append(finding(f"{key}-{pool}", severity, title, message))
         # With automatic checks turned off in Settings, an old check is a choice
         allowed = storage_checks.max_age(kind)
         if allowed is None:

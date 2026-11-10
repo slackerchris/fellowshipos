@@ -163,6 +163,8 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                                 <tr><th scope="row">Created</th><td>{pool.created ? when(pool.created) : "–"}</td></tr>
                                 <tr><th scope="row">Last {engine.check_name}</th>
                                     <td>{pool.last_scrub ? when(pool.last_scrub) : "never"}</td></tr>
+                                {pool.last_sync !== undefined && <tr><th scope="row">Last parity sync</th>
+                                    <td>{pool.last_sync ? when(pool.last_sync) : "never"}</td></tr>}
                                 <tr><th scope="row">{engine.errors_label}</th>
                                     <td>{pool.errors}</td></tr>
                                 <tr><th scope="row">Fragmentation of free space</th><td>{pool.fragmentation === null

@@ -1,4 +1,4 @@
-"""Long jobs: a resilver, scrub, RAIDZ expansion or backup. Each runs as its
+"""Long jobs: a resilver, scrub, RAIDZ expansion, parity sync or backup. Each runs as its
 own systemd unit and records its progress in a file, so it carries on when
 the browser closes or the web server restarts."""
 import contextlib
@@ -14,7 +14,7 @@ from . import alerts, backup, pools
 JOBS_DIR = os.path.join(STATE_DIR, "jobs")
 JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 UNIT_PREFIX = "fellowship-job-"
-KINDS = ("resilver", "scrub", "expand", "backup")
+KINDS = ("resilver", "scrub", "expand", "sync", "backup")
 RUNNING = "running"
 # How long finished jobs stay in the list
 KEEP = 7 * DAY
@@ -38,9 +38,11 @@ def save(job):
     write_json(path(job["id"]), job)
 
 
-def start(kind, title, pool=None):
+def start(kind, title, pool=None, details=None):
+    """details is the engine's own: what the job runs, for an engine whose work isn't the kernel's."""
     job = {"id": uuid.uuid4().hex[:12], "kind": kind, "title": title, "pool": pool,
-           "state": RUNNING, "progress": 0.0, "started": int(time.time()), "ended": None, "error": None}
+           "state": RUNNING, "progress": 0.0, "started": int(time.time()), "ended": None, "error": None,
+           "details": details}
     save(job)
     run("systemd-run", "--quiet", "--collect", f"--unit={UNIT_PREFIX}{job['id']}",
         f"--description={title}", "/usr/sbin/fnas", "job", "run", job["id"])

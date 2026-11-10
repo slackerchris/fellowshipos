@@ -37,6 +37,7 @@ PRESENTATION = {
     # Damage is mended as it's found, so there is no separate repair to start
     "repair": False,
     "grow": ["group", "expand", "mirror", "spare"],
+    "grow_text": {},
     "expand_text": "Add one disk to {group}",
     "check_button": "Check for damage",
     "check_name": "check for damage",
@@ -44,6 +45,8 @@ PRESENTATION = {
                    "Damaged blocks are repaired from another copy or parity where the pool has one, and reported "
                    "where it doesn't. Shares stay usable while it runs."),
     "errors_label": "Read, write and checksum errors",
+    "repair_notice": "",
+    "repair_text": "",
     "replace_text": "ZFS copies its data onto the new disk; the pool stays in use meanwhile.",
     "filesystems": [],
 }
@@ -614,7 +617,12 @@ def damage(pool):
             "if the errors come back.")
 
 
-def scrub_pool(name):
+def problems(pool, now):
+    """Anything else Health should say about this pool; its state and damage cover ZFS."""
+    return []
+
+
+def scrub_pool(name, scheduled=False):
     pools.find_pool(name)
     run("zpool", "scrub", name)
     return jobs.start("scrub", f"Checking every block on {name}", pool=name)
