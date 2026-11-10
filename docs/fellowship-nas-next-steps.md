@@ -93,6 +93,10 @@ per-user file helper that WebDAV reuses in Phase 13.
    already the house rule for a feature that can't work.
 
 The plan's Files section carries the same answers, and the code follows them.
+What is left of Phase 12 is planned slice by slice in
+[the Files plan](fellowship-nas-files-plan.md): multi-select, copy and a "Move
+to…" picker, search, the owner and permission columns, snapshots, then the
+installable phone app.
 
 ## 5. Order of work
 

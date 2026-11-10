@@ -9,6 +9,7 @@ FellowshipNAS is the NAS role in FellowshipOS, a Debian Trixie-based homelab OS.
 | [Repository README](../README.md) | Build, install, deployment and CLI examples |
 | [Architecture plan, revision 4](fellowship-nas-plan.md) | Design decisions, phase gates and future architecture |
 | [November 9 VM review](fellowship-nas-changes.md) | Original review findings and requests. The revised plan resolves some items marked Open there. |
+| [Files plan](fellowship-nas-files-plan.md) | The rest of Phase 12, slice by slice: selection, copy and move, search, permissions, snapshots, the phone app |
 | This overview | Behavior present in the checkout, where it lives and what has been verified |
 
 ## Install and first run
