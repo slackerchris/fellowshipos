@@ -646,17 +646,21 @@ def dispatch_pool(args, show):
     elif args.action == "engines":
         show(pools.engines(), print_engines)
     elif args.action == "status":
-        if not args.name:
-            print(run("zpool", "status", "-P").stdout, end="")
-        elif args.json:
+        names = [args.name] if args.name else [p["name"] for p in pools.list_pools()]
+        if args.json and args.name:
             show(pools.engine_for(args.name).pool_status(args.name), None)
-        else:
-            pools.check_pool_name(args.name)
-            print(run("zpool", "status", "-P", args.name).stdout, end="")
+        for name in [] if args.json else names:
+            if pools.find_pool(name)["engine"] == "zfs":
+                print(run("zpool", "status", "-P", name).stdout, end="")
+            else:
+                # An array's own report, which knows its disks, spares and any rebuild
+                print(run("mdadm", "--detail", pools.engine_for(name).array_device(name)).stdout, end="")
     elif args.action == "details":
         details = pools.engine_for(args.name).pool_details(args.name)
         found = usage.history(args.name)
-        details.update(history=found, projection=usage.projection(found["daily"] or found["hourly"]))
+        details.update(history=found, projection=usage.projection(found["daily"] or found["hourly"]),
+                       engine=pools.find_pool(args.name)["engine"])
+        details.setdefault("filesystem", None)
         show(details, print_details)
     elif args.action == "layouts":
         found = disks.list_disks()

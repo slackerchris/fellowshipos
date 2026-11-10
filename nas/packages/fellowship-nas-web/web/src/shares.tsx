@@ -4,7 +4,7 @@ import {
     Access, FnasError, Group, NfsClient, NfsOptions, Protocol, Share, SharingSettings, SmbOptions, User, accessArgs, fnas,
     fnasJson, onOff,
 } from "./api";
-import { PolicyEditor } from "./backups";
+import { NO_SNAPSHOTS, PolicyEditor, snapshotsWork } from "./backups";
 import { AccessEditor, CreateShare, LanSubnet, NfsServer, SmbServer, WaysToShare, nobody } from "./sharing";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
@@ -85,7 +85,7 @@ function SmbTab({ share, onDone }: { share: Share; onDone: () => void }) {
                 </Field>
             )}
             {check("previous_versions", "Previous Versions: Windows shows this share's snapshots",
-                   share.engine === "zfs" || share.engine === "btrfs" ? "" : "this kind of storage has no snapshots")}
+                   snapshotsWork(share) ? "" : NO_SNAPSHOTS.toLowerCase())}
             <div class="row"><Button kind="primary" type="submit" busy={action.busy}>Save</Button></div>
             <Result outcome={action.outcome} />
         </form>

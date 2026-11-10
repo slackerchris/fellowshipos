@@ -5,7 +5,20 @@ import { Badge, Button, Card, Field, Loading, Notice, Page, Result, useAction, u
 
 const PERIODS: (keyof Policy)[] = ["hourly", "daily", "monthly"];
 
+export const NO_SNAPSHOTS = "This pool doesn't support snapshots";
+export const NO_BACKUP = "The current backup engine only supports ZFS pools";
+
+/** Snapshots need ZFS or, later, Btrfs; a share on an array keeps no history. */
+export const snapshotsWork = (share: Share) => share.engine === "zfs" || share.engine === "btrfs";
+
 export function PolicyEditor({ share, onDone }: { share: Share; onDone: () => void }) {
+    if (!snapshotsWork(share)) {
+        return <Notice>{NO_SNAPSHOTS}, so {share.name} keeps no earlier versions.</Notice>;
+    }
+    return <PolicyForm share={share} onDone={onDone} />;
+}
+
+function PolicyForm({ share, onDone }: { share: Share; onDone: () => void }) {
     const [policy, setPolicy] = useState<Policy>(share.policy);
     const action = useAction(onDone);
     return (
@@ -65,6 +78,7 @@ export function BackupJob({ onChange }: { onChange?: () => void }) {
                     );
                 }
                 const writable = pools.data!.filter(pool => !pool.readonly && pool.engine === "zfs").map(pool => pool.name);
+                const others = pools.data!.filter(pool => !pool.readonly && pool.engine !== "zfs").map(pool => pool.name);
                 const from = source || writable[0] || "";
                 const to = target || writable.find(pool => pool !== from) || "";
                 const missing = writable.length < 2;
@@ -73,18 +87,22 @@ export function BackupJob({ onChange }: { onChange?: () => void }) {
                         event.preventDefault();
                         action.run(() => fnas(["backup", "set", from, to]));
                     }}>
-                        {missing && <Notice>No backup is set up. A backup needs two pools, and this NAS has
+                        {missing && <Notice>No backup is set up. A backup needs two ZFS pools, and this NAS has
                             {writable.length ? " one" : " none"}. Add a pool in Storage, then choose it here.</Notice>}
+                        {others.length > 0 && <p class="muted small">{NO_BACKUP}, so {others.join(" and ")} can't be backed up
+                            here yet.</p>}
                         <fieldset class="plain" disabled={missing}>
                             <div class="grid-2">
                                 <Field label="Back up shares on">
                                     <select value={from} onChange={event => setSource(event.currentTarget.value)}>
                                         {writable.map(pool => <option key={pool}>{pool}</option>)}
+                                        {others.map(pool => <option key={pool} disabled>{pool} (ZFS pools only)</option>)}
                                     </select>
                                 </Field>
                                 <Field label="To">
                                     <select value={to} onChange={event => setTarget(event.currentTarget.value)}>
                                         {writable.filter(pool => pool !== from).map(pool => <option key={pool}>{pool}</option>)}
+                                        {others.map(pool => <option key={pool} disabled>{pool} (ZFS pools only)</option>)}
                                     </select>
                                 </Field>
                             </div>
@@ -122,15 +140,17 @@ function SnapshotSchedules() {
                                     {shares.data!.map(({ share, snapshots }) => (
                                         <tr key={share.dataset}>
                                             <td><strong>{share.name}</strong><br /><span class="small muted">on {share.pool}</span></td>
-                                            <td>{editing === share.name
+                                            <td>{!snapshotsWork(share) ? <span class="small muted">{NO_SNAPSHOTS}</span>
+                                                : editing === share.name
                                                 ? <PolicyEditor share={share} onDone={() => { setEditing(null); shares.reload(); }} />
                                                 : <span class="small">{share.policy.hourly} hourly, {share.policy.daily} daily,
                                                     {" "}{share.policy.monthly} monthly</span>}</td>
-                                            <td class="small">{snapshots.length
+                                            <td class="small">{!snapshotsWork(share) ? "–" : snapshots.length
                                                 ? <>{plural(snapshots.length, "snapshot")}, newest {when(snapshots[snapshots.length - 1].created)}</>
                                                 : "None yet"}</td>
                                             <td class="actions">{!share.readonly && editing !== share.name && (
-                                                <Button onClick={() => setEditing(share.name)}>Change</Button>)}</td>
+                                                <Button disabled={!snapshotsWork(share)} onClick={() => setEditing(share.name)}>
+                                                    Change</Button>)}</td>
                                         </tr>
                                     ))}
                                 </tbody>

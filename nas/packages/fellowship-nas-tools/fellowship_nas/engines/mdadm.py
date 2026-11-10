@@ -126,8 +126,13 @@ def scan_arrays():
     return found
 
 
+def resolve(device):
+    """The kernel's name for an array: mdadm says /dev/md/NAME, /proc/mdstat says /dev/md127."""
+    return os.path.realpath(device)
+
+
 def array_names():
-    return {array["device"]: array["name"] for array in scan_arrays()}
+    return {resolve(array["device"]): array["name"] for array in scan_arrays()}
 
 
 def pool_devices():
@@ -370,8 +375,10 @@ def save_conf():
     kept = [row for row in rows_of(MDADM_CONF) if not row.startswith("ARRAY ")]
     os.makedirs(os.path.dirname(MDADM_CONF), exist_ok=True)
     with open(MDADM_CONF, "w") as file:
-        file.writelines(kept + [row + "\n" for row in scanned.splitlines()
-                                if row.startswith("ARRAY ")])
+        # A new array counts the disk it is still building onto as a spare; a spares=
+        # count recorded then would have mdadm --monitor report a spare missing forever
+        file.writelines(kept + [" ".join(word for word in row.split() if not word.startswith("spares=")) + "\n"
+                                for row in scanned.splitlines() if row.startswith("ARRAY ")])
     run("update-initramfs", "-u", "-k", "all", check=False)
 
 
@@ -394,6 +401,10 @@ def detail(name):
     return {"fields": fields, "rows": rows}
 
 
+def plural(count, word):
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
 def disk_state(words):
     """mdadm's own words for a disk, in the vocabulary the other engine uses."""
     if "faulty" in words or "removed" in words:
@@ -405,10 +416,22 @@ def disk_state(words):
     return "DEGRADED"
 
 
-def describe_disk(row):
-    return {"name": row["path"] or f"slot {row['slot']}", "type": "disk",
-            "state": disk_state(row["state"]), "path": row["path"],
-            "size": 0, "errors": 0, "note": row["state"]}
+def disk_size(device):
+    """A disk's size in bytes, from the kernel's count of 512-byte sectors."""
+    try:
+        return int(read(os.path.join("/sys/class/block", os.path.basename(device), "size")).strip()) * 512
+    except (OSError, ValueError):
+        return 0
+
+
+def describe_disk(row, links=None):
+    """A disk in the array as the desktop shows it, by its stable by-id name rather than the
+    /dev/vdX name mdadm reports, which can change between boots."""
+    links = links if links is not None else {**disks.by_id_links(), **disks.by_id_links(partitions=True)}
+    path = links.get(row["path"], row["path"])
+    return {"name": path or f"slot {row['slot']}", "type": "disk",
+            "state": disk_state(row["state"]), "path": path,
+            "size": disk_size(row["path"]) if row["path"] else 0, "errors": 0, "note": row["state"]}
 
 
 def sync_from(device):
@@ -439,15 +462,27 @@ def pool_status(name):
     found = detail(name)
     fields, rows = found["fields"], found["rows"]
     members = [row for row in rows if row["raid_device"] is not None]
-    spares = [row for row in rows if row["raid_device"] is None and row["slot"] is not None]
+    spares = [row for row in rows if row["raid_device"] is None and "spare" in row["state"]]
+    # mdadm lists a failed disk outside the array, with its old slot left "removed":
+    # show it in that slot, so the disk to replace is named, not "missing"
+    for failed in [row for row in rows if row["raid_device"] is None and "faulty" in row["state"]]:
+        empty = next((row for row in members if not row["path"]), None)
+        if empty:
+            empty.update(path=failed["path"], state=failed["state"])
+        else:
+            members.append(failed)
     level = level_of(fields.get("raid level", "").lower())
     broken = [row for row in members if disk_state(row["state"]) == "FAULTED"]
     state = "ONLINE" if not broken else "DEGRADED"
-    return {"name": name, "state": state, "status": fields.get("state", ""), "action": "",
+    links = {**disks.by_id_links(), **disks.by_id_links(partitions=True)}
+    # mdadm's own state words ("clean, checking") say nothing a person needs unless a disk is gone
+    status = (f"{plural(len(broken), 'disk')} failed. The array still works, with less protection, "
+              "until the disk is replaced." if broken else "")
+    return {"name": name, "state": state, "status": status, "action": "",
             "groups": [{"name": f"{level}-0", "type": level, "state": state, "path": "",
                         "size": 0, "errors": missed(device), "note": "",
-                        "disks": [describe_disk(row) for row in members]}],
-            "spares": [describe_disk(row) for row in spares],
+                        "disks": [describe_disk(row, links) for row in members]}],
+            "spares": [describe_disk(row, links) for row in spares],
             "scan": sync_from(device), "expand": None, "expandable": True}
 
 
@@ -459,11 +494,11 @@ def member_disks(status):
 
 def last_scrub(name):
     """When a check last finished, in seconds since the epoch, or 0."""
-    return int(read_json(CHECKS).get(name, 0))
+    return int(read_json(CHECKS, {}).get(name, 0))
 
 
 def record_check(name, when=None):
-    checks = read_json(CHECKS)
+    checks = read_json(CHECKS, {})
     checks[name] = int(when or time.time())
     write_json(CHECKS, checks)
 
@@ -571,7 +606,10 @@ def replace(name, old, wanted, confirm, wipe_disks):
     disks.prepare(chosen, wipe_disks)
     device = array_device(name)
     replaced = False
-    if disk["path"]:
+    if disk["path"] and disk["state"] == "FAULTED":
+        # A failed disk can't hand its data over; take it out, and the new one is rebuilt
+        run("mdadm", "--manage", device, "--remove", disk["path"], check=False)
+    elif disk["path"]:
         replaced = run("mdadm", "--manage", device, "--replace", disk["path"],
                        "--with", chosen[0]["by_id"], check=False).returncode == 0
     if not replaced:
@@ -674,7 +712,7 @@ def pool_details(name):
             # A plain filesystem has no fragmentation or compression to report
             "fragmentation": None, "compression": 1.0, "logical": size - free,
             "created": created_at(detail(name)["fields"]), "last_scrub": last_scrub(name),
-            "errors": missed(device), "space": space(name)}
+            "errors": missed(device), "space": space(name), "filesystem": filesystem_of(name)}
 
 
 # --------------------------------------------------------------- shares
@@ -704,8 +742,13 @@ def volume_snapshots(share):
 
 
 def share_volumes(name):
-    """An array keeps its shares as plain folders, with no settings on them."""
-    return {}
+    """An array keeps its shares as plain folders in /mnt/NAME/shares, with their
+    settings in shares.json; "dataset" names the folder the way ZFS names a dataset."""
+    folder = os.path.join(pools.mountpoint(name), "shares")
+    if not os.path.isdir(folder):
+        return {}
+    return {entry: {"dataset": f"{name}/shares/{entry}", "path": os.path.join(folder, entry), "readonly": False}
+            for entry in sorted(os.listdir(folder)) if os.path.isdir(os.path.join(folder, entry))}
 
 
 def clear_legacy(name, share):

@@ -2062,6 +2062,42 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
     def options(self, count, size=4 * GB):
         return self.engine.layouts([size] * count)
 
+    def test_mdadm_and_the_kernel_name_an_array_differently(self):
+        # mdadm --detail --scan says /dev/md/tank, a link to the /dev/md127 that /proc/mdstat lists
+        output = SimpleNamespace(stdout=self.SCAN, stderr="", returncode=0)
+        links = {"/dev/md/tank": "/dev/md127", "/dev/md/old": "/dev/md0"}
+        with patch("run", lambda *command, check=True: output), \
+                mock.patch.object(self.engine.os.path, "realpath", side_effect=lambda path: links.get(path, path)):
+            self.assertEqual(self.engine.array_names(), {"/dev/md127": "tank", "/dev/md0": "old"})
+
+    def test_checks_before_the_first_is_recorded(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(self.engine, "CHECKS", os.path.join(directory, "checks.json")):
+            self.assertEqual(self.engine.last_scrub("vault"), 0)
+            self.engine.record_check("vault", 1234)
+            self.assertEqual(self.engine.last_scrub("vault"), 1234)
+
+    def test_an_arrays_shares_are_its_share_folders(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.makedirs(os.path.join(directory, "vault", "shares", "docs"))
+            open(os.path.join(directory, "vault", "shares", "stray-file"), "w").close()
+            with patch("ROOT", directory):
+                found = self.engine.share_volumes("vault")
+        self.assertEqual(found, {"docs": {"dataset": "vault/shares/docs", "readonly": False,
+                                          "path": os.path.join(directory, "vault", "shares", "docs")}})
+
+    def test_saved_arrays_carry_no_spare_count(self):
+        scan = "ARRAY /dev/md/vault metadata=1.2 spares=1 UUID=d6a1:3cf5\n"
+        with tempfile.TemporaryDirectory() as directory:
+            conf = os.path.join(directory, "mdadm.conf")
+            with open(conf, "w") as file:
+                file.write("MAILADDR root\nARRAY /dev/md/gone UUID=1\n")
+            with patch("run", lambda *command, check=True: SimpleNamespace(stdout=scan, stderr="", returncode=0)), \
+                    mock.patch.object(self.engine, "MDADM_CONF", conf):
+                self.engine.save_conf()
+            with open(conf) as file:
+                self.assertEqual(file.read(), "MAILADDR root\nARRAY /dev/md/vault metadata=1.2 UUID=d6a1:3cf5\n")
+
     def best(self, count):
         option = self.options(count)[0]
         self.assertTrue(option["recommended"])
@@ -2195,6 +2231,24 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         self.assertEqual([(r["raid_device"], r["state"], r["path"]) for r in found["rows"]],
                          [(0, "active sync", "/dev/sdb1"), (1, "active sync", "/dev/sdc1"),
                           (2, "removed", ""), (None, "spare", "/dev/sdd1")])
+
+    def test_a_failed_disk_shows_in_its_slot_not_as_a_spare(self):
+        # What mdadm --detail says after mdadm --fail: the slot is "removed", the disk "faulty" outside it
+        rows = [{"slot": 0, "raid_device": 0, "state": "active sync", "path": "/dev/vdf"},
+                {"slot": None, "raid_device": 2, "state": "removed", "path": ""},
+                {"slot": 2, "raid_device": None, "state": "faulty", "path": "/dev/vdh"},
+                {"slot": 3, "raid_device": None, "state": "spare", "path": "/dev/vdj"}]
+        detail = {"fields": {"raid level": "raid5"}, "rows": rows}
+        with mock.patch.object(self.engine, "detail", lambda name: detail), \
+                mock.patch.object(self.engine, "array_device", lambda name: "/dev/md127"), \
+                mock.patch.object(self.engine, "sync_from", lambda device: None), \
+                mock.patch.object(self.engine, "missed", lambda device: 0), \
+                patch("find_pool", lambda name: {"name": name}), patch("by_id_links", lambda partitions=False: {}):
+            status = self.engine.pool_status("vault")
+        self.assertEqual([(d["path"], d["state"]) for d in status["groups"][0]["disks"]],
+                         [("/dev/vdf", "ONLINE"), ("/dev/vdh", "FAULTED")])
+        self.assertEqual([d["path"] for d in status["spares"]], ["/dev/vdj"])
+        self.assertIn("1 disk failed", status["status"])
 
     def test_a_pool_status_names_its_disks_and_spares(self):
         status = {"groups": [{"disks": [{"path": "/dev/sdb1"}, {"path": "/dev/sdc1"}]}],

@@ -16,6 +16,9 @@ const PARITY_NAMES = ["", "Striped with parity", "Striped with double parity", "
 /** What a layout gives, in plain words: "Striped with double parity, in 2 groups of 8 disks" */
 export function describeLayout(option: LayoutOption) {
     const text = option.layout === "single" ? "One disk, no protection"
+        : option.layout === "raid10" ? `Two copies of everything, striped across ${option.width} disks`
+        : option.layout === "raid5" || option.layout === "raid6"
+            ? `${PARITY_NAMES[option.layout === "raid5" ? 1 : 2]} across ${option.width} disks`
         : option.layout === "mirror"
             ? option.groups === 1 ? "Two copies of everything" : `Two copies of everything, on ${option.groups} pairs of disks`
         : PARITY_NAMES[option.survives] + (option.groups === 1 ? ` across ${option.width} disks`
@@ -27,6 +30,7 @@ export function describeLayout(option: LayoutOption) {
 export function technicalLayout(option: LayoutOption) {
     const name = LAYOUT_NAMES[option.layout];
     const groups = option.layout === "single" ? name
+        : option.layout === "raid10" ? `${name} · Two copies, ${option.width} disks`
         : `${option.groups > 1 ? `${option.groups} × ` : ""}${name} of ${option.width} disks`;
     return groups + (option.spares ? `, ${plural(option.spares, "hot spare")}` : "");
 }
@@ -36,7 +40,8 @@ export function survival(option: LayoutOption) {
         return "Losing the disk loses the pool";
     }
     const disks = option.survives === 1 ? "1 disk" : `${option.survives} disks`;
-    const where = option.groups === 1 ? `Any ${disks} can fail`
+    const where = option.layout === "raid10" ? "Any 1 disk can fail, and more if they hold different copies"
+        : option.groups === 1 ? `Any ${disks} can fail`
         : `${disks[0].toUpperCase()}${disks.slice(1)} in each ${option.layout === "mirror" ? "pair" : "group"} can fail`;
     return where + (option.spares ? ", and a spare takes over by itself" : "");
 }
@@ -138,6 +143,7 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list"]));
     const engines = useLoad(() => fnasJson<Engine[]>(["pool", "engines"]));
     const [engine, setEngine] = useState("");
+    const [filesystem, setFilesystem] = useState<"xfs" | "ext4">("xfs");
     const [name, setName] = useState(["tank", "data", "media", "backup"].find(free => !taken.includes(free)) || "");
     const [chosen, setChosen] = useState<string[]>([]);
     const [options, setOptions] = useState<LayoutOption[] | null>(null);
@@ -227,6 +233,23 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                                 <span>Erase the data on the disks marked ⚠. Check they aren't from another pool you want first.</span>
                             </label>
                         )}
+                        {chosenEngine === "mdadm" && (
+                            <div class="field">
+                                <span class="field-label">Format</span>
+                                <label class="choice">
+                                    <input type="radio" name="filesystem" checked={filesystem === "xfs"} onChange={() => setFilesystem("xfs")} />
+                                    <span><strong>XFS</strong> <Badge kind="good">Recommended</Badge><br />
+                                        <span class="muted small">Built for large files and large arrays, and grows quickly when a
+                                            disk is added. It can't be made smaller later.</span></span>
+                                </label>
+                                <label class="choice">
+                                    <input type="radio" name="filesystem" checked={filesystem === "ext4"} onChange={() => setFilesystem("ext4")} />
+                                    <span><strong>ext4</strong><br />
+                                        <span class="muted small">The most common Linux format, readable almost anywhere. Slower to
+                                            check after a crash on a big array.</span></span>
+                                </label>
+                            </div>
+                        )}
                         {problem && (selected.length > 0 || !chosenEngine) && <p class="muted small">{problem}</p>}
                         <div class="row">
                             <Button kind="primary" type="submit" disabled={!!problem}>Create pool</Button>
@@ -239,11 +262,14 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                                          await fnas(["pool", "create", name, option.layout, "--engine", chosenEngine,
                                                      ...selected.map(disk => disk.by_id || disk.path),
                                                      "--width", String(option.width), "--spares", String(option.spares),
+                                                     ...(chosenEngine === "mdadm" ? ["--filesystem", filesystem] : []),
                                                      "--confirm", typed, ...(wipe ? ["--wipe"] : [])]);
                                          setConfirming(false);
                                          onCreated(name);
                                      })}>
-                                <p>{describeLayout(option)} ({technicalLayout(option)}). Everything on these disks will be erased:</p>
+                                <p>{describeLayout(option)} ({technicalLayout(option)}
+                                    {chosenEngine === "mdadm" ? `, formatted ${filesystem === "xfs" ? "XFS" : "ext4"}` : ""}).
+                                    Everything on these disks will be erased:</p>
                                 <ul>{selected.map(disk => <li key={disk.path} class="mono small">{diskName(disk)}</li>)}</ul>
                             </Confirm>
                         )}

@@ -14,6 +14,11 @@ bump.
 
 ### Added
 
+- Create pool names RAID layouts in full ("Two copies of everything, striped across
+  4 disks", "RAID 10 · Two copies, 4 disks") and asks for the format, XFS or ext4. An
+  array's card offers Check array, Repair when a check found mismatches, and only the
+  ways an array grows: one more disk, or spares. Snapshots, Previous Versions and the
+  nightly backup stay visible for arrays, disabled with the reason.
 - Traditional RAID, as a second storage engine: a pool is one array of RAID 1, 5,
   6 or 10 with up to two hot spares, on XFS (recommended, and preselected) or
   ext4. RAID 10 uses the standard two-copy layout. Arrays can be created, grown
@@ -71,6 +76,18 @@ bump.
 
 ### Fixed
 
+- Traditional RAID, found by running it on real disks in the VM:
+  - `mdadm --detail --scan` names an array `/dev/md/NAME` and `/proc/mdstat` calls it
+    `md127`; nothing matched the two, so a new array was never listed as a pool, and
+    progress, mismatch counts and the end of a reshape were never seen.
+  - Shares made on an array were saved but never listed, shared or exported.
+  - A failed disk showed under Hot spares with an empty "Missing disk" slot; it now
+    shows in its own slot, and replacing it takes it out of the array first.
+  - Disks showed as `/dev/vdX` with no size; they show by their stable by-id names.
+  - mdadm.conf kept the `spares=1` a new array reports while it builds.
+  - The pool details view failed before an array's first check.
+  - `fnas pool status NAME` ran `zpool status` for arrays too.
+- `fellowship-nas` now depends on `mdadm` and `xfsprogs`, which the engine needs.
 - A Health dial showing a single part in full colour had a notch at twelve
   o'clock. The gap between parts now appears only when there is more than one.
 - A gauge beside a short row grew to fill the whole track and stretched its

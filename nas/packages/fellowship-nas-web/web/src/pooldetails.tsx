@@ -1,6 +1,7 @@
 // One pool in detail: what uses its space, how full it has been over time, and when it fills
 import { useState } from "preact/hooks";
 import { PoolDetails, UsagePoint, fnasJson, humanSize, plural, when } from "./api";
+import { NO_SNAPSHOTS } from "./backups";
 import { Button, Card, Loading, Notice, useLoad } from "./ui";
 import { chartDay as day, useWidth } from "./charts";
 
@@ -106,6 +107,8 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
             <Loading loaded={details}>{() => {
                 const pool = details.data!;
                 const space = pool.space;
+                const array = pool.engine === "mdadm";
+                const format = pool.filesystem === "ext4" ? "ext4" : "XFS";
                 const points = pool.history[range];
                 const fill = pool.projection;
                 return <>
@@ -120,9 +123,10 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                                 <span class="small muted">{fill.days === undefined ? fill.reason
                                     : `at ${humanSize(fill.per_day!)} a day, the recent rate`}</span></div>
                             <div class="stat"><span class="small muted">Compression</span>
-                                <strong>{pool.compression.toFixed(2)}×</strong>
-                                <span class="small muted">{pool.logical > space.used
-                                    ? `saves ${humanSize(pool.logical - space.used)}` : "saves nothing yet"}</span></div>
+                                <strong>{array ? "–" : `${pool.compression.toFixed(2)}×`}</strong>
+                                <span class="small muted">{array ? `${format} doesn't compress`
+                                    : pool.logical > space.used ? `saves ${humanSize(pool.logical - space.used)}`
+                                    : "saves nothing yet"}</span></div>
                         </div>
                     </Card>
                     <Card title="Space used over time" actions={
@@ -154,11 +158,16 @@ export function PoolDetailsView({ name, back }: { name: string; back: () => void
                     <Card title="About this pool">
                         <div class="table-wrap">
                             <table><tbody>
-                                <tr><th scope="row">Created</th><td>{when(pool.created)}</td></tr>
-                                <tr><th scope="row">Last check for damage</th><td>{pool.last_scrub ? when(pool.last_scrub) : "never"}</td></tr>
-                                <tr><th scope="row">Read, write and checksum errors</th><td>{pool.errors}</td></tr>
-                                <tr><th scope="row">Fragmentation of free space</th><td>{pool.fragmentation === null ? "–"
-                                    : `${pool.fragmentation}%`}<span class="muted small"> (higher slows writes as a pool fills)</span></td></tr>
+                                <tr><th scope="row">Kind of storage</th><td>{array ? `Traditional RAID, formatted ${format}` : "ZFS"}</td></tr>
+                                <tr><th scope="row">Created</th><td>{pool.created ? when(pool.created) : "–"}</td></tr>
+                                <tr><th scope="row">{array ? "Last array check" : "Last check for damage"}</th>
+                                    <td>{pool.last_scrub ? when(pool.last_scrub) : "never"}</td></tr>
+                                <tr><th scope="row">{array ? "Blocks that didn't match at the last check" : "Read, write and checksum errors"}</th>
+                                    <td>{pool.errors}</td></tr>
+                                <tr><th scope="row">Fragmentation of free space</th><td>{pool.fragmentation === null
+                                    ? <span class="muted small">{array ? `${format} doesn't report it` : "–"}</span>
+                                    : <>{pool.fragmentation}%<span class="muted small"> (higher slows writes as a pool fills)</span></>}</td></tr>
+                                {array && <tr><th scope="row">Snapshots</th><td class="muted small">{NO_SNAPSHOTS}</td></tr>}
                             </tbody></table>
                         </div>
                     </Card>

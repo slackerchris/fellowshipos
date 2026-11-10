@@ -114,7 +114,8 @@ export interface Pool {
 }
 
 export interface LayoutOption {
-    layout: "single" | "mirror" | "raidz1" | "raidz2" | "raidz3";
+    // single and raidz are ZFS's; raid5, raid6 and raid10 are traditional RAID's; both have mirror
+    layout: "single" | "mirror" | "raidz1" | "raidz2" | "raidz3" | "raid5" | "raid6" | "raid10";
     width: number;
     groups: number;
     spares: number;
@@ -437,6 +438,9 @@ export interface PoolDetails {
         shares: { name: string; files: number; snapshots: number }[];
         parts: { shares: number; snapshots: number; backups: number; other: number };
     };
+    engine: string;
+    // An array's format, xfs or ext4; ZFS is its own
+    filesystem: string | null;
     history: { hourly: UsagePoint[]; daily: UsagePoint[] };
     projection: { days?: number; per_day?: number; reason?: string };
 }
@@ -504,6 +508,9 @@ export const LAYOUT_NAMES: Record<LayoutOption["layout"], string> = {
     raidz1: "RAIDZ1",
     raidz2: "RAIDZ2",
     raidz3: "RAIDZ3",
+    raid5: "RAID 5",
+    raid6: "RAID 6",
+    raid10: "RAID 10",
 };
 
 export function plural(count: number, word: string) {
