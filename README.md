@@ -1,6 +1,6 @@
 # FellowshipOS
 
-FellowshipOS builds two Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS** and **FellowshipOS Multi-purpose**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools, traditional RAID arrays and Unraid-style pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, light and dark appearances, and four themes chosen in the account menu.
+FellowshipOS builds two Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS** and **FellowshipOS Multi-purpose**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools, traditional RAID arrays and Unraid-style pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances, with four themes chosen in **Settings → Appearance**.
 
 [Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
@@ -136,9 +136,10 @@ python3 -m unittest nas/tests/unit/test_fnas.py
 ```
 
 [CI](.github/workflows/ci.yml) runs those suites on every push and pull request,
-then checks `gofmt` and `go vet` in both Go modules, type-checks and bundles both
-frontends, and runs ShellCheck on the shell scripts. The phase gates in the plan
-still run by hand in a VM, since they need real disks and hours of patience.
+the Go ones under the race detector, then checks `gofmt` and `go vet` in both Go
+modules, lints the Python with ruff, type-checks and bundles both frontends, and
+runs ShellCheck on the shell scripts. The phase gates in the plan still run by
+hand in a VM, since they need real disks and hours of patience.
 
 For desktop development, build the frontend and run the web server and helper in Docker with sample `fnas` responses:
 
@@ -157,7 +158,7 @@ For disk and reinstall testing, use the [QEMU/KVM VM harness](nas/tests/vm/vm.sh
 | [installer/](installer/) | Graphical NAS installer in Go and TypeScript |
 | [nas/packages/](nas/packages/) | NAS packages, Python CLI, Go services, browser desktop, and scheduled jobs |
 | [nas/tests/](nas/tests/) | Python unit tests and VM harness |
-| [docs/](docs/) | [Architecture plan](docs/fellowship-nas-plan.md), [project overview](docs/fellowship-nas-overview.md) of what is built and verified, [next steps](docs/fellowship-nas-next-steps.md), [Files plan](docs/fellowship-nas-files-plan.md) and [November 9 review notes](docs/fellowship-nas-changes.md) |
+| [docs/](docs/) | [Architecture plan](docs/fellowship-nas-plan.md), [project overview](docs/fellowship-nas-overview.md) of what is built and verified, [next steps](docs/fellowship-nas-next-steps.md), [Files plan](docs/fellowship-nas-files-plan.md), [November 9 review notes](docs/fellowship-nas-changes.md) and [November 11 VM walkthrough](docs/fellowship-vm-walkthrough-2026-11-11.md) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, and what is waiting to be released |
 
 ## Troubleshooting

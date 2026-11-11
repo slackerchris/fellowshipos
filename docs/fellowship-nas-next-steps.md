@@ -6,7 +6,9 @@ November 10 against `c29fe37` when the SFTP work landed, again the same day
 against `238700b`, the commit that brought the documents up to Phase 13, and
 again the same day for the working tree on top of it: the two-edition build, the
 reworked install page and the verification that went with them (committed as
-`c6ae5fb`, `e7840d5` and `a442697`), and once more after a review of the docs.
+`c6ae5fb`, `e7840d5` and `a442697`), once more after a review of the docs, and
+on November 11 against `c7dcc2e`, which fixed what a VM walkthrough of both
+images found.
 The three canonical documents remain [the plan](fellowship-nas-plan.md),
 [the overview](fellowship-nas-overview.md) and
 [the review notes](fellowship-nas-changes.md). This file is a short brief for
@@ -21,8 +23,9 @@ picking work back up, not a fourth source of truth.
 | Phases done | 1 to 11, with the gates recorded in the plan; 12 built and its gate left for real hardware |
 | Phase 13 | WebDAV is built three times over: read over HTTPS, then writes with a strong `ETag` and `If-Match` checked as the write commits, then `LOCK`/`UNLOCK` with locks bound to the account that took them and folders that carry the locks inside them. SFTP is built: an account set to Files over SFTP is chrooted to a view of just its shares, with no shell, no forwarding and its view rebuilt whenever a share changes and at boot. **FTP is what is left of the phase**, FTPS first with plain FTP an opt-in |
 | Next | FTP, then the release gates on real hardware: everything in section 3, and the protocol gate in the plan (`An SFTP-only user can't get a shell and sees only their shares`, two accounts over SFTP, FTP and WebDAV) |
-| Tests | 285 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, the installer's edition, layout, engine and server tests pass, and CI runs on every push |
-| Docs baseline | The overview describes `a442697`, which includes the two-edition build and the reworked install page, and the plan's Phase 13 test results record each WebDAV and SFTP slice and what was seen of it, which the overview summarizes and links |
+| Tests | 286 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, the installer's edition, layout, engine and server tests pass, and CI runs on every push |
+| Docs baseline | The overview describes `c7dcc2e`, which includes the two-edition build, the reworked install page and the walkthrough's fixes. The plan's Phase 13 test results record each WebDAV and SFTP slice and what was seen of it, which the overview summarizes and links |
+| VM walkthrough | Nov 11: both ISOs live-booted, installed and started from disk, with the NAS taken through Setup, a pool, a share and Files. The 11 bugs found are fixed in `c7dcc2e`. [The notes](fellowship-vm-walkthrough-2026-11-11.md) keep the suggestions still open |
 
 **The running VM predates all of Phase 13.** The SFTP views, the sshd `Match`
 block and `fellowship-nas-refresh.service` are new files, so they exist only
@@ -121,18 +124,28 @@ Done:
    WebDAV in Phase 13 inherits.
 3. Phase 12, all slices, and the file helper WebDAV reuses.
 4. Phase 13's WebDAV, in three slices, and SFTP.
+5. A walkthrough of both images in a VM, and the fixes for what it found
+   (`c7dcc2e`).
 
 Left, in order:
 
-5. FTP, FTPS by default, sharing the same chroot view SFTP builds.
-6. Hand-made partition layouts, if the automatic plan isn't enough for someone.
+6. Rebuild both ISOs and walk the boot menu and install page again. The fixes
+   in `c7dcc2e` to the default entry, the finished page, the Multi-purpose
+   wording and the step rail have tests and builds, but haven't been seen
+   running. While there, take the wizard's "Storage node" entry out, which the
+   plan says is gone. Then pick from the walkthrough's suggestions: the
+   first-boot wizard asking again for what the installer collected, Debian
+   branding in the boot menu and the firmware entry, and kernel messages over
+   the wizard.
+7. FTP, FTPS by default, sharing the same chroot view SFTP builds.
+8. Hand-made partition layouts, if the automatic plan isn't enough for someone.
    The checks are in `installer/internal/layout/manual.go` with their tests —
    one system, one fat EFI partition of at least 300 MiB, at most one swap, one
    partition allowed to take the rest and last, nothing beyond the disk. What is
    left is the engine half (sgdisk per partition, mkfs per format, the others
    mounted under the target, `fstab` from the plan), the table on the Space step,
    `btrfs-progs` and `xfsprogs` in the image, and an install and boot in the VM.
-7. The catch-up gate on real disks for both engines, then the protocol gate,
+9. The catch-up gate on real disks for both engines, then the protocol gate,
    which section 3 lists item by item.
 
 ## 5a. What a reboot now does, and what to look at
