@@ -71,8 +71,14 @@ export const sessions = () => request<SessionInfo[]>("GET", "/api/sessions");
 export const endSession = (id: string) => request<unknown>("POST", "/api/sessions/end", { id });
 
 /** Run fnas and return what it printed. */
+/** Sent on window after fnas has changed something, so views that only poll,
+ * like the desktop's widgets, can catch up at once instead of minutes later. */
+export const FNAS_CHANGED = "fnas-changed";
+
 export async function fnas(args: string[], input?: string): Promise<string> {
-    return (await request<{ output: string }>("POST", "/api/fnas", { args, input })).output;
+    const output = (await request<{ output: string }>("POST", "/api/fnas", { args, input })).output;
+    window.dispatchEvent(new Event(FNAS_CHANGED));
+    return output;
 }
 
 /** fnas tells the command line how to follow a long job; the desktop shows its progress itself. */

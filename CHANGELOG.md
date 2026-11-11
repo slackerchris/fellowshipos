@@ -342,6 +342,57 @@ bump.
 
 ### Fixed
 
+From the VM walkthrough of both images on Nov 11
+([notes](docs/fellowship-vm-walkthrough-2026-11-11.md)):
+
+- **Boot menu:**
+  - Enter at the boot menu started Debian's text installer. Its entry came first
+    on both images, although the menu's own comment and the docs put it under
+    Advanced.
+  - The graphical install is now the first entry. The text install sits at the
+    top of **Advanced install options**, labelled as the way in for legacy BIOS,
+    without the old list of roles that still named "storage".
+  - `vm.sh install` presses `a` before `i` to reach it.
+- **Install page:**
+  - The finished page said the desktop opens at `https://NAME`. It now gives the
+    name chosen on the You step, and on the machine's own screen its address
+    too. The name comes back with the progress, so it survives a reload.
+  - The Multi-purpose image's page no longer calls itself the NAS installer:
+    - The tab title is the image's own.
+    - Pairing says "the machine being installed" and that the code is 6 digits.
+    - The user-name hint no longer mentions a desktop that image hasn't got.
+  - The summary leaves out "room to grow 0 B".
+  - The step rail kept its pill shape only while it could be clicked; it now
+    keeps it during the install too.
+  - The console printed `https://:443` when the network had no address yet. It
+    now says which port, and how to find the address.
+- **First boot:**
+  - The NAS was left degraded: Debian enables `hd-idle` with
+    `START_HD_IDLE=false`, so the unit failed until it hit its start limit. The
+    NAS role now turns it off unless a spin-down time already turned it on;
+    fnas turns it on when an Unraid-style pool gets one.
+  - The first-boot wizard offered the NAS role on the Multi-purpose image, which
+    carries no NAS packages. It now shows it unavailable with the reason.
+- **Desktop:**
+  - ZFS pools showed their raw size: a RAIDZ2 of four 4 GB disks read "17 GB
+    free of 17 GB" when files could use 7.8 GB. Pool lists now take used and
+    free from the pool's top dataset, so Storage, the widgets and Health agree
+    with the layout card.
+  - The widgets waited up to two minutes after a change: a new pool still read
+    "No pools yet". They now ask again as soon as any app changes something.
+  - Btrfs read "Not built yet (Phase 14)". The plan has it as Phase 17, and so
+    do the engine list and the sample data. The sample data also stops calling
+    Unraid-style unbuilt.
+  - The pool-name hint now shows the name typed (`/mnt/data`) instead of
+    `/mnt/NAME`.
+  - Setup's last page now gives a real share's `mount` line.
+  - Connect lines used the address the page was opened on, even `127.0.0.1`
+    behind a tunnel or port forward. On loopback they now use the NAS's own
+    name.
+  - The Disks widget says "data drives", since it leaves the system disk out
+    and Health's count doesn't.
+  - Snapshots and backup no longer says restoring single files waits for
+    Phase 12: it points to **Earlier versions…** in Files.
 - The list/grid switch in Files was squeezed: it inherited the segmented
   control's share of the row and its wide padding, so two 26px buttons held the
   icons in half of a box and cut them off, the two looking alike. The switch now

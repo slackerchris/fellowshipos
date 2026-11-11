@@ -20,7 +20,7 @@ CATALOGUE = [
                                      "files and stays readable on its own; parity disks are updated every night."),
     ("mdadm", "Traditional RAID", None, "Classic RAID 1, 5, 6 or 10, then formatted with ext4 or XFS. Fast, and "
                                         "any Linux machine can read it; no snapshots or self-repair."),
-    ("btrfs", "Btrfs", 14, "Mirrors with checksums and snapshots, on disks of any size."),
+    ("btrfs", "Btrfs", 17, "Mirrors with checksums and snapshots, on disks of any size."),
 ]
 # Every pool is mounted at /mnt/NAME, on every engine, so no pool name can
 # collide with a folder the system uses

@@ -210,6 +210,13 @@ func serve(installer *server.Server, which edition.Edition) {
 	installer.RemoteURLs = remoteURLs(address)
 	go func() { log.Fatal(away.ListenAndServeTLS("", "")) }()
 	for _, url := range installer.RemoteURLs {
+		// An address with no host part, before the network has given this
+		// machine one, would print as https://:443, which nobody can open
+		if host, port, err := net.SplitHostPort(strings.TrimPrefix(url, "https://")); err == nil && host == "" {
+			log.Printf("%s page for another computer on port %s of this machine's address, once the network gives it one (ip -brief address shows it)",
+				which.Title(), port)
+			continue
+		}
 		log.Printf("%s page for another computer on %s", which.Title(), url)
 	}
 	log.Printf("  the certificate's SHA-256 is %s", fingerprint)

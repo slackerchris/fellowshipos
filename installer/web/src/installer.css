@@ -122,6 +122,18 @@ th { width: 120px; }
     cursor: pointer;
 }
 .steps button:hover { border-color: var(--gold); color: var(--text); }
+/* While the install runs the rail can't be used, but it keeps its shape */
+.steps span {
+    display: inline-block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 4px 12px;
+}
+.steps li.current span { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.steps li.done span { background: var(--good-soft); color: var(--good); }
 .steps li.current button { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .steps li.done button { background: var(--good-soft); color: var(--good); }
 

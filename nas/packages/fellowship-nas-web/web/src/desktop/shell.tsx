@@ -1,6 +1,6 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Alert, DiskHealth, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
+import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
 import { MODES, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
@@ -44,7 +44,17 @@ function useStatus(admin: boolean) {
         };
         refresh();
         const timer = setInterval(refresh, POLL);
-        return () => { current = false; clearInterval(timer); };
+        // A change made in any app, such as a new pool, shows in the widgets
+        // straight away; a burst of changes asks once
+        let soon = 0;
+        const changed = () => { clearTimeout(soon); soon = window.setTimeout(refresh, 500); };
+        window.addEventListener(FNAS_CHANGED, changed);
+        return () => {
+            current = false;
+            clearInterval(timer);
+            clearTimeout(soon);
+            window.removeEventListener(FNAS_CHANGED, changed);
+        };
     }, [admin]);
     return status;
 }
@@ -167,7 +177,8 @@ function DisksWidget({ status, open }: { status: Status; open: (app: AppId) => v
         <section class="widget disks-widget" aria-label="Disks">
             <button type="button" class="widget-head" onClick={() => open("health")}>
                 <h2>Disks</h2>
-                <span class="small muted">{plural(disks.length, "drive")}</span>
+                {/* The system disk has no bay here, so the count says what it counts */}
+                <span class="small muted">{plural(disks.length, "data drive")}</span>
             </button>
             {!health && <p class="muted small">{status.error ? "Unavailable" : "Loading…"}</p>}
             {health && !disks.length && <p class="small muted">No drive reports itself yet.</p>}

@@ -71,11 +71,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     );
 }
 
-function Pairing({ onPaired }: { onPaired: () => void }) {
+function Pairing({ greeting, onPaired }: { greeting: Hello; onPaired: () => void }) {
     const [code, setCode] = useState("");
     const [error, setError] = useState("");
     return (
-        <Frame>
+        <Frame title={greeting.title}>
             <form class="stack" onSubmit={async event => {
                 event.preventDefault();
                 try {
@@ -85,8 +85,9 @@ function Pairing({ onPaired }: { onPaired: () => void }) {
                     setError((failure as Error).message);
                 }
             }}>
-                <p>To install from this computer, type the pairing code shown on the NAS's own screen.</p>
-                <Field label="Pairing code">
+                <p>To install from this computer, type the pairing code shown on the screen of the machine being installed.
+                    Check first that the certificate your browser shows has the SHA-256 printed on that screen.</p>
+                <Field label="Pairing code" hint="6 digits">
                     <input value={code} inputMode="numeric" autoComplete="off" maxLength={6}
                            onInput={event => setCode(event.currentTarget.value)} />
                 </Field>
@@ -230,7 +231,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                 <Field label="Your name">
                     <input value={settings.full_name} autoComplete="name" onInput={event => setName(event.currentTarget.value)} />
                 </Field>
-                <Field label="User name" hint="For logging in to the desktop and over SSH">
+                <Field label="User name" hint={info.edition === "nas" ? "For logging in to the desktop and over SSH" : "For logging in here and over SSH"}>
                     <input value={settings.user} autoComplete="username" autoCapitalize="none" spellcheck={false}
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
                 </Field>
@@ -275,7 +276,7 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
                 <tbody>
                     <tr><th>Disk</th><td>{size(disk.size)} {disk.model} <span class="mono small">{shortName(disk.path)}</span>
                         {disk.contents?.length ? <><br /><span class="small warning-text">Holds {disk.contents.join(", ")}. It is erased.</span></> : null}</td></tr>
-                    <tr><th>Layout</th><td>System {size(layout.system)}, room to grow {size(layout.reserve)}, swap {size(layout.swap)}
+                    <tr><th>Layout</th><td>System {size(layout.system)}{layout.reserve ? `, room to grow ${size(layout.reserve)}` : ""}, swap {size(layout.swap)}
                         {layout.data ? `, data ${size(layout.data)} left empty` : ""}</td></tr>
                     <tr><th>Name</th><td>{settings.hostname}</td></tr>
                     <tr><th>Account</th><td>{settings.user}{settings.full_name ? ` (${settings.full_name})` : ""}, administrator</td></tr>
@@ -289,7 +290,9 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
     );
 }
 
-function Installing({ state, edition, onRetry }: { state: Progress; edition?: string; onRetry: () => void }) {
+function Installing({ state, edition, hostname, addresses, onRetry }: {
+    state: Progress; edition?: string; hostname: string; addresses?: string[]; onRetry: () => void;
+}) {
     const [restarting, setRestarting] = useState(false);
     const log = state.log || [];
     return (
@@ -312,7 +315,9 @@ function Installing({ state, edition, onRetry }: { state: Progress; edition?: st
                 <>
                     <Notice kind="done">FellowshipOS is installed. Remove the USB stick or disc, then restart. After the first start,
                         the setup on screen finishes the machine{edition === "nas"
-                            ? ", and the NAS desktop opens at https://NAME from any browser" : " and asks what it will do"}.</Notice>
+                            ? <>, and the NAS desktop opens from any browser at <span class="mono">https://{hostname}</span>
+                                {addresses?.length ? <> or <span class="mono">https://{addresses[0]}</span></> : null}</>
+                            : " and asks what it will do"}.</Notice>
                     <div class="row">
                         <button class="button button-primary" type="button" disabled={restarting}
                                 onClick={() => { setRestarting(true); reboot().catch(() => {}); }}>
@@ -348,6 +353,7 @@ function Installer({ greeting }: { greeting: Hello }) {
 
     const load = () => machine().then(found => {
         setInfo(found);
+        document.title = `Install ${found.title}`;
         setSettings(previous => ({ ...previous, timezone: guessTimezone(found.timezones) }));
     }, failure => setError(failure.message));
     useEffect(() => { load(); }, []);
@@ -376,7 +382,8 @@ function Installer({ greeting }: { greeting: Hello }) {
 
     if (state && state.phase !== "choose") {
         return <Frame step={3} title={info?.title} subtitle={info?.subtitle}>
-            <Installing state={state} edition={info?.edition} onRetry={() => { setState(null); load(); }} />
+            <Installing state={state} edition={info?.edition} hostname={state.hostname || settings.hostname}
+                        addresses={greeting.addresses} onRetry={() => { setState(null); load(); }} />
         </Frame>;
     }
     if (error) {
@@ -443,7 +450,10 @@ function Installer({ greeting }: { greeting: Hello }) {
 function App() {
     const [greeting, setGreeting] = useState<Hello | null>(null);
     const [error, setError] = useState("");
-    const check = () => hello().then(setGreeting, failure => setError(failure.message));
+    const check = () => hello().then(found => {
+        setGreeting(found);
+        found.title && (document.title = `Install ${found.title}`);
+    }, failure => setError(failure.message));
     useEffect(() => { check(); }, []);
     // The network often comes up after the installer, so the screen keeps asking for its address
     useEffect(() => {
@@ -460,7 +470,7 @@ function App() {
         return <Frame><p class="muted">Starting…</p></Frame>;
     }
     if (!greeting.allowed) {
-        return <Pairing onPaired={check} />;
+        return <Pairing greeting={greeting} onPaired={check} />;
     }
     return <Installer greeting={greeting} />;
 }

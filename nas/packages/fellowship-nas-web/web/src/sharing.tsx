@@ -1,7 +1,7 @@
 // Share creation, the ways to share, the LAN subnet and SMB passwords, shared by the Shares page and the setup wizard
 import { useState } from "preact/hooks";
 import {
-    Access, Group, Level, Pool, Protocol, Share, SharingSettings, User, accessArgs, fnas, fnasJson, onOff,
+    Access, Group, Level, Pool, Protocol, Share, SharingSettings, SystemInfo, User, accessArgs, fnas, fnasJson, onOff,
 } from "./api";
 import { Badge, Button, Card, Field, Loading, Notice, Result, useAction, useLoad } from "./ui";
 
@@ -10,9 +10,19 @@ export const STATE_BADGE = {
     off: "neutral",
 } as const;
 
+const LOOPBACK = /^(localhost|127(\.\d+){3}|\[?::1\]?)$/;
+
+/** The name other machines reach the NAS by. That is the address this page was
+ * opened on, unless it was opened on loopback (a tunnel or a port forward), which
+ * means nothing to another machine: then it is the NAS's own name. */
+export function useShareHost(): string {
+    const here = window.location.hostname;
+    const info = useLoad(() => LOOPBACK.test(here) ? fnasJson<SystemInfo>(["system", "show"]) : Promise.resolve(null));
+    return info.data?.hostname || here;
+}
+
 /** How to reach a share, or every share, over one protocol. */
-function connectTo(protocol: Protocol, shares: Share[]) {
-    const host = window.location.hostname;
+function connectTo(host: string, protocol: Protocol, shares: Share[]) {
     const example = shares.find(share => share[protocol.name as "smb" | "nfs"]);
     if (protocol.name === "smb") {
         return [`\\\\${host}\\${example?.name || "SHARE"}`, `smb://${host}/${example?.name || "SHARE"}`];
@@ -25,6 +35,7 @@ function connectTo(protocol: Protocol, shares: Share[]) {
 
 /** Every way to share files, built or not, so nothing is hidden behind having a pool. */
 export function WaysToShare({ protocols, shares }: { protocols: Protocol[]; shares: Share[] }) {
+    const host = useShareHost();
     return (
         <Card title="Ways to share">
             <div class="table-wrap">
@@ -37,7 +48,7 @@ export function WaysToShare({ protocols, shares }: { protocols: Protocol[]; shar
                                 <td class="small">{protocol.for}</td>
                                 <td><Badge kind={STATE_BADGE[protocol.state]}>{protocol.detail}</Badge></td>
                                 <td class="small mono">
-                                    {connectTo(protocol, shares).map(line => <div key={line}>{line}</div>)}
+                                    {connectTo(host, protocol, shares).map(line => <div key={line}>{line}</div>)}
                                     {protocol.state === "not-built" || protocol.state === "later" ? <span class="muted">–</span> : null}
                                 </td>
                             </tr>

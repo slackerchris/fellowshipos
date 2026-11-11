@@ -5,7 +5,7 @@ import {
     fnasJson, onOff,
 } from "./api";
 import { NO_SNAPSHOTS, PolicyEditor, snapshotsWork } from "./backups";
-import { AccessEditor, CreateShare, LanSubnet, NfsServer, SmbServer, nobody } from "./sharing";
+import { AccessEditor, CreateShare, LanSubnet, NfsServer, SmbServer, nobody, useShareHost } from "./sharing";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 /** "kim (read), group family (read and write)" */
@@ -222,8 +222,7 @@ function protocolsOf(share: Share) {
 }
 
 /** Where to reach a share from another machine, per protocol it is on. */
-function connectLines(share: Share) {
-    const host = window.location.hostname;
+function connectLines(host: string, share: Share) {
     const lines = [];
     if (share.smb) {
         lines.push(`\\\\${host}\\${share.name}`, `smb://${host}/${share.name}`);
@@ -251,7 +250,7 @@ function SharePanel({ share, lan, busy, toggle, onDone }: {
     toggle: (share: Share, protocol: "nfs" | "smb" | "webdav" | "sftp") => void;
     onDone: () => void;
 }) {
-    const lines = connectLines(share);
+    const lines = connectLines(useShareHost(), share);
     return (
         <div class="stack share-panel">
             <div class="connect-block">

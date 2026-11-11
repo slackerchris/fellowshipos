@@ -186,10 +186,14 @@ echo "    2) Docker node"
 echo "    3) Server (web / app / database / proxy)"
 echo "    4) Monitor node"
 echo "    5) Storage node (mergerfs + SnapRAID)"
-# Containers can't load ZFS or own disks
+# Containers can't load ZFS or own disks, and only the NAS image carries the
+# NAS packages
 if systemd-detect-virt --container --quiet; then
     NAS_AVAILABLE="N"
     echo "    6) NAS / Home Server (full installs only)"
+elif [ ! -d /usr/share/fellowshipos/nas-repo ]; then
+    NAS_AVAILABLE="N"
+    echo "    6) NAS / Home Server (install the NAS image for this)"
 else
     NAS_AVAILABLE="Y"
     echo "    6) NAS / Home Server (ZFS + web UI)"
@@ -206,7 +210,7 @@ while true; do
     case "$SETUP_FLAVOR_CHOICE" in
         6)
             [ "$NAS_AVAILABLE" = "Y" ] && break
-            echo -e "  ${RED}The NAS role needs a full install from the ISO. Choose another option.${RESET}"
+            echo -e "  ${RED}The NAS role needs a full install from the NAS image. Choose another option.${RESET}"
             ;;
         1|2|3|4|5|7) break ;;
         *) echo -e "  ${RED}Please enter a number between 1 and 7.${RESET}" ;;

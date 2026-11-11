@@ -29,6 +29,14 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y fellowship-nas fellowship-nas-smb fellowship-nas-web
 
+# Debian enables hd-idle on install with START_HD_IDLE=false, so the unit exits,
+# restarts until it hits the start limit and leaves the system degraded. fnas
+# turns it on when an Unraid-style pool is given a spin-down time.
+if ! grep -qs '^START_HD_IDLE=true' /etc/default/hd-idle; then
+    systemctl disable --now hd-idle.service 2> /dev/null || true
+    systemctl reset-failed hd-idle.service 2> /dev/null || true
+fi
+
 # The desktop lets nas-admins manage the NAS; the wizard's user is the first one
 if [ -n "$SUDO_USER" ] && id "$SUDO_USER" > /dev/null 2>&1; then
     usermod -aG nas-admins "$SUDO_USER"

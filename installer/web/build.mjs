@@ -12,7 +12,7 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>Install FellowshipOS NAS</title>
+  <title>Install FellowshipOS</title>
   <link rel="stylesheet" href="main.css">
 </head>
 <body>

@@ -112,9 +112,18 @@ def list_pools():
     fields = ("name", "size", "allocated", "free", "health", "readonly")
     output = run("zpool", "list", "-Hp", "-o", ",".join(fields)).stdout
     found = [dict(zip(fields, line.split("\t"))) for line in output.splitlines()]
+    # zpool counts parity and mirror copies, so a RAIDZ2 of four disks reads as
+    # twice the room it has. The pool's top dataset says what files can use.
+    usable = {}
+    for line in run("zfs", "list", "-Hp", "-d", "0", "-o", "name,used,avail", check=False).stdout.splitlines():
+        name, used, avail = line.split("\t")
+        usable[name] = (int(used), int(avail))
     for pool in found:
         for key in ("size", "allocated", "free"):
             pool[key] = int(pool[key])
+        if pool["name"] in usable:
+            used, avail = usable[pool["name"]]
+            pool.update(size=used + avail, allocated=used, free=avail)
         pool["readonly"] = pool["readonly"] == "on"
     return found
 

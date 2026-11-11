@@ -4,7 +4,7 @@ import { AlertSetup } from "./alerting";
 import { BackupJob } from "./backups";
 import { DesktopContext } from "./desktop/context";
 import { CreatePool, ImportPools } from "./pools";
-import { CreateShare, LanSubnet } from "./sharing";
+import { CreateShare, LanSubnet, useShareHost } from "./sharing";
 import { AddUser } from "./users";
 import { Badge, Button, Card, Loading, Page, Result, useAction, useLoad } from "./ui";
 
@@ -57,14 +57,18 @@ function SharesStep() {
 }
 
 function DoneStep() {
-    const host = window.location.hostname;
+    const host = useShareHost();
+    const shares = useLoad(() => fnasJson<Share[]>(["share", "list"]));
+    // Real names where there are shares, so the lines can be copied as they are
+    const nfs = shares.data?.find(share => share.nfs);
     return (
         <Card title="Your NAS is ready">
             <p>Open shares from other computers:</p>
             <ul>
                 <li>Windows: <span class="mono">{`\\\\${host}`}</span> in File Explorer</li>
                 <li>Mac: Finder → Go → Connect to Server → <span class="mono">{`smb://${host}`}</span></li>
-                <li>Linux: <span class="mono">{`mount ${host}:/mnt/POOL/shares/NAME /media/NAME`}</span></li>
+                <li>Linux: <span class="mono">{`mount ${host}:${nfs?.path || "/mnt/POOL/shares/SHARE"} /media/${nfs?.name || "SHARE"}`}</span>
+                    {!nfs && <span class="muted small"> (once a share is on NFS, its own line shows here)</span>}</li>
             </ul>
             <p class="muted">Each step lives on in its own app: Storage, Users, Shares, Snapshots and backup, and Alerts. Setup
                 won't open by itself again; Settings → Setup runs it again.</p>

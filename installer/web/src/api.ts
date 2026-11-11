@@ -36,6 +36,8 @@ export interface Machine {
 export interface Hello {
     allowed: boolean;
     local: boolean;
+    edition?: "nas" | "multi";
+    title?: string;
     code?: string;
     addresses?: string[];
     remote_urls?: string[];
@@ -47,6 +49,7 @@ export interface Progress {
     step: number;
     log: string[] | null;
     error?: string;
+    hostname?: string;
 }
 
 export interface Settings {

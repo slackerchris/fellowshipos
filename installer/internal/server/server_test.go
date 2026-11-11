@@ -92,6 +92,10 @@ func TestScreenIsAllowedAndSeesTheCode(t *testing.T) {
 	if remote["allowed"] != false || remote["code"] != nil || remote["addresses"] != nil {
 		t.Fatalf("laptop saw %v", remote)
 	}
+	// The pairing page names the image, so it needs the title before pairing
+	if remote["title"] != s.edition.Title() || remote["edition"] != s.edition.String() {
+		t.Fatalf("laptop wasn't told which image this is: %v", remote)
+	}
 	if code := send(s, req{method: "GET", path: "/api/machine", remote: laptop, secure: true}).Code; code != 401 {
 		t.Fatalf("unpaired laptop: %d", code)
 	}
@@ -197,7 +201,8 @@ func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	var state progress
 	json.Unmarshal(send(s, req{method: "GET", path: "/api/progress", remote: screen}).Body.Bytes(), &state)
-	if state.Phase != "done" {
+	// The finished page says where to find the machine, by the name chosen
+	if state.Phase != "done" || state.Hostname == "" {
 		t.Fatalf("progress %+v", state)
 	}
 	if code := send(s, req{method: "POST", path: "/api/install", remote: screen,

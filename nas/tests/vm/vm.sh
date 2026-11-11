@@ -139,7 +139,7 @@ case "$MODE" in
 
         # Timed keystrokes through the real boot menu, so the shipped preseed
         # is what gets tested. Delays are generous and assume KVM.
-        sleep 15; keys i                        # GRUB: Start installer
+        sleep 15; keys a; sleep 2; keys i       # GRUB: Advanced, then the text installer
         sleep 70; keys ret; sleep 3; keys ret; sleep 3; keys ret   # Language, location, keyboard
         sleep 60; type_line tester              # Full name
         sleep 3;  keys ret                      # Username

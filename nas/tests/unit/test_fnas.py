@@ -107,6 +107,8 @@ class Fake:
             ok.stdout = self.pools
         elif command[:2] == ("zpool", "list"):
             pass
+        elif command[:5] == ("zfs", "list", "-Hp", "-d", "0"):
+            pass  # the usable room of each pool, read alongside zpool list
         elif command == ("zpool", "import", "-d", fnas.BY_ID_DIR):
             ok.stdout, ok.returncode = self.imports, self.import_rc
             ok.stderr = "" if self.imports else "no pools available to import"
@@ -2324,11 +2326,11 @@ class Engines(unittest.TestCase):
         self.assertEqual([(e["name"], e["title"], e["available"]) for e in found],
                          [("zfs", "ZFS", True), ("mergerfs", "Unraid-style", True),
                           ("mdadm", "Traditional RAID", True), ("btrfs", "Btrfs", False)])
-        self.assertEqual(found[3]["reason"], "Not built yet (Phase 14)")
+        self.assertEqual(found[3]["reason"], "Not built yet (Phase 17)")
 
     def test_an_unbuilt_engine_says_so(self):
         with patch("unavailable", lambda: ""), self.assertRaisesRegex(fnas.FnasError, "Btrfs can't be used "
-                                                                       r"here: Not built yet \(Phase 14\)"):
+                                                                       r"here: Not built yet \(Phase 17\)"):
             fnas.engine_named("btrfs")
         with self.assertRaisesRegex(fnas.FnasError, "no such engine"):
             fnas.engine_named("lvm")
@@ -2338,6 +2340,18 @@ class Engines(unittest.TestCase):
                 self.assertRaisesRegex(fnas.FnasError, "Traditional RAID can't be used here: "
                                                             "mdadm isn't installed"):
             fnas.engine_named("mdadm")
+
+    def test_zfs_pools_show_the_room_files_can_use(self):
+        # A RAIDZ2 of four 4 GiB disks: zpool counts 16 GiB, files get about 8
+        def run(*command, check=True, stdin=None, timeout=None):
+            if command[:2] == ("zpool", "list"):
+                return SimpleNamespace(stdout="tank\t16000\t40\t15960\tONLINE\toff\n", returncode=0)
+            if command[:2] == ("zfs", "list"):
+                return SimpleNamespace(stdout="tank\t20\t7980\n", returncode=0)
+            raise AssertionError(command)
+        with mock.patch.object(zfs, "run", run):
+            pool, = zfs.list_pools()
+        self.assertEqual((pool["size"], pool["allocated"], pool["free"]), (8000, 20, 7980))
 
     def test_zfs_says_why_it_cant_be_used(self):
         with patch("unavailable", lambda: "Secure Boot is on"):

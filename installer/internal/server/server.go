@@ -47,6 +47,9 @@ type progress struct {
 	Step  int      `json:"step"`
 	Log   []string `json:"log"`
 	Error string   `json:"error,omitempty"`
+	// The name chosen for the machine, so the finished page can say where to
+	// find it even after the page was reloaded
+	Hostname string `json:"hostname,omitempty"`
 }
 
 type Server struct {
@@ -203,7 +206,10 @@ func (s *Server) Handler() http.Handler {
 // hello tells the page whether it may go on, and shows the pairing code
 // only on the machine's own screen
 func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
-	answer := map[string]any{"allowed": s.allowed(r), "local": local(r)}
+	// The image's name is no secret, and the pairing page needs it to say
+	// which installer this is
+	answer := map[string]any{"allowed": s.allowed(r), "local": local(r),
+		"edition": s.edition.String(), "title": s.edition.Title()}
 	if local(r) {
 		s.mu.Lock()
 		answer["code"] = s.code
@@ -363,7 +369,7 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "An install has already started.")
 		return
 	}
-	s.state = progress{Phase: "installing", Steps: engine.Steps, Step: -1}
+	s.state = progress{Phase: "installing", Steps: engine.Steps, Step: -1, Hostname: body.Hostname}
 	s.mu.Unlock()
 	log.Printf("installing to %s for %s", body.Disk, body.User)
 

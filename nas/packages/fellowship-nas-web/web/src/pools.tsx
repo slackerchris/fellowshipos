@@ -187,7 +187,7 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
                 return (
                     <form class="stack" onSubmit={event => { event.preventDefault(); setConfirming(true); }}>
                         <EnginePicker engines={engines.data!} chosen={chosenEngine} setChosen={setEngine} />
-                        <Field label="Pool name" hint="It is mounted at /mnt/NAME, with shares in /mnt/NAME/shares">
+                        <Field label="Pool name" hint={`It is mounted at /mnt/${name || "NAME"}, with shares in /mnt/${name || "NAME"}/shares`}>
                             <input value={name} onInput={event => setName(event.currentTarget.value)} />
                         </Field>
                         {!usable.length && (

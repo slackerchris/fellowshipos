@@ -159,8 +159,8 @@ function SnapshotSchedules() {
                             </table>
                         </div>
                     )}
-                    <Notice>Browsing snapshots and restoring single files here isn't built yet: it comes with the Files app
-                        (Phase 12). Until then, use Previous Versions in Windows, or the snapshot folders over SSH.</Notice>
+                    <Notice>To open or bring back one file from a snapshot, pick it in Files and choose Earlier versions…;
+                        Previous Versions in Windows works too.</Notice>
                 </div>
             )}</Loading>
         </Card>

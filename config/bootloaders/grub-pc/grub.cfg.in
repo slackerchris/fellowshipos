@@ -1,11 +1,10 @@
 source /boot/grub/config.cfg
 
-# FellowshipOS: the graphical installer installs this image. auto/config fills
-# in which image that is, and the same value goes on the kernel command line for
-# the installer to read. The text installer stays in the advanced menu for
-# machines that start in legacy BIOS mode, which the graphical one doesn't do yet.
-source  /boot/grub/install_start.cfg
-
+# FellowshipOS: the graphical installer installs this image, so it is the first
+# entry and the one Enter starts. auto/config fills in which image that is, and
+# the same value goes on the kernel command line for the installer to read. The
+# text installer stays in the advanced menu for machines that start in legacy
+# BIOS mode, which the graphical one doesn't do yet.
 menuentry "@ENTRY@" --hotkey=@HOTKEY@ {
         linux   @KERNEL_LIVE@ @APPEND_LIVE@ fellowship.installer=@EDITION@
         initrd  @INITRD_LIVE@
@@ -37,6 +36,7 @@ submenu 'Advanced install options ...' --hotkey=a {
 
         source /boot/grub/theme.cfg
 
+        source  /boot/grub/install_start.cfg
         source  /boot/grub/install.cfg
 
 }
