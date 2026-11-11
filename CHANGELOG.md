@@ -14,6 +14,43 @@ bump.
 
 ### Added
 
+- The install page walks in any order. Its four steps — **Disk**, **Space**,
+  **You** and **Install** — are buttons in the rail at the top, so any of them
+  opens at any time, and the rail shows how far the install has got rather than
+  which step was last visited. Each step ends with one button naming the step it
+  leads to, so there is no Back button to pair with it. Landing on a step early
+  says what is missing and offers the way to it, instead of showing half a form.
+- The erasure is agreed to on the disk itself: ticking a disk card's box chooses
+  that disk and agrees that everything on it is erased. A disk holding something
+  says what it holds, a disk that can't be used shows why with a dashed box, and
+  ticking another disk is the whole of changing one's mind. The typed phrase and
+  the separate confirmation it needed are gone.
+- The user name follows the name typed on the You step — first word, lower case,
+  accents and characters a user name can't hold dropped, "Chris Smith" giving
+  "chris" — and stops following the moment it is edited by hand.
+- `layout.CheckManual` and `layout.ResolveManual` decide whether a hand-made
+  partition plan is installable: one system at `/` on ext4, btrfs or xfs, one fat
+  `/boot/efi` of at least 300 MiB, at most one swap, at most one partition taking
+  the rest of the disk and that one last, no two partitions on one mount point,
+  nothing beyond the disk, and a system large enough for the install. Nothing
+  offers such a plan yet; the engine and the page that use these checks are still
+  to be written.
+- The VM harness gained a `remote` mode, which boots the image's own kernel with
+  `fellowship.installer.remote=:443 console=ttyS0` so the page can be driven from
+  a browser on the host with the certificate's fingerprint and the pairing code
+  in the serial log, and `FELLOWSHIP_VM_DISPLAY=gtk` to show the machine's own
+  screen.
+
+- Two images, **FellowshipOS NAS** and **FellowshipOS Multi-purpose**, built from
+  one live system and one installer. The boot menu puts
+  `fellowship.installer=nas` or `fellowship.installer=multi` on the kernel
+  command line and the installer takes it from there: the NAS image records the
+  NAS role and leaves a data partition for a pool, the multi-purpose image gives
+  the system the whole disk and leaves the role to first boot's choices. The
+  page names the image, and the space slider gives way to a plain sentence where
+  there is no data partition to size. Debian's text installer stays in the
+  advanced menu for machines that start in legacy BIOS mode.
+
 - Sharing, taking a way in away over SFTP takes effect at once. Every change to
   a share rebuilds each account's view as well as the NFS and Samba files, so
   turning SFTP off for a share, or taking someone off it, needs no second
@@ -225,6 +262,11 @@ bump.
 
 ### Changed
 
+- The boot menu is generated for each image instead of being committed. Each
+  edition's entry names itself — **Install FellowshipOS NAS (graphical)** or
+  **Install FellowshipOS Multi-purpose (graphical)** — carries its own
+  `fellowship.installer=` value, and keeps Debian's text installer in the advanced
+  submenu for legacy BIOS machines.
 - Files looks and behaves like a file browser: the shares down the left with how
   you may use each one, a toolbar with back, up and refresh over a breadcrumb that
   starts at the share's name, a sortable list with a header for name, size and
@@ -284,6 +326,19 @@ bump.
 - Health's monthly pool check is now **Monthly storage checks**, it covers every
   writable pool rather than only ZFS ones, and each engine names its own action:
   Scrub for a ZFS pool, Array check for traditional RAID.
+- The Shares app has a WebDAV switch beside SMB, NFS and SFTP, so a share made
+  before Phase 13 can be served over HTTPS without a shell command. A share's row
+  names WebDAV among its protocols, and **Connect** offers its `/dav/` address.
+- The graphical installer serves the page on loopback, for the machine's own
+  screen, and installing from another computer is a mode that has to be asked
+  for: `-remote ADDRESS` serves the page over HTTPS with a certificate made at
+  boot and prints that certificate's SHA-256 and the pairing code on the console.
+  The pairing cookie is `Secure`, and a request from anywhere but loopback is
+  refused unless it came in over HTTPS.
+- `./build.sh` builds both images and names them
+  `fellowshipos-<edition>-amd64-<version>.hybrid.iso`; `FELLOWSHIP_EDITIONS=nas`
+  or `multi` builds one of them. The LXC template comes from the multi-purpose
+  image, and the NAS packages are only in the NAS image.
 
 ### Fixed
 
@@ -357,3 +412,44 @@ bump.
   sparkline with it. Gauges are capped and centred in their cell.
 - `__pycache__` and `*.pyc` are ignored, so a byte-compile pass leaves nothing to
   commit.
+- A share shared only over WebDAV said "Not shared" on its row, because the
+  protocol line knew SMB, NFS and SFTP only.
+- WebDAV read a `Destination` as an already-decoded path while a request's own
+  address was read a segment at a time, so `%2F` in a `MOVE` or `COPY`
+  destination became a folder instead of being refused. Both go through one
+  reader now, and a Destination naming another server answers 502 rather than
+  being taken for this NAS.
+- An SFTP view that could not be rebuilt said nothing. An unmount that failed
+  even when detached left the share in place, and so still reachable by the
+  account that had lost it; a failed bind mount left an empty folder that looked
+  like a share the person could not read. Both are now checked against the
+  kernel's own mount list, written to the journal, and raised as an alert, and a
+  share that failed to mount is not shown at all.
+- The helper took the whole process down, and every open session with it, if the
+  machine could not read from its random source; a login now answers that it
+  can't start a session instead.
+- The sshd drop-in for SFTP now ends with `Match all`. Debian puts the `Include`
+  for that directory near the top of `sshd_config`, so without it every line
+  after the include — `UsePAM`, `Subsystem sftp` — was read inside the match,
+  which `sshd -t` refuses; the settings were restored and the SFTP views never
+  took effect on a stock host.
+- Changing a password, turning an account off or removing it now signs that
+  account out everywhere: `fnas` records the moment, and the helper refuses any
+  session that started before it, so the password that has just been replaced
+  can't still be in use on another computer.
+- A WebDAV login tells the helper which address it came from. Every WebDAV
+  attempt used to share one throttle, so five wrong passwords from anywhere on
+  the network held up everyone else's file apps for up to five minutes, and the
+  alert gave no address at all.
+- WebDAV uploads have the same size cap as the desktop's, and say 413 rather
+  than "the helper isn't running" when a file is past it; a share could be filled
+  with one unbounded `PUT` before.
+- The helper reads a request line of at most a megabyte, so a request can no
+  longer grow the root process's memory simply by not ending.
+- The installer no longer starts a session with a token it could not make: a
+  failed read of the kernel's random source left the pairing cookie all zeros,
+  and that server erases disks as root.
+- WebDAV decides from the connection whether a password may be read, rather than
+  from the scheme the server was started with: a plain HTTP request is refused
+  before the password is looked at, and the helper is never asked about it, even
+  when the server was told it was serving HTTPS.

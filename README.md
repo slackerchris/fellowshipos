@@ -1,6 +1,6 @@
 # FellowshipOS
 
-FellowshipOS builds a Debian Trixie live ISO and a Proxmox LXC template for amd64 homelab systems. **FellowshipNAS** is its full-install NAS role. It manages disks, ZFS pools and traditional RAID arrays, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, light and dark appearances, and four themes chosen in the account menu.
+FellowshipOS builds two Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS** and **FellowshipOS Multi-purpose**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools and traditional RAID arrays, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, light and dark appearances, and four themes chosen in the account menu.
 
 [Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
@@ -14,15 +14,16 @@ On a Linux host with Docker, internet access, and at least 10 GB of free space, 
 
 | Output | Use |
 | --- | --- |
-| `live-image-amd64.hybrid.iso` | Try FellowshipOS live or install it on physical hardware or a VM |
+| `fellowshipos-nas-amd64-1.0.hybrid.iso` | Install FellowshipNAS, or try it live |
+| `fellowshipos-multi-amd64-1.0.hybrid.iso` | Install a general FellowshipOS machine, or try it live |
 | `fellowshipos-trixie-amd64-1.0_lxc.tar.gz` | Create a general-purpose Proxmox container |
 
-The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the resulting chroot. See `build.log` for build and packaging errors. The template version is set in [build.sh](build.sh). If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) as well.
+Both images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The template version is set in [build.sh](build.sh). If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) as well.
 
 ## Install FellowshipNAS
 
-1. Boot the ISO and choose **Install FellowshipOS NAS (graphical)** on a UEFI system. Use the local screen or open the displayed address on another computer and enter the pairing code.
-2. Select the OS disk and review the layout. The graphical installer uses LVM for the system and can leave a separate data partition on disks of at least 64 GiB. It requires a typed erase confirmation and writes only to the selected disk. Create storage pools after installation from the NAS desktop.
+1. Boot the image and choose its **Install FellowshipOS … (graphical)** entry on a UEFI system. The installer runs on this machine's own screen. To drive it from another computer, add `fellowship.installer.remote=:8443` to the boot entry (press `e` at the menu): the page is then served over HTTPS and the console prints the certificate's SHA-256 and a pairing code. The browser must show that same certificate before the code is typed. Legacy BIOS machines use the text installer under **Advanced install options** until the graphical one supports them.
+2. Select the OS disk and review the layout. Ticking a disk's box chooses it and agrees that everything on it is erased; nothing else on the machine is written to. The graphical installer uses LVM for the system and can leave a separate data partition on disks of at least 64 GiB. Its four steps, **Disk**, **Space**, **You** and **Install**, can be opened in any order from the rail at the top, each step ends with one button naming the step it leads to, and the user name follows the name typed until it is changed. Create storage pools after installation from the NAS desktop.
 3. Reboot and complete the first-boot wizard. The graphical installer preselects **NAS / Home Server**. This step needs access to the Debian mirrors. The current NAS role setup stops if Secure Boot is enabled.
 4. Open the HTTPS address printed by the wizard and sign in with your local NAS account. The default certificate is self-signed. **Settings → Certificate** shows its fingerprint and accepts a replacement.
 5. On the first admin login, **Setup** guides you through storage, the LAN subnet, people and shares, alerts, and backup. Skip it or reopen it from **Settings → Setup**.
@@ -33,15 +34,15 @@ The ISO also has a live session and a Debian text installer for other Fellowship
 
 | App | What you can do |
 | --- | --- |
-| **Files** | Browse the shares your own account can use, open folders, and preview pictures, video, audio, PDFs and text, with download. Where the share allows it you can also upload, make folders, rename, delete, copy, cut and paste, and move by dragging or with **Move to…**. Pick several at once to delete, move or download them together as a zip. Search the whole share by name, and add Kind, Owner and Permissions columns; when you can't change something, Files says why. A share you can't use never appears or answers, and one you can only read hides the changes and refuses them anyway. Earlier versions from a snapshot come next. |
+| **Files** | Browse the shares your own account can use, open folders, and preview pictures, video, audio, PDFs and text, with download. Where the share allows it you can also upload, make folders, rename, delete, copy, cut and paste, and move by dragging or with **Move to…**. Pick several at once to delete, move or download them together as a zip. Search the whole share by name, and add Kind, Owner and Permissions columns; when you can't change something, Files says why. A share you can't use never appears or answers, and one you can only read hides the changes and refuses them anyway. **Earlier versions…** in a file's menu lists the snapshots holding it and puts one back beside it as a copy. |
 | **Storage** | Create, scan, import, check, and grow ZFS pools and RAID arrays, choosing XFS or ext4 for an array. Repair an array's mismatched blocks after a check. Replace or identify disks and follow background jobs. **Details and history** shows space use, compression, a Week or Year chart, and a fill estimate after at least three days of history if usage is rising. |
 | **Users** | Manage local accounts, groups, administrators, and SSH eligibility. Password changes through FellowshipNAS set the Linux and Samba passwords together. |
-| **Shares** | Share over SMB, NFS, or both. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
+| **Shares** | Share over SMB, NFS, WebDAV (a drive over HTTPS) or SFTP, each on its own switch. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
 | **Snapshots & backup** | Set snapshot retention and schedule a backup to a second ZFS pool. Restore a missing share from that backup. Array shares show these controls disabled, with the reason. |
 | **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
 | **Settings** | Manage your password, sessions, certificates, system disk space, storage check schedules, SSH, and power controls. |
 
-**Available today.** ZFS pools, traditional RAID arrays and Unraid-style pools (mergerfs with SnapRAID parity) are the implemented storage engines. SMB and NFS are the implemented share protocols. The desktop shows planned choices with their availability. The Files app browses, downloads and previews; uploading, file operations and snapshots come next, followed by more share protocols and Btrfs. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
+**Available today.** ZFS pools, traditional RAID arrays and Unraid-style pools (mergerfs with SnapRAID parity) are the implemented storage engines. SMB, NFS, WebDAV and SFTP are the implemented share protocols; FTP is next. The desktop shows planned choices with their availability. Files browses, downloads, previews, uploads and changes what is there, earlier versions among them. Btrfs is still to come. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
 
 ### Storage and shares
 
@@ -148,7 +149,7 @@ nas/packages/fellowship-nas-web/dev/run.sh
 
 Open `http://localhost:8080`. The script lists the development accounts. Run `npm run watch` in the web directory to rebuild while editing.
 
-For disk and reinstall testing, use the [QEMU/KVM VM harness](nas/tests/vm/vm.sh) with a built ISO, OVMF, and a dedicated VM work directory. Its modes and environment variables are documented at the top of the script. The installed guest's HTTPS is forwarded to `https://localhost:8443/`. Set `FELLOWSHIP_KEEP_DATA=1` when reinstalling a test VM with data disks you want to preserve.
+For disk and reinstall testing, use the [QEMU/KVM VM harness](nas/tests/vm/vm.sh) with a built ISO, OVMF, and a dedicated VM work directory. Its modes and environment variables are documented at the top of the script. `install` drives the text installer, `nas` and `multi` boot the graphical installers, and `remote` boots straight into the HTTPS page for a browser on this host, with the certificate's fingerprint and the pairing code in `serial-remote.log`. `FELLOWSHIP_VM_DISPLAY=gtk` shows the machine's own screen in a window; the window's pointer is relative, so using the page from a browser is the reliable way to click through it. The installed guest's HTTPS is forwarded to `https://localhost:8443/`. Set `FELLOWSHIP_KEEP_DATA=1` when reinstalling a test VM with data disks you want to preserve.
 
 | Path | Purpose |
 | --- | --- |
