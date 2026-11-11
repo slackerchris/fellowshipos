@@ -329,7 +329,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
                                         </td>
                                         <td class="row-actions">
                                             <button type="button" class="link-button" aria-expanded={open === share.name}
-                                                    onClick={() => choose(share.name)}>Connect</button>
+                                                    onClick={() => choose(share.name)}>Manage</button>
                                             {!share.readonly && (
                                                 <span class="menu-wrap">
                                                     <button type="button" class="kebab" aria-haspopup="menu"

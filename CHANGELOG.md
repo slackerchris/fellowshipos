@@ -269,6 +269,32 @@ bump.
   its turn rather than having the machine open a process for each.
 - CI builds pushes to `master` as well as `nas-edition`, runs the Go tests under
   the race detector, and lints the Python with ruff's error rules.
+- A share's panel states each way to share once. Four switches are the only
+  place a way is turned on or off, a way that is off has no settings tab, and
+  the connect lines name the machine to use. **Ways to share** moved to Sharing
+  settings, and the action on a row is **Manage**, since the panel holds the
+  switches and settings as well as the paths.
+- Setup's steps are clickable, as the installer's rail is, and **Your pools**
+  shows free space instead of the disk's size.
+- The desktop opens a window over the whole screen below 720 px wide, so two
+  windows no longer land on top of each other in a narrow window. The Health
+  widget adds the not-applicable count the app already had, the Disks widget
+  says what a **?** means (no SMART data), and Files opens the only share
+  straight away rather than asking which one.
+- The installer preselects the one usable disk, offers **Show** and **Hide** on
+  the password and says plainly when it is under eight characters, and its
+  summary names the image and, on NAS, says the role finishes on the first start
+  with Secure Boot off.
+- The first-boot wizard no longer offers the old **Storage node** role. The NAS
+  role is where mergerfs and SnapRAID are set up, so the separate entry only
+  gave two ways to build the same thing.
+- The Alerts step says that findings are always kept on the NAS and shown in the
+  bell and in Health, so "Email: off, ntfy: off" no longer reads as no alerts.
+- The VM harness's `live` mode presses its hotkey, its test password meets the
+  installer's eight-character rule, the host ports can be moved with
+  `FELLOWSHIP_SSH_PORT`, `FELLOWSHIP_HTTPS_PORT` and `FELLOWSHIP_HTTP_PORT` so a
+  second VM can run beside the first, and the monitor socket lives under `/tmp`
+  so a deep work directory can't pass the 108-byte path limit.
 
 - The boot menu is generated for each image instead of being committed. Each
   edition's entry names itself — **Install FellowshipOS NAS (graphical)** or
@@ -292,11 +318,11 @@ bump.
   and Remove move into a menu on the row. **Add someone** opens the form under the
   list, and the group list takes the same shape with **New group**.
 - The Shares app is two tabs. **Shared folders** lists each share on one line with
-  who can use it and which protocols it is on, and **Connect** opens that share's
-  paths and its SMB and NFS switches under the row. A menu on each row holds its
-  settings and deletion. **Sharing settings** holds the NAS-wide SMB and NFS
-  settings and the home network, which used to sit below the folder table. A
-  compact **Ways to share** card replaces the four-column protocol table.
+  who can use it and which protocols it is on, and **Manage** opens that share's
+  paths, one switch for each way to share it, and a settings tab for each way
+  that is on. A menu on each row holds its deletion. **Sharing settings** holds
+  the NAS-wide SMB and NFS settings, the home network and the state of each way
+  to share.
 - fnas scrubs ZFS pools instead of Debian's `zfsutils-linux` cron job: each pool gets
   `org.debian:periodic-scrub=disable`, which that job honours, so only one runs. Its
   monthly TRIM still does.
