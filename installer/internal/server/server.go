@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"fellowship-installer/internal/disks"
+	"fellowship-installer/internal/edition"
 	"fellowship-installer/internal/engine"
 	"fellowship-installer/internal/layout"
 )
@@ -51,6 +52,11 @@ type progress struct {
 type Server struct {
 	machine Machine
 	static  fs.FS
+	// Which image this is: the role it records and the disk layout it offers
+	edition edition.Edition
+	// Where another computer should open, when remote install was asked for;
+	// the page tells the person at the screen so they can pass it on
+	RemoteURLs []string
 
 	mu       sync.Mutex
 	code     string
@@ -67,14 +73,16 @@ func randomCode() string {
 	return fmt.Sprintf("%06d", n.Int64())
 }
 
-func randomToken() string {
+func randomToken() (string, error) {
 	buffer := make([]byte, 24)
-	rand.Read(buffer)
-	return fmt.Sprintf("%x", buffer)
+	if _, err := rand.Read(buffer); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", buffer), nil
 }
 
-func New(machine Machine, static fs.FS) *Server {
-	return &Server{machine: machine, static: static, code: randomCode(), paired: map[string]bool{},
+func New(machine Machine, static fs.FS, which edition.Edition) *Server {
+	return &Server{machine: machine, static: static, edition: which, code: randomCode(), paired: map[string]bool{},
 		state: progress{Phase: "choose", Steps: engine.Steps, Step: -1}}
 }
 
@@ -98,6 +106,11 @@ func (s *Server) allowed(r *http.Request) bool {
 	if local(r) {
 		return true
 	}
+	if r.TLS == nil {
+		// A browser on the network only gets in over HTTPS, whatever a handler
+		// was asked for
+		return false
+	}
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
 		return false
@@ -107,9 +120,27 @@ func (s *Server) allowed(r *http.Request) bool {
 	return s.paired[cookie.Value]
 }
 
+// plainRemote is the refusal for a browser on the network that did not come in
+// over HTTPS. Installing erases a disk, and the pairing code and the cookie it
+// buys are what authorise that, so neither travels in the clear.
+const plainRemote = "Installing from another computer is only served over HTTPS."
+
+// remoteOverTLS says whether this request may be served at all: the machine's
+// own screen is loopback and needs nothing, and anything else must be encrypted.
+func remoteOverTLS(r *http.Request) bool {
+	return local(r) || r.TLS != nil
+}
+
+// sameOrigin is the defence against other sites: the page sends its own header
+// on every POST, and the Origin must name this server over the scheme it was
+// reached by.
 func sameOrigin(r *http.Request) bool {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
 	origin := r.Header.Get("Origin")
-	return r.Header.Get(header) == "1" && (origin == "" || origin == "http://"+r.Host)
+	return r.Header.Get(header) == "1" && (origin == "" || origin == scheme+"://"+r.Host)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -131,10 +162,14 @@ func readJSON(w http.ResponseWriter, r *http.Request, into any) bool {
 	return true
 }
 
-// guard lets a handler run only for the local screen or a paired browser,
-// and only for POSTs that came from the installer page
+// guard lets a handler run only for the local screen or a paired browser over
+// HTTPS, and only for POSTs that came from the installer page
 func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !remoteOverTLS(r) {
+			fail(w, http.StatusForbidden, plainRemote)
+			return
+		}
 		if r.Method == http.MethodPost && !sameOrigin(r) {
 			fail(w, http.StatusForbidden, "This request didn't come from the installer page.")
 			return
@@ -174,11 +209,18 @@ func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
 		answer["code"] = s.code
 		s.mu.Unlock()
 		answer["addresses"] = s.machine.Addresses()
+		if len(s.RemoteURLs) > 0 {
+			answer["remote_urls"] = s.RemoteURLs
+		}
 	}
 	writeJSON(w, http.StatusOK, answer)
 }
 
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
+	if !remoteOverTLS(r) {
+		fail(w, http.StatusForbidden, plainRemote)
+		return
+	}
 	if !sameOrigin(r) {
 		fail(w, http.StatusForbidden, "This request didn't come from the installer page.")
 		return
@@ -201,10 +243,18 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, "That code is wrong. Check the NAS's screen.")
 		return
 	}
-	token := randomToken()
+	token, err := randomToken()
+	if err != nil {
+		// This server erases disks as root, so a token that isn't random is no
+		// better than no token at all
+		log.Printf("a session token could not be made: %v", err)
+		fail(w, http.StatusInternalServerError, "Could not start a session. Try again.")
+		return
+	}
 	s.paired[token] = true
 	s.attempts = 0
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true,
+		Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
 	log.Printf("paired a browser at %s", r.RemoteAddr)
 	writeJSON(w, http.StatusOK, map[string]bool{"allowed": true})
 }
@@ -237,6 +287,8 @@ func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 		zones = []string{"UTC"}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"edition": s.edition.String(), "title": s.edition.Title(),
+		"subtitle": s.edition.Subtitle(), "whole_disk": s.edition.WholeDisk(),
 		"disks": choices, "timezones": zones, "installed": s.machine.Installed,
 		"memory": s.machine.Memory, "min_system": layout.MinSystem(s.machine.Installed),
 		"split_from": layout.SplitFrom,
@@ -251,12 +303,21 @@ func (s *Server) layout(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	chosen, err := layout.WithSystem(body.Size, s.machine.Installed, s.machine.Memory, body.System)
+	chosen, err := s.plan(body.Size, body.System)
 	if err != nil {
 		fail(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, chosen)
+}
+
+// plan lays the disk out the way this image wants: the whole disk for the
+// multi-purpose image, a system and a data partition for the NAS image.
+func (s *Server) plan(size, system int64) (layout.Layout, error) {
+	if s.edition.WholeDisk() {
+		return layout.WholeDisk(size, s.machine.Installed, s.machine.Memory)
+	}
+	return layout.WithSystem(size, s.machine.Installed, s.machine.Memory, system)
 }
 
 // ConfirmPhrase is what the person types to erase a disk: its short name
@@ -294,7 +355,7 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnprocessableEntity, fmt.Sprintf("Type %q to confirm.", ConfirmPhrase(body.Disk)))
 		return
 	}
-	body.Role = "nas"
+	body.Role = s.edition.Role()
 
 	s.mu.Lock()
 	if s.state.Phase == "installing" || s.state.Phase == "done" {

@@ -25,6 +25,12 @@ export interface Machine {
     memory: number;
     min_system: number;
     split_from: number;
+    // Which image this is, and what it calls itself
+    edition: "nas" | "multi";
+    title: string;
+    subtitle: string;
+    // True when the system takes the whole disk and no data part is offered
+    whole_disk: boolean;
 }
 
 export interface Hello {
@@ -32,6 +38,7 @@ export interface Hello {
     local: boolean;
     code?: string;
     addresses?: string[];
+    remote_urls?: string[];
 }
 
 export interface Progress {

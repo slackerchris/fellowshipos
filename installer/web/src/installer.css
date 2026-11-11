@@ -30,11 +30,12 @@ body { overflow: auto; }
 .nav { justify-content: flex-end; }
 
 .disk {
+    position: relative;
     display: grid;
     gap: 4px;
     text-align: left;
     width: 100%;
-    padding: 12px 14px;
+    padding: 12px 52px 12px 14px;
     font: inherit;
     color: var(--text);
     background: var(--surface-sunk);
@@ -45,6 +46,32 @@ body { overflow: auto; }
 .disk:hover:not(:disabled) { border-color: var(--gold); }
 .disk.chosen { border-color: var(--gold); background: var(--info-soft); box-shadow: inset 3px 0 0 var(--gold); }
 .disk:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* The tick is the choice and the agreement in one: this is the disk that goes */
+.disk-mark {
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+}
+.disk.chosen .disk-mark { border-color: var(--good); background: var(--good); }
+.disk.chosen .disk-mark::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 0;
+    width: 5px;
+    height: 10px;
+    border: solid var(--accent-text);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.disk:disabled .disk-mark { border-style: dashed; }
 .disk-name { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .warning-text { color: var(--warning); }
 
@@ -81,6 +108,22 @@ th { width: 120px; }
 .progress li.failed::before { background: var(--bad); border-color: var(--bad); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .progress li.current::before { animation: none; } }
+
+/* Every step is a way in, not a marker: the rail is the navigation */
+.steps li { padding: 0; background: none; }
+.steps button {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 4px 12px;
+    cursor: pointer;
+}
+.steps button:hover { border-color: var(--gold); color: var(--text); }
+.steps li.current button { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.steps li.done button { background: var(--good-soft); color: var(--good); }
 
 .log { max-height: 220px; overflow: auto; padding: 10px; background: var(--surface-sunk); border-radius: 7px; }
 

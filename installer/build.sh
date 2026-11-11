@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build the NAS installer into the live image's own packages. It only lives
-# in the live system: both install paths remove it from the installed one.
+# Build the graphical installer into the live image's own packages. It only
+# lives in the live system: installing removes it from the installed one.
 set -e
 
 cd "$(dirname "$0")"

@@ -1,5 +1,28 @@
 #!/bin/bash
+# live-build configuration, run by `lb config`. FELLOWSHIP_EDITION chooses which
+# of the two images this build is: the ISO's name, the boot menu entry and the
+# value the installer reads from the kernel command line all follow from it.
 set -e
+
+EDITION="${FELLOWSHIP_EDITION:-multi}"
+case "$EDITION" in
+    nas)
+        TITLE="FellowshipOS NAS"
+        VOLUME="FELLOWSHIPOS_NAS"
+        ENTRY="Install FellowshipOS NAS (graphical)"
+        HOTKEY="n"
+        ;;
+    multi)
+        TITLE="FellowshipOS Multi-purpose"
+        VOLUME="FELLOWSHIPOS_MULTI"
+        ENTRY="Install FellowshipOS Multi-purpose (graphical)"
+        HOTKEY="m"
+        ;;
+    *)
+        echo "auto/config: no such edition: $EDITION" >&2
+        exit 1
+        ;;
+esac
 
 lb config noauto \
     --architecture amd64 \
@@ -22,6 +45,11 @@ lb config noauto \
     --memtest none \
     --win32-loader false \
     --apt-recommends false \
-    --iso-volume "FellowshipOS" \
+    --iso-volume "$VOLUME" \
     --iso-publisher "Chris" \
-    --iso-application "FellowshipOS Base"
+    --iso-application "$TITLE"
+
+# The boot menu belongs to the image being built: its first entry is the one
+# that starts the graphical installer, and it says which image this is.
+sed -e "s|@ENTRY@|$ENTRY|g" -e "s|@EDITION@|$EDITION|g" -e "s|@HOTKEY@|$HOTKEY|g" \
+    config/bootloaders/grub-pc/grub.cfg.in > config/bootloaders/grub-pc/grub.cfg

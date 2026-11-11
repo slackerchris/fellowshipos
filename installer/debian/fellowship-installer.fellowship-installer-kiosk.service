@@ -1,6 +1,7 @@
 [Unit]
-Description=FellowshipOS NAS installer on this screen
-ConditionKernelCommandLine=fellowship.installer=nas
+Description=FellowshipOS installer on this screen
+# The same rule as the installer itself: any graphical install entry
+ConditionKernelCommandLine=fellowship.installer
 After=fellowship-installer.service systemd-user-sessions.service
 Wants=fellowship-installer.service
 # The installer takes the first screen instead of a login prompt

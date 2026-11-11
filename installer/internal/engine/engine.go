@@ -71,6 +71,9 @@ type Engine struct {
 	Installed, Memory int64
 	// UEFI firmware; legacy BIOS machines need the regular installer for now
 	EFI bool
+	// The system takes the whole disk, with no data partition left for a pool:
+	// the multi-purpose image, which has no pool to prepare for
+	WholeDisk bool
 	// The wired network ports, each set up for DHCP as Debian's installer does
 	Network []string
 	// Reports each step's title as it starts, and lines worth showing
@@ -151,13 +154,20 @@ func (e *Engine) Install(s Settings) error {
 		return err
 	}
 	if !e.EFI {
-		return errors.New("this machine started in legacy BIOS mode; the NAS installer needs UEFI. Switch the firmware to UEFI, or use the regular installer")
+		return errors.New("this machine started in legacy BIOS mode; the graphical installer needs UEFI. Switch the firmware to UEFI, or use the text installer from the boot menu")
 	}
 	size, err := e.diskSize(s.Disk)
 	if err != nil {
 		return err
 	}
-	plan, err := layout.WithSystem(size, e.Installed, e.Memory, s.System)
+	// The NAS image leaves the rest of the disk for a pool; the multi-purpose
+	// image has no pool to prepare for and gives the system all of it
+	var plan layout.Layout
+	if e.WholeDisk {
+		plan, err = layout.WholeDisk(size, e.Installed, e.Memory)
+	} else {
+		plan, err = layout.WithSystem(size, e.Installed, e.Memory, s.System)
+	}
 	if err != nil {
 		return err
 	}
@@ -362,14 +372,20 @@ func (e *Engine) configure(s Settings, group string) error {
 	}
 
 	files := map[string]string{
-		"etc/hostname":                  s.Hostname + "\n",
-		"etc/hosts":                     fmt.Sprintf("127.0.0.1\tlocalhost\n127.0.1.1\t%s\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n", s.Hostname),
-		"etc/timezone":                  s.Timezone + "\n",
-		"etc/fellowshipos/install-role": s.Role + "\n",
-		"etc/machine-id":                "",
+		"etc/hostname":   s.Hostname + "\n",
+		"etc/hosts":      fmt.Sprintf("127.0.0.1\tlocalhost\n127.0.1.1\t%s\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\t\tip6-allnodes\nff02::2\t\tip6-allrouters\n", s.Hostname),
+		"etc/timezone":   s.Timezone + "\n",
+		"etc/machine-id": "",
 	}
 	for path, content := range files {
 		if err := e.write(path, content, 0o644); err != nil {
+			return err
+		}
+	}
+	if s.Role != "" {
+		// First boot installs this role; the multi-purpose image chooses none,
+		// so its first boot offers every choice instead
+		if err := e.write("etc/fellowshipos/install-role", s.Role+"\n", 0o644); err != nil {
 			return err
 		}
 	}

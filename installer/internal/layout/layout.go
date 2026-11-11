@@ -110,6 +110,20 @@ func WithSystem(disk, installed, memory, system int64) (Layout, error) {
 	return l, nil
 }
 
+// WholeDisk lays out a disk for a machine that keeps nothing back for a pool:
+// EFI, swap, and the rest as the system's root volume, with its room to grow
+// inside the same volume group. The multi-purpose image uses this, and it is
+// what a NAS already gets on a disk too small to split.
+func WholeDisk(disk, installed, memory int64) (Layout, error) {
+	usable := disk - EFI - slack - lvmOverhead
+	minimum := MinSystem(installed)
+	swap := swapFor(memory)
+	if usable < minimum+swap {
+		return Layout{}, fmt.Errorf("the disk is too small: FellowshipOS needs at least %s", Size(minimum+swap+EFI+slack))
+	}
+	return Layout{Disk: disk, EFI: EFI, Swap: swap, System: roundDown(usable-swap, GiB)}, nil
+}
+
 // Size writes a byte count the way disks are sold, in decimal units
 func Size(bytes int64) string {
 	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}

@@ -5,6 +5,7 @@ import {
     Disk, GiB, Hello, Layout, Machine, Progress, Settings, hello, install, layoutFor, machine, pair, progress, reboot,
     shortName, size,
 } from "./api";
+import { suggestUser } from "./user";
 
 const STEPS = ["Disk", "Space", "You", "Install"];
 
@@ -19,22 +20,35 @@ function Mark() {
     );
 }
 
-function Frame({ step, children }: { step?: number; children: ComponentChildren }) {
+function Frame({ step, onStep, answered, title = "FellowshipOS", subtitle = "installer", children }: {
+    step?: number; onStep?: (index: number) => void; answered?: boolean[];
+    title?: string; subtitle?: string; children: ComponentChildren;
+}) {
     return (
         <div class="installer">
             <main class="installer-card">
                 <header class="brand">
                     <Mark />
                     <div>
-                        <h1>FellowshipOS</h1>
-                        <span class="muted small">NAS installer</span>
+                        <h1>{title}</h1>
+                        <span class="muted small">{subtitle}</span>
                     </div>
                 </header>
                 {step !== undefined && (
                     <ol class="steps">
-                        {STEPS.map((name, index) => (
-                            <li key={name} class={index === step ? "current" : index < step ? "done" : ""}>{index + 1}. {name}</li>
-                        ))}
+                        {STEPS.map((name, index) => {
+                            const here = index === step;
+                            const decided = !here && answered?.[index];
+                            return (
+                                <li key={name} class={here ? "current" : decided ? "done" : ""}>
+                                    {/* Any step can be opened at any time, so the rail is the way round */}
+                                    {onStep
+                                        ? <button type="button" aria-current={here ? "step" : undefined}
+                                                  onClick={() => onStep(index)}>{index + 1}. {name}</button>
+                                        : <span>{index + 1}. {name}</span>}
+                                </li>
+                            );
+                        })}
                     </ol>
                 )}
                 {children}
@@ -96,6 +110,7 @@ function ChooseDisk({ info, chosen, onChoose }: { info: Machine; chosen: string;
             {info.disks.map(disk => (
                 <button type="button" key={disk.path} class={`disk ${chosen === disk.path ? "chosen" : ""}`}
                         disabled={!!disk.refused} aria-pressed={chosen === disk.path} onClick={() => onChoose(disk)}>
+                    <span class="disk-mark" aria-hidden="true" />
                     <span class="disk-name"><strong>{size(disk.size)}</strong> {disk.model || "Disk"}
                         <span class="badge">{busName(disk.bus || "")}</span></span>
                     <span class="mono small muted">{shortName(disk.path)}{disk.serial ? ` · ${disk.serial}` : ""}</span>
@@ -135,7 +150,8 @@ function LayoutBar({ layout }: { layout: Layout }) {
 }
 
 function ChooseSpace({ info, disk, layout, onLayout }: { info: Machine; disk: Disk; layout: Layout; onLayout: (layout: Layout) => void }) {
-    const split = disk.size >= info.split_from;
+    // The multi-purpose image has no pool to prepare for, so it never splits
+    const split = !info.whole_disk && disk.size >= info.split_from;
     const [system, setSystem] = useState(layout.system);
     const [error, setError] = useState("");
     const latest = useRef(0);
@@ -170,6 +186,8 @@ function ChooseSpace({ info, disk, layout, onLayout }: { info: Machine; disk: Di
                     </p>
                     <p class="small muted">The system sits on LVM, so it can use its room to grow later from Settings.</p>
                 </>
+            ) : info.whole_disk ? (
+                <Notice>The system takes the whole disk. Keep shared files on other disks, set up later.</Notice>
             ) : (
                 <Notice>This disk is small, so FellowshipOS uses all of it. Keep shared files on other disks, set up from the desktop.</Notice>
             )}
@@ -189,10 +207,19 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
     onAgain: (again: string) => void;
 }) {
     const set = (change: Partial<Settings>) => onChange({ ...settings, ...change });
+    // The user name follows the name until it has been edited by hand. It still
+    // follows while it holds the suggestion for the name as it was before this
+    // keystroke, which covers typing the name for the first time and carrying
+    // on with it, but never overwrites a name someone chose for themselves.
+    const setName = (value: string) => {
+        const follows = settings.user === "" || settings.user === suggestUser(settings.full_name);
+        set(follows ? { full_name: value, user: suggestUser(value) } : { full_name: value });
+    };
     return (
         <div class="stack">
             <div class="grid-2">
-                <Field label="Name of this NAS" hint="What other computers see on the network">
+                <Field label={info.edition === "nas" ? "Name of this NAS" : "Name of this computer"}
+                       hint="What other computers see on the network">
                     <input value={settings.hostname} onInput={event => set({ hostname: event.currentTarget.value.toLowerCase() })} />
                 </Field>
                 <Field label="Time zone">
@@ -201,7 +228,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                     </select>
                 </Field>
                 <Field label="Your name">
-                    <input value={settings.full_name} autoComplete="name" onInput={event => set({ full_name: event.currentTarget.value })} />
+                    <input value={settings.full_name} autoComplete="name" onInput={event => setName(event.currentTarget.value)} />
                 </Field>
                 <Field label="User name" hint="For logging in to the desktop and over SSH">
                     <input value={settings.user} autoComplete="username" autoCapitalize="none" spellcheck={false}
@@ -228,8 +255,6 @@ function aboutReady(settings: Settings, again: string) {
 }
 
 function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: Layout; settings: Settings; onInstall: (typed: string) => Promise<void> }) {
-    const phrase = `erase ${shortName(disk.path)}`;
-    const [typed, setTyped] = useState("");
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
     return (
@@ -238,7 +263,9 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
             setBusy(true);
             setError("");
             try {
-                await onInstall(typed);
+                // The server asks for the phrase naming the disk, so the request
+                // itself says which one it erases
+                await onInstall(`erase ${shortName(disk.path)}`);
             } catch (failure) {
                 setError((failure as Error).message);
                 setBusy(false);
@@ -246,7 +273,8 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
         }}>
             <table>
                 <tbody>
-                    <tr><th>Disk</th><td>{size(disk.size)} {disk.model} <span class="mono small">{shortName(disk.path)}</span></td></tr>
+                    <tr><th>Disk</th><td>{size(disk.size)} {disk.model} <span class="mono small">{shortName(disk.path)}</span>
+                        {disk.contents?.length ? <><br /><span class="small warning-text">Holds {disk.contents.join(", ")}. It is erased.</span></> : null}</td></tr>
                     <tr><th>Layout</th><td>System {size(layout.system)}, room to grow {size(layout.reserve)}, swap {size(layout.swap)}
                         {layout.data ? `, data ${size(layout.data)} left empty` : ""}</td></tr>
                     <tr><th>Name</th><td>{settings.hostname}</td></tr>
@@ -254,21 +282,14 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
                     <tr><th>Time zone</th><td>{settings.timezone}</td></tr>
                 </tbody>
             </table>
-            <Notice kind="warning">
-                Everything on <strong>{shortName(disk.path)}</strong> is erased
-                {disk.contents?.length ? <>, including {disk.contents.join(", ")}</> : ""}. Other disks aren't touched.
-            </Notice>
-            <Field label={`Type "${phrase}" to install`}>
-                <input value={typed} autoComplete="off" onInput={event => setTyped(event.currentTarget.value)} />
-            </Field>
             {error && <Notice kind="error">{error}</Notice>}
-            <div class="row"><button class="button button-danger" type="submit" disabled={typed !== phrase || busy}>
-                {busy ? "Starting…" : "Erase and install"}</button></div>
+            <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
+                {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
         </form>
     );
 }
 
-function Installing({ state, onRetry }: { state: Progress; onRetry: () => void }) {
+function Installing({ state, edition, onRetry }: { state: Progress; edition?: string; onRetry: () => void }) {
     const [restarting, setRestarting] = useState(false);
     const log = state.log || [];
     return (
@@ -290,7 +311,8 @@ function Installing({ state, onRetry }: { state: Progress; onRetry: () => void }
             {state.phase === "done" && (
                 <>
                     <Notice kind="done">FellowshipOS is installed. Remove the USB stick or disc, then restart. After the first start,
-                        the setup on screen installs the NAS, and the desktop opens at https://NAME from any browser.</Notice>
+                        the setup on screen finishes the machine{edition === "nas"
+                            ? ", and the NAS desktop opens at https://NAME from any browser" : " and asks what it will do"}.</Notice>
                     <div class="row">
                         <button class="button button-primary" type="button" disabled={restarting}
                                 onClick={() => { setRestarting(true); reboot().catch(() => {}); }}>
@@ -353,7 +375,9 @@ function Installer({ greeting }: { greeting: Hello }) {
     }, [state?.phase]);
 
     if (state && state.phase !== "choose") {
-        return <Frame step={3}><Installing state={state} onRetry={() => { setState(null); load(); }} /></Frame>;
+        return <Frame step={3} title={info?.title} subtitle={info?.subtitle}>
+            <Installing state={state} edition={info?.edition} onRetry={() => { setState(null); load(); }} />
+        </Frame>;
     }
     if (error) {
         return <Frame><Notice kind="error">{error}</Notice></Frame>;
@@ -362,31 +386,56 @@ function Installer({ greeting }: { greeting: Hello }) {
         return <Frame><p class="muted">Looking at this machine…</p></Frame>;
     }
 
-    const canNext = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : step === 2 ? aboutReady(settings, again) : false;
+    const canInstall = !!disk && !!layout && aboutReady(settings, again);
+    // One way on from each step, named after where it goes. The rail above is the
+    // rest of the navigation: any step, in any order, and back without a button.
+    const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again);
+    // A step reads as answered only once everything before it is too, so the rail
+    // shows how far along the install is rather than which boxes happen to be set
+    const answers = [!!disk, !!layout, aboutReady(settings, again), canInstall];
+    const answered = answers.map((_, index) => answers.slice(0, index + 1).every(Boolean));
     return (
-        <Frame step={step}>
-            {step === 0 && greeting.local && (greeting.addresses?.length ? (
-                <p class="small muted">Prefer another computer? Open <span class="mono">http://{greeting.addresses[0]}</span> there and
-                    enter the pairing code <strong class="mono">{greeting.code}</strong>.</p>
+        <Frame step={step} onStep={setStep} answered={answered}
+               title={info.title} subtitle={info.subtitle}>
+            {step === 0 && greeting.local && (greeting.remote_urls?.length ? (
+                <p class="small muted">Installing from another computer? Open <span class="mono">{greeting.remote_urls[0]}</span> there,
+                    check the certificate it shows, and enter the pairing code <strong class="mono">{greeting.code}</strong>.</p>
             ) : (
-                <p class="small muted">To install from another computer instead, connect this machine to the network; its address
-                    appears here. The pairing code is <strong class="mono">{greeting.code}</strong>.</p>
+                <p class="small muted">To install from another computer, add <span class="mono">fellowship.installer.remote=:8443</span> to
+                    this image's boot entry; the console then prints the address, the certificate's fingerprint and the pairing code.</p>
             ))}
             {step === 0 && <ChooseDisk info={info} chosen={disk?.path || ""} onChoose={chosen => { setDisk(chosen); setLayout(chosen.layout || null); }} />}
             {step === 1 && disk && layout && <ChooseSpace info={info} disk={disk} layout={layout} onLayout={setLayout} />}
+            {step === 1 && !(disk && layout) && (
+                <div class="stack">
+                    <Notice kind="warning">There's no disk yet, so there's nothing to lay out.</Notice>
+                    <div class="row"><button class="button" type="button" onClick={() => setStep(0)}>Choose a disk</button></div>
+                </div>
+            )}
             {step === 2 && (
                 <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
             )}
-            {step === 3 && disk && layout && (
+            {step === 3 && canInstall && disk && layout && (
                 <Confirm disk={disk} layout={layout} settings={settings} onInstall={async typed => {
                     await install({ ...settings, disk: disk.path, system: layout.system }, typed);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />
             )}
-            <div class="row nav">
-                {step > 0 && <button class="button" type="button" onClick={() => setStep(step - 1)}>Back</button>}
-                {step < 3 && <button class="button button-primary" type="button" disabled={!canNext} onClick={() => setStep(step + 1)}>Next</button>}
-            </div>
+            {step === 3 && !canInstall && (
+                <div class="stack">
+                    <Notice kind="warning">Not everything is settled yet.</Notice>
+                    <div class="row">
+                        {!disk && <button class="button" type="button" onClick={() => setStep(0)}>Choose a disk</button>}
+                        {!aboutReady(settings, again) && <button class="button" type="button" onClick={() => setStep(2)}>Finish your account</button>}
+                    </div>
+                </div>
+            )}
+            {step < 3 && (
+                <div class="row nav">
+                    <button class="button button-primary" type="button" disabled={!onFrom} onClick={() => setStep(step + 1)}>
+                        {STEPS[step + 1]} →</button>
+                </div>
+            )}
         </Frame>
     );
 }

@@ -1,0 +1,68 @@
+source /boot/grub/config.cfg
+
+# FellowshipOS: the graphical installer installs this image. auto/config fills
+# in which image that is, and the same value goes on the kernel command line for
+# the installer to read. The text installer stays in the advanced menu for
+# machines that start in legacy BIOS mode, which the graphical one doesn't do yet.
+source  /boot/grub/install_start.cfg
+
+menuentry "@ENTRY@" --hotkey=@HOTKEY@ {
+        linux   @KERNEL_LIVE@ @APPEND_LIVE@ fellowship.installer=@EDITION@
+        initrd  @INITRD_LIVE@
+}
+
+menuentry "Try FellowshipOS (live)" --hotkey=l {
+        linux   @KERNEL_LIVE@ @APPEND_LIVE@
+        initrd  @INITRD_LIVE@
+}
+
+# You can add more entries like this
+# menuentry "Alternate live boot" {
+# linux @KERNEL_LIVE@ @APPEND_LIVE@ custom options here
+# initrd @INITRD_LIVE@
+# }
+# menuentry "Alternate graphical installer" {
+# linux @KERNEL_GI@ @APPEND_GI@ custom options here
+# initrd @INITRD_GI@
+# }
+# menuentry "Alternate textual installer" {
+# linux @KERNEL_DI@ @APPEND_DI@ custom options here
+# initrd @INITRD_DI@
+# }
+
+# Installer (if any)
+if @ENABLE_INSTALL_MENU@; then
+
+submenu 'Advanced install options ...' --hotkey=a {
+
+        source /boot/grub/theme.cfg
+
+        source  /boot/grub/install.cfg
+
+}
+fi
+
+submenu 'Utilities...' --hotkey=u {
+
+        source /boot/grub/theme.cfg
+
+        # Memtest (if any)
+        if @ENABLE_MEMTEST@; then
+                source /boot/grub/memtest.cfg
+        fi
+
+        # Firmware setup (UEFI)
+        if [ "${grub_platform}" = "efi" ]; then
+                menuentry "UEFI Firmware Settings" --hotkey=f {
+                        fwsetup
+                }
+        fi
+
+        # Verify the checksums
+        if @ENABLE_VERIFY_CHECKSUMS@; then
+                menuentry "Verify integrity of the boot medium" --hotkey=v {
+                        linux   @KERNEL_LIVE@ @APPEND_VERIFY_CHECKSUMS@
+                        initrd  @INITRD_LIVE@
+                }
+        fi
+}

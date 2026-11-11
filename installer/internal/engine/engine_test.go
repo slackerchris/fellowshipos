@@ -177,6 +177,44 @@ func TestSystemIsConfigured(t *testing.T) {
 	}
 }
 
+func TestTheNASImageRecordsItsRole(t *testing.T) {
+	_, e, _ := setup(t, 100*layout.GiB)
+	if err := e.Install(settings("/dev/sdb")); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(filepath.Join(e.Target, "etc/fellowshipos/install-role"))
+	if err != nil || string(written) != "nas\n" {
+		t.Fatalf("the NAS image recorded %q, %v", written, err)
+	}
+}
+
+func TestTheMultiPurposeImageRecordsNoRole(t *testing.T) {
+	// First boot asks what this machine will do, so nothing is chosen here
+	_, e, _ := setup(t, 100*layout.GiB)
+	which := settings("/dev/sdb")
+	which.Role = ""
+	if err := e.Install(which); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(e.Target, "etc/fellowshipos/install-role")); !os.IsNotExist(err) {
+		t.Fatalf("the multi-purpose image wrote a role anyway: %v", err)
+	}
+}
+
+func TestAWholeDiskImageKeepsNoDataPartition(t *testing.T) {
+	f, e, _ := setup(t, 500*layout.GiB)
+	e.WholeDisk = true
+	if err := e.Install(settings("/dev/sdb")); err != nil {
+		t.Fatal(err)
+	}
+	if partition := find(f, "sgdisk -n")[0].String(); strings.Contains(partition, "fellowship-data") {
+		t.Errorf("a whole-disk image left a data partition: %s", partition)
+	}
+	if len(find(f, "wipefs -a /dev/sdb3")) != 0 {
+		t.Error("a whole-disk image wiped a third partition that doesn't exist")
+	}
+}
+
 func TestFailureStopsAndUnmounts(t *testing.T) {
 	f, e, steps := setup(t, 500*layout.GiB)
 	f.fail = "unsquashfs"

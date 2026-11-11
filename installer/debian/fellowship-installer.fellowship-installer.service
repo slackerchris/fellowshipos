@@ -1,10 +1,18 @@
 [Unit]
-Description=FellowshipOS NAS installer
-# Only when the boot menu's NAS entry was chosen
-ConditionKernelCommandLine=fellowship.installer=nas
+Description=FellowshipOS installer
+# Only when one of the boot menu's graphical install entries was chosen. A bare
+# word matches the key of any assignment, so this starts for
+# fellowship.installer=nas and fellowship.installer=multi alike; the installer
+# itself reads the value to know which image it is.
+ConditionKernelCommandLine=fellowship.installer
 After=local-fs.target
 
 [Service]
+# The page is served on loopback for the machine's own screen. To install from
+# another computer, add fellowship.installer.remote=ADDRESS to the boot entry
+# (such as fellowship.installer.remote=:8443): the page is then served over
+# HTTPS, and the console prints the certificate's fingerprint and the pairing
+# code to type in the browser.
 ExecStart=/usr/lib/fellowship-installer/fellowship-installer
 StandardOutput=journal+console
 Restart=on-failure

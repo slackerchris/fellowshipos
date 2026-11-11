@@ -40,6 +40,29 @@ func TestSmallDiskGivesEverythingToTheSystem(t *testing.T) {
 	}
 }
 
+func TestWholeDiskNeverLeavesADataPartition(t *testing.T) {
+	// The multi-purpose image has no pool to prepare for, so even a large disk
+	// goes wholly to the system, with no data part and nothing reserved beside it
+	for _, size := range []int64{64 * GiB, 500 * GiB, 4096 * GiB} {
+		l, err := WholeDisk(size, installed, memory)
+		if err != nil {
+			t.Fatalf("%s: %v", Size(size), err)
+		}
+		if l.Data != 0 || l.Reserve != 0 || l.Swap != 4*GiB {
+			t.Errorf("%s: %+v", Size(size), l)
+		}
+		if l.System < MinSystem(installed) {
+			t.Errorf("%s: a system of %s is too small", Size(size), Size(l.System))
+		}
+		if total := l.EFI + l.LVM(); total > size {
+			t.Errorf("%s: a layout of %d bytes doesn't fit", Size(size), total)
+		}
+	}
+	if _, err := WholeDisk(10*GiB, installed, memory); err == nil {
+		t.Fatal("a 10 GB disk was accepted")
+	}
+}
+
 func TestTooSmall(t *testing.T) {
 	if _, err := Suggest(10*GiB, installed, memory); err == nil {
 		t.Fatal("a 10 GB disk was accepted")

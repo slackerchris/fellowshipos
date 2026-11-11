@@ -19,3 +19,9 @@ __pycache__/
 *.pyc
 # The editor's own workspace file is per-machine, not part of the project
 *.code-workspace
+
+# Generated from grub.cfg.in by auto/config, per edition
+config/bootloaders/grub-pc/grub.cfg
+
+# Scratch build output, such as a demo installer built outside Docker
+/tmp/
