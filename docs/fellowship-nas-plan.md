@@ -49,6 +49,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS. It replaces TrueN
 - DLNA, so TVs and consoles find media by themselves
 - iSCSI, so a slice of a pool appears as a disk on another machine
 - More alert services (Apprise covers 100+, such as Discord, Telegram, Pushover and Home Assistant)
+- **Backlog:** NAS setup continuing without ZFS when Secure Boot is on, with ZFS shown as unavailable and the reason, and the other engines working. Today setup stops instead (Chris, Nov 10)
 
 **Not now**
 
@@ -69,7 +70,7 @@ FellowshipNAS is the "NAS / Home Server" role in FellowshipOS. It replaces TrueN
 4. **The person using the NAS makes the choices:** which engine, which layout, which disks. The system explains each option; it doesn't choose for them.
 5. **It runs on whatever machine it is put in.** The system finds out what the hardware offers and only enables options that work there: layouts the disk count allows, bay numbers where the enclosure reports them, a serial number and an activity-light blink where it doesn't.
 6. **Show everything, hide nothing** (Chris, Nov 9).
-   - Every screen lists all of its features and their state, including ones that can't be used yet, with the reason: "No pool yet", "Not built yet", "ZFS unavailable: Secure Boot is on".
+   - Every screen lists all of its features and their state, including ones that can't be used yet, with the reason: "No pool yet", "Not built yet", "Needs at least 2 disks".
    - Controls are disabled, never removed.
    - Labels say what you get in plain words, with the technical name in small print.
 7. **Chris's reference list is the scope.** Anything from his FygoOS list, or anything he has asked for, is cut or postponed only after he agrees.
@@ -149,7 +150,7 @@ With root login off, the installer always creates a first user, with `sudo`. The
 1. Stops with a clear message in a container.
 2. Checks the network and Debian mirror access.
 3. Installs `fellowship-nas`, `fellowship-nas-smb` and `fellowship-nas-web`, which bring every engine's and every protocol's tools.
-4. Builds and loads the ZFS module. **As built today**, the role stops before installing anything if Secure Boot is on, with "Secure Boot is on, so the ZFS module can't load: disable it and retry". **Planned:** the role completes without ZFS, marking it unavailable with the reason so the other engines still work; that isn't built yet.
+4. Checks Secure Boot first and **stops if it is on** (Chris, Nov 10), before anything is installed, with "Secure Boot is on, so the ZFS module can't load: disable it and retry". The marker isn't written, so the wizard shows the retry command; turning Secure Boot off and running it again completes the role. Then it builds and loads the ZFS module. Continuing without ZFS is in the backlog (see Later).
 5. Adds the wizard's user to `nas-admins` and writes `/etc/fellowshipos/.nas-role-complete`.
 
 The flavor is safe to run twice; if the marker is missing, the wizard shows the retry command, `sudo homelabos-flavor nas-node`. At the end, the wizard prints the desktop's address, `https://ADDRESS`.
@@ -168,7 +169,7 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 
 **Creating a pool** always starts with the engine.
 
-1. **Engine:** the four engines are listed side by side, with the comparison below. One that can't be used here says why ("Not built yet", "Needs at least 2 disks", "ZFS unavailable: Secure Boot is on") and stays on screen, disabled.
+1. **Engine:** the four engines are listed side by side, with the comparison below. One that can't be used here says why ("Not built yet", "Needs at least 2 disks") and stays on screen, disabled.
 2. **Disks:** every disk is listed, and those that can't be used say why ("Holds the system", "Part of pool tank", "Has old data: tick to erase").
 3. **Layout:** only that engine's layouts that make sense for the chosen disks, labelled in plain words.
 
@@ -197,6 +198,8 @@ For v1 they ship as a local apt repo inside the ISO, with dependencies from Debi
 | Disks spin down when idle | No | Yes | No | No |
 | Secure Boot | Must be off | Works | Works | Works |
 | Imports an existing pool | TrueNAS pools | Disks from another mergerfs + SnapRAID setup | mdadm arrays from another Linux machine | Btrfs filesystems |
+
+The Secure Boot row describes the engines. NAS setup stops while Secure Boot is on (see Role install), so today it must be off to install the NAS at all, whichever engine is used.
 
 **Disk handling**
 
@@ -454,8 +457,6 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
   - **Taking a way in away takes effect at once** (Nov 10). Every change to a share — its boxes, its access list, its owner, being deleted or having its pool exported — goes through `shares.write_config`, and that now rebuilds the views as well as the NFS and Samba files, so nobody has to remember a second command. Changing a person's kind rebuilds them too.
   - A plain unmount is refused while anything still has its feet in the share, so a client with a file open could otherwise keep a share it has lost the right to. The mount is detached instead (`umount -l`): the client that has already opened a file keeps that one file, which nothing can take back, and every new open through that name fails at once.
   - Mounts don't survive a reboot, so `fellowship-nas-refresh.service` runs `fnas share refresh` after the pools are mounted. It is a oneshot unit ordered after `local-fs.target`, `remote-fs.target` and `zfs-mount.service`, so the views are back before anyone logs in.
-  - **Walked** (Nov 10) on a Debian machine with a real `sshd`, a real `sftp` client and three accounts: `kim` and `sam` set to Files over SFTP, and `ada` keeping a shell. `kim`'s session started at `/` and `ls /` listed `media` and `private`, the two shares marked for SFTP that were hers to use; `sam`'s listed `media`, and `ls /private` answered "not found"; neither could see `docs`, which is shared over SMB but not over SFTP, or anything else on the machine. `kim` wrote a file into `media`, which landed owned `kim:media` on disk, and was refused "Permission denied" in `private`, where she has read only. Asking `ssh` for a shell as `kim` answered "This service allows sftp connections only", and asking sshd to carry a connection with `-W` failed, while the same request from `ada` came back with the SSH banner. Turning `media`'s SFTP box off and syncing again took it out of both views and out of a live `sftp` listing, leaving `kim` with `private` alone.
-  - **Revoking access while a session is open** (Nov 10), on a Debian machine with a real `sshd` and real `sftp` clients, with `media` set to chosen access (kim read and write, sam read) and kim given `private` read-only. With kim's session sitting inside `/media`, taking her off the share and rebuilding the views took the share away from that session at once: its next `ls` answered "No such file or directory" and its next `get` "File not found", nothing downloaded, and a fresh session saw `private` alone. The same held with a client holding a file open, which makes the unmount busy: the mount is detached, kim's new session saw `private` alone and could open nothing in `media`, while sam's session still listed and read it. Re-enabling the access and then throwing every mount away — what a reboot does — left both accounts correct from one run of the boot unit's own command: kim saw `media` and `private` and could write in `media` but not in `private`, sam saw `media` alone, read a file and was refused a write.
 - **FTP:**
   - `vsftpd` uses the same chroot view as SFTP and requires TLS unless plain FTP is turned on.
   - Passive ports are a fixed range opened in the firewall for the LAN only.
@@ -475,14 +476,47 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
       - `MOVE` and `COPY` check both ends: the source has to exist and be theirs to read (a move only needs the folders, so the kernel alone would let someone shift a file they cannot open), the share has to be theirs to write, and the address they are going to has to be free — an existing name answers 412 rather than being replaced, since overwriting is what the desktop makes people type a name for. A move between shares answers 502 rather than being guessed at.
       - Nothing reaches into `.zfs`: any address with that as a step answers 403, on every method, so a client can't write into or over a snapshot.
       - A refusal the kernel makes reads as 403, not as a server error.
-    - Walked with two regular accounts: a stale client got 412 and the first client's text stayed on disk; two clients PUTting the same version at the same instant left exactly one 204 and one 412; a read-only account could browse (207) and read (200) but every write was 403 "archive is read only for you"; a copy or move whose source was root's unreadable file was refused 403 and left it where it was; one into a root-owned folder was refused the same way; and every method against `.zfs` answered 403. rclone, as a real client, uploaded, read, renamed and deleted a file.
     - **Locks** (Nov 10): `LOCK` and `UNLOCK`, which is what a word processor takes before it will save to a drive. The desktop says `DAV: 1, 2` on every answer, which is how a client knows locking is offered at all, and `PROPFIND` says so per address too. A lock is exclusive and on one address, or on a folder and everything in it; every change — `PUT`, `MKCOL`, `DELETE`, `MOVE`, `COPY` — needs the token in its `If` header while it is held, or answers 423. A client may renew its own lock, and every lock has a time on it (30 minutes unless the client asks for something else, 12 hours at most), so one abandoned by a client that vanished holds nothing for longer than that. Locks live in the desktop's memory: a restart loses them, which is what clients expect after a server restart.
       - A lock may be taken on a name that does not exist yet, which is what a new file looks like to a mounted drive. It does **not** make the file: doing that made the client's own `If-None-Match: *` create fail with 412, and its write never landed — found with davfs2, which is the only client that both locks and creates.
       - Only exclusive locks are offered; a request for a shared one is refused with that reason.
       - **A lock is the account's, not the token's** (Nov 10). Writing through a lock, renewing it and releasing it all need the account that took it as well as the token, so a token overheard, copied out of a log or replayed by a second person who also has write access to the share is worth nothing. None of the 423 answers names a token any more: whose lock it is stays the holder's business. `UNLOCK` from another account answers 423, and from somebody holding no such lock at all, 409.
       - **A folder carries its locks with it.** Deleting or moving a folder takes whatever is inside, so every lock at or under that folder is checked before anything is touched: if one is not satisfied, the whole request answers 423 and the folder, its contents and the lock are all left exactly as they were.
-      - Walked with curl and with **davfs2 mounting the share as a drive** on this machine: while the drive had a file open, another client's `PUT` to it answered 423, and after the drive let go the same `PUT` went through (204). A file written through the mount, and one changed through it, both landed on the NAS with their contents; a file written, then released by unmounting, kept its text rather than being taken away with the lock. Over curl a lock on an existing file kept a write out until the token came (423 then 204), a lock on a name that wasn't there left nothing on disk until the client created it, UNLOCK needed the token it was given, and a read-only account was refused a lock with "read only for you". Then, with two accounts that both have write on the same share, dana locked `media/folder/notes.txt` and gave guest the exact token: guest's `PUT`, renewal, `UNLOCK`, `DELETE` and `MOVE` of the file and of the folder all answered 423 — with no token in any of those answers and no `Lock-Token` header on them — while the file still held dana's text and her `PROPFIND` still showed the lock. Dana then wrote through the lock (204), renewed it (200) and released it (204), after which guest's write went through. The davfs2 mount as dana was repeated afterwards: the drive read the share, wrote a new file and changed an existing one, unmounted, and both landed on the NAS with no lock left behind.
 - **Still to come in Phase 13:** FTP.
+
+### Phase 13 test results
+
+What was walked for WebDAV and SFTP, and what wasn't. The feature bullets above say what each one does; this section is the record of how it was checked. The overview summarizes it and links here.
+
+#### WebDAV reading
+
+In the development container, with `FELLOWSHIP_DEV_TLS=1 dev/run.sh` serving `https://localhost:9443` (WebDAV refuses plain HTTP) and three accounts: `admin` (in `nas-admins`), and `guest` and `dana`, both in `media`, with a share `private` for `dana` alone. WebDAV was on for `media`, `family` and `private` and off for `archive`, which `guest` can read in Files.
+
+Signed in with rclone, `guest` listing `/dav/` saw `media/` and nothing else; `dana` saw `media/` and `private/`. Both read a file they may read; `rclone cat --offset 6 --count 4` on `media/notes.txt` returned exactly the four bytes at that offset, and `Range: bytes=10-19` answered 206 with `Content-Range: bytes 10-19/98` and the same ten bytes `dd` reads from disk. As `guest`, `private/diary.txt`, `family/private.txt` and `archive/old-notes.txt` each answered 404, the last being a share `guest` can read in Files but which isn't shared over WebDAV. At that slice every write answered 405 and the folder on disk was unchanged. Turning `archive` on through the desktop's API made it appear for `guest`; turning it off made it disappear. A wrong password answered 401 with a `Basic` challenge. The 403 for plain HTTP is covered by a unit test rather than a walk.
+
+#### WebDAV writing
+
+With the same accounts, over `https://localhost:9443/dav/`. A `PUT` of a new file by `dana` answered 201 and landed owned `dana:media`, `0664`, with the strong `ETag` it answered matching what a later `GET` reported. `MKCOL` answered 201, and 405 for the same name again; `COPY` answered 201, and 412 onto a name in use; `MOVE` answered 201, and 502 into another share; a file `DELETE` answered 204, a folder 400 with `Depth: 0` and 204 with its contents. Beyond that: a stale client got 412 and the first client's text stayed on disk; two clients PUTting the same version at the same instant left exactly one 204 and one 412; a read-only account could browse (207) and read (200) but every write was 403 "archive is read only for you"; a copy or move whose source was root's unreadable file was refused 403 and left it where it was; one into a root-owned folder was refused the same way; and every method against `.zfs` answered 403. rclone, as a real client, uploaded, read, renamed and deleted a file.
+
+#### WebDAV locking
+
+With curl, and with **davfs2 mounting the share as a drive** on the development machine: while the drive had a file open, another client's `PUT` to it answered 423, and after the drive let go the same `PUT` went through (204). A file written through the mount, and one changed through it, both landed on the NAS with their contents; a file written, then released by unmounting, kept its text rather than being taken away with the lock. Over curl a lock on an existing file kept a write out until the token came (423 then 204), a lock on a name that wasn't there left nothing on disk until the client created it, UNLOCK needed the token it was given, and a read-only account was refused a lock with "read only for you". Then, with two accounts that both have write on the same share, dana locked `media/folder/notes.txt` and gave guest the exact token: guest's `PUT`, renewal, `UNLOCK`, `DELETE` and `MOVE` of the file and of the folder all answered 423 — with no token in any of those answers and no `Lock-Token` header on them — while the file still held dana's text and her `PROPFIND` still showed the lock. Dana then wrote through the lock (204), renewed it (200) and released it (204), after which guest's write went through. The davfs2 mount as dana was repeated afterwards: the drive read the share, wrote a new file and changed an existing one, unmounted, and both landed on the NAS with no lock left behind.
+
+Three things the davfs2 walk changed: the server now says `DAV: 1, 2`, without which davfs2 announced "the server does not support locks" and skipped them; a lock on a name that doesn't exist yet no longer makes the empty file, which made davfs2's own `If-None-Match: *` create fail with 412; and an unlock no longer deletes the empty file a lock made, since a client that lets go before it has flushed would lose what it wrote.
+
+Not tried: Word, Excel, LibreOffice or Finder against the drive.
+
+#### SFTP
+
+On a Debian machine with a real `sshd`, a real `sftp` client and three accounts: `kim` and `sam` set to Files over SFTP, and `ada` keeping a shell. `kim`'s session started at `/` and `ls /` listed `media` and `private`, the two shares marked for SFTP that were hers to use; `sam`'s listed `media`, and `ls /private` answered "not found"; neither could see `docs`, which is shared over SMB but not over SFTP, or anything else on the machine. `kim` wrote a file into `media`, which landed owned `kim:media` on disk, and was refused "Permission denied" in `private`, where she has read only. Asking `ssh` for a shell as `kim` answered "This service allows sftp connections only", and asking sshd to carry a connection with `-W` failed, while the same request from `ada` came back with the SSH banner. Turning `media`'s SFTP box off and syncing again took it out of both views and out of a live `sftp` listing, leaving `kim` with `private` alone.
+
+The walk found one bug only a real client shows: a share turned off stayed in the view, because `os.path.ismount` misses a bind mount on the same filesystem. Mount points are read from `/proc/self/mountinfo` now.
+
+#### Taking access away
+
+On a Debian machine with a real `sshd` and real `sftp` clients, with `media` set to chosen access (kim read and write, sam read) and kim given `private` read-only. With kim's session sitting inside `/media`, taking her off the share and rebuilding the views took the share away from that session at once: its next `ls` answered "No such file or directory" and its next `get` "File not found", nothing downloaded, and a fresh session saw `private` alone. The same held with a client holding a file open, which makes the unmount busy: the mount is detached, kim's new session saw `private` alone and could open nothing in `media`, while sam's session still listed and read it. Re-enabling the access and then throwing every mount away — what a reboot does — left both accounts correct from one run of the boot unit's own command: kim saw `media` and `private` and could write in `media` but not in `private`, sam saw `media` alone, read a file and was refused a write.
+
+Not tried for SFTP: the boot unit through a real reboot (the machine was a container), FileZilla, a phone app or a script against the server, and SSH keys for a Files over SFTP account. Nothing in this section has run on real hardware.
+
 
 ## Pool details and SSH (Chris, Nov 9, built between Phases 9 and 10)
 
@@ -823,7 +857,7 @@ Install and role:
 - [ ] Install to disk from the ISO with data disks attached, reboot: wizard runs once and settings persist
 - [ ] Boot the ISO live: the first-boot wizard does not run
 - [ ] Cut the network during the role install: failure is shown, and the retry command completes it
-- [ ] Enable Secure Boot: role completes, ZFS shows as unavailable with the reason, the other engines work (today the role stops with a message instead; see Role install)
+- [ ] Enable Secure Boot: the role stops before installing anything with "Secure Boot is on, so the ZFS module can't load: disable it and retry", the wizard shows the retry command, and with Secure Boot off the retry completes the role
 - [ ] Try the role in the LXC template: role stops with a clear message
 
 Pools, on every engine in the release build:

@@ -22,7 +22,7 @@ picking work back up, not a fourth source of truth.
 | Phase 13 | WebDAV is built three times over: read over HTTPS, then writes with a strong `ETag` and `If-Match` checked as the write commits, then `LOCK`/`UNLOCK` with locks bound to the account that took them and folders that carry the locks inside them. SFTP is built: an account set to Files over SFTP is chrooted to a view of just its shares, with no shell, no forwarding and its view rebuilt whenever a share changes and at boot. **FTP is what is left of the phase**, FTPS first with plain FTP an opt-in |
 | Next | FTP, then the release gates on real hardware: everything in section 3, and the protocol gate in the plan (`An SFTP-only user can't get a shell and sees only their shares`, two accounts over SFTP, FTP and WebDAV) |
 | Tests | 285 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, the installer's edition, layout, engine and server tests pass, and CI runs on every push |
-| Docs baseline | The overview describes `a442697`, which includes the two-edition build and the reworked install page, and the plan's Sharing section records each WebDAV and SFTP slice built and what was seen of it |
+| Docs baseline | The overview describes `a442697`, which includes the two-edition build and the reworked install page, and the plan's Phase 13 test results record each WebDAV and SFTP slice and what was seen of it, which the overview summarizes and links |
 
 **The running VM predates all of Phase 13.** The SFTP views, the sshd `Match`
 block and `fellowship-nas-refresh.service` are new files, so they exist only
