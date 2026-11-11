@@ -285,7 +285,8 @@ def main(args):
                 share[protocol] = rest[rest.index(f"--{protocol}") + 1] == "on"
         out = f"Updated share {rest[0]}"
     elif area == "share" and action == "delete":
-        phrase = f"delete {rest[0]} and 3 snapshots"
+        # The name is the confirmation, as fnas asks for it
+        phrase = rest[0]
         if "--confirm" not in rest or rest[rest.index("--confirm") + 1] != phrase:
             fail(f"this destroys {rest[0]} and its snapshots:\n    tank/shares/{rest[0]}@hourly-1\n"
                  f"    tank/shares/{rest[0]}@daily-1\n    tank/shares/{rest[0]}@monthly-1\n"

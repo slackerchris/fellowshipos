@@ -711,12 +711,13 @@ def delete_share(name, confirm):
         raise FnasError(f"{share['pool']} is imported read-only")
     engine = pools.ENGINES[share["engine"]]
     kept = engine.volume_snapshots(share)
-    count = len(kept)
-    expected = f"delete {name} and {count} snapshot" + ("" if count == 1 else "s")
-    if confirm != expected:
+    # The name is what the person types, as deleting a file asks for its name.
+    # What goes with the share is listed here instead of being spelled into a
+    # sentence they would only copy back.
+    if confirm != name:
         lost = "".join(f"\n    {snapshot}" for snapshot in kept)
         raise FnasError(f"this destroys all data in {share['path']}{lost}\n"
-                        f'confirm by passing --confirm "{expected}"')
+                        f'confirm by passing --confirm "{name}"')
     engine.destroy_volume(share)
     save_settings(share["pool"], removed=name)
     write_config()

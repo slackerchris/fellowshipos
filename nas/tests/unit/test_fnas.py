@@ -1266,13 +1266,13 @@ class Sharing(Base):
         with self.assertRaises(fnas.FnasError) as refused:
             fnas.delete_share("media", "delete media")
         self.assertIn("tank/shares/media@a", str(refused.exception))
-        self.assertIn("delete media and 2 snapshots", str(refused.exception))
+        self.assertIn('--confirm "media"', str(refused.exception))
         self.assertEqual(fake.calls, [])
 
     def test_delete_with_confirmation(self):
         self.write_settings(media={"mode": "everyone", "nfs": True, "smb": False})
         fake = self.fake(volume_line("media"), snapshots="tank/shares/media@a\n")
-        fnas.delete_share("media", "delete media and 1 snapshot")
+        fnas.delete_share("media", "media")
         self.assertIn(("zfs", "destroy", "-r", "tank/shares/media"), fake.calls)
         self.assertEqual(self.settings(), {})
         self.assertEqual(self.exports(), [])

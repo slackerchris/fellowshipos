@@ -449,7 +449,7 @@ def build_parser():
     share.add_parser("services", help="list every way to share files and whether each is running")
     delete = share.add_parser("delete", help="destroy a share, its data and its snapshots")
     delete.add_argument("name")
-    delete.add_argument("--confirm", default="", help='type "delete NAME and N snapshots"')
+    delete.add_argument("--confirm", default="", help="type the share's name")
 
     sharing = area.add_parser("sharing", help="NAS-wide SMB and NFS settings").add_subparsers(
         dest="action", required=True)
