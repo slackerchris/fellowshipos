@@ -200,7 +200,7 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
                             <label class="check">
                                 <input type="checkbox" checked={webdav}
                                        onChange={event => setWebdav(event.currentTarget.checked)} />
-                                <span>A phone app or a mapped drive (WebDAV, read only for now)</span>
+                                <span>A phone app or a mapped drive (WebDAV, over HTTPS)</span>
                             </label>
                             <label class="check">
                                 <input type="checkbox" checked={sftp}

@@ -2,6 +2,7 @@
 command goes through a fake, and a test fails if fnas runs one it didn't expect."""
 import contextlib
 import importlib
+import io
 import json
 import os
 import pkgutil
@@ -2843,10 +2844,14 @@ class Users(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         shadow = os.path.join(directory.name, "shadow")
+        signed_out = os.path.join(directory.name, "signed-out.json")
+        self.signed_out = signed_out
         with open(shadow, "w") as file:
             file.write("tester:$y$hash:20000:0:99999:7:::\nkim:!:20000:0:99999:7:::\n"
                        "sam:!$y$hash:20000:0:99999:7::1:\n")
         for patcher in (patch("run", run), patch("SHADOW", shadow),
+                        patch("SIGNED_OUT_FILE", signed_out),
+                        patch("SIGNED_OUT_LOCK", signed_out + ".lock"),
                         mock.patch.object(fnas.pwd, "getpwall", lambda: self.accounts),
                         mock.patch.object(fnas.grp, "getgrall", lambda: self.groups),
                         mock.patch.object(fnas.grp, "getgrnam", by_name),
@@ -2877,6 +2882,21 @@ class Users(unittest.TestCase):
         self.assertIn((("chpasswd",), "sam:long enough\n"), self.calls)
         self.assertIn((("smbpasswd", "-s", "-a", "sam"), "long enough\nlong enough\n"), self.calls)
         self.assertIn(("gpasswd", "-a", "sam", "family"), commands)
+
+    def test_changing_a_password_ends_every_session(self):
+        with mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.set_password("tester", "another long one")
+        # The helper reads this and refuses a session that started before it
+        with open(self.signed_out) as file:
+            self.assertIn("tester", json.load(file))
+
+    def test_turning_an_account_off_or_removing_it_ends_its_sessions(self):
+        fnas.change_user("kim", enabled=False)
+        with open(self.signed_out) as file:
+            self.assertIn("kim", json.load(file))
+        fnas.remove_user("kim", False, "remove kim", ["docs"])
+        with open(self.signed_out) as file:
+            self.assertIn("kim", json.load(file))
 
     def test_refusals(self):
         cases = [(("tester", "", "shares", False, [], "long enough"), "already used"),
@@ -3047,6 +3067,9 @@ class Ssh(unittest.TestCase):
         self.assertIn("AllowGroups nas-ssh nas-sftp\n", text)
         self.assertIn("PermitRootLogin no\n", text)
         self.assertIn("PasswordAuthentication no\n", text)
+        # Debian's Include sits near the top of the main file, so everything
+        # after it would be inside the Match unless the block is closed
+        self.assertTrue(text.rstrip().endswith("Match all"))
 
     def test_keys_can_carry_no_options(self):
         for line in ('command="rm -rf /" ssh-ed25519 AAAA kim', "no-pty ssh-ed25519 AAAA", "hello", "ssh-dss AAAA x"):
@@ -3243,20 +3266,65 @@ class SftpViews(unittest.TestCase):
         home = os.path.join(self.root, "view", "kim")
         point = os.path.join(home, "media")
         os.makedirs(point)
+        # What the kernel still has mounted, which a detach does take away
+        held = {point}
 
         def stubborn(*command, check=True, stdin=None):
             self.calls.append(command)
-            busy = command[:2] == ("umount", point)
+            if command == ("umount", "-l", point):
+                held.clear()
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+            busy = command == ("umount", point)
             return SimpleNamespace(stdout="", stderr="busy" if busy else "",
                                    returncode=1 if busy else 0)
         with mock.patch.object(self.sftp, "run", stubborn), \
-                mock.patch.object(self.sftp, "mounts", lambda: {point}):
-            self.sftp.sync_view("kim", [one for one in self.sftp.view("kim")
-                                       if one["share"] == "private"])
+                mock.patch.object(self.sftp, "mounts", lambda: set(held)):
+            problems = self.sftp.sync_view("kim", [one for one in self.sftp.view("kim")
+                                                   if one["share"] == "private"])
         # A client with a file open keeps the file it opened and nothing more
         self.assertIn(("umount", point), self.calls)
         self.assertIn(("umount", "-l", point), self.calls)
         self.assertFalse(os.path.exists(point))
+        self.assertFalse(problems)
+
+    def test_a_share_that_will_not_go_is_reported_rather_than_forgotten(self):
+        home = os.path.join(self.root, "view", "kim")
+        point = os.path.join(home, "media")
+        os.makedirs(point)
+
+        def stuck(*command, check=True, stdin=None):
+            self.calls.append(command)
+            refused = command[0] == "umount"
+            return SimpleNamespace(stdout="", stderr="busy" if refused else "",
+                                   returncode=1 if refused else 0)
+        with mock.patch.object(self.sftp, "run", stuck), \
+                mock.patch.object(self.sftp, "mounts", lambda: {point}):
+            problems = self.sftp.sync_view("kim", [one for one in self.sftp.view("kim")
+                                                   if one["share"] == "private"])
+        # The way in was not taken away, so that is said rather than assumed
+        self.assertEqual(problems, [point])
+        self.assertTrue(os.path.isdir(point))
+
+    def test_a_share_that_will_not_mount_is_not_shown_empty(self):
+        def refuse_mount(*command, check=True, stdin=None):
+            self.calls.append(command)
+            broken = command[:2] == ("mount", "--bind")
+            return SimpleNamespace(stdout="", stderr="no such device" if broken else "",
+                                   returncode=1 if broken else 0)
+        with mock.patch.object(self.sftp, "run", refuse_mount):
+            problems = self.sftp.sync_view("sam", self.sftp.view("sam"))
+        point = os.path.join(self.root, "view", "sam", "media")
+        # An empty folder would look like a share they can't read, so it isn't there
+        self.assertFalse(os.path.exists(point))
+        self.assertEqual(problems, [point])
+
+    def test_a_view_that_would_not_rebuild_raises_an_alert(self):
+        said = []
+        with mock.patch.object(self.sftp.alerts, "send_alert",
+                               lambda severity, title, body: said.append((severity, title))), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.sftp.report([os.path.join(self.root, "view", "kim", "media")])
+        self.assertEqual(said, [("high", "An SFTP share could not be withdrawn")])
 
     def test_an_account_no_longer_set_to_sftp_loses_its_view(self):
         os.makedirs(os.path.join(self.root, "view", "sam"))

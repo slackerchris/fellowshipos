@@ -9,9 +9,10 @@ does for Files and WebDAV.
 """
 import grp
 import os
+import sys
 
 from .common import run, write_file
-from . import shares, users
+from . import alerts, shares, users
 
 
 VIEW_ROOT = "/var/lib/fellowship-nas/sftp"
@@ -117,39 +118,53 @@ def shows(point, path):
 
 
 def unmount(point):
-    """Take a share out of a view.
+    """Take a share out of a view, and say whether it really went.
 
     A plain unmount is refused while anything still has its feet in the share —
     a client with a file open, say. That must not leave the share reachable, so
     the mount is detached instead: the client that has hold of it keeps the file
     it already opened, which nothing can take back, and every new open through
-    that name fails at once."""
-    if run("umount", point, check=False).returncode != 0:
-        run("umount", "-l", point, check=False)
+    that name fails at once. Whether it went is read from the kernel, not from
+    the command's exit status, since a detach that failed leaves the share in
+    place."""
+    if run("umount", point, check=False).returncode == 0:
+        return True
+    run("umount", "-l", point, check=False)
+    return not mounted(point)
 
 
 def let_go(point, here=None):
-    """Take one share out of somebody's view and leave the folder empty."""
+    """Take one share out of somebody's view and leave the folder empty.
+
+    Answers False when the mount would not go, so the caller can say so: a share
+    that is still mounted is still reachable by an account that has lost it."""
     if os.path.normpath(point) in (mounts() if here is None else here):
-        unmount(point)
+        if not unmount(point):
+            return False
     try:
         os.rmdir(point)
     except OSError:
         pass
+    return True
 
 
 def sync_view(user, wanted):
     """Build one account's view: a folder belonging to root, holding one bind
-    mount per share. sshd refuses a chroot any other account could write to."""
+    mount per share. sshd refuses a chroot any other account could write to.
+
+    Answers the folders that could not be put right, so a failure is not taken
+    for a view that is current."""
     home = os.path.join(VIEW_ROOT, user)
     os.makedirs(home, mode=0o755, exist_ok=True)
     os.chown(home, 0, 0)
     os.chmod(home, 0o755)
     names = {one["share"] for one in wanted}
     here = mounts()
+    problems = []
     for entry in sorted(os.listdir(home)):
         if entry not in names:
-            let_go(os.path.join(home, entry), here)
+            if not let_go(os.path.join(home, entry), here):
+                problems.append(os.path.join(home, entry))
     for one in wanted:
         if not os.path.isdir(one["path"]):
             # Its pool isn't mounted, so there is nothing to show
@@ -158,34 +173,62 @@ def sync_view(user, wanted):
         shown = os.path.normpath(point) in here
         if shown and shows(point, one["path"]):
             continue
-        if shown:
-            unmount(point)
+        if shown and not unmount(point):
+            problems.append(point)
+            continue
         os.makedirs(point, mode=0o755, exist_ok=True)
-        run("mount", "--bind", one["path"], point)
+        if run("mount", "--bind", one["path"], point, check=False).returncode != 0:
+            # An empty folder in its place would look like a share they can't
+            # read, so it goes: a share that failed to mount is not shown at all
+            try:
+                os.rmdir(point)
+            except OSError:
+                pass
+            problems.append(point)
+    return problems
 
 
 def sync_views(known=None):
     """Rebuild every SFTP account's view from the shares it may use now, so a
     share turned off or an account changed takes effect at once. known is the
-    share list, for a caller that has just worked it out."""
+    share list, for a caller that has just worked it out. Answers the folders
+    that could not be put right."""
     os.makedirs(VIEW_ROOT, mode=0o755, exist_ok=True)
     os.chown(VIEW_ROOT, 0, 0)
     os.chmod(VIEW_ROOT, 0o755)
     known = shares.list_shares() if known is None else known
     wanted = {name: view(name, known) for name in accounts()}
+    problems = []
     for entry in sorted(os.listdir(VIEW_ROOT)):
         if entry in wanted:
             continue
         # Someone who isn't an SFTP account any more: their view goes
         home = os.path.join(VIEW_ROOT, entry)
         for inside in sorted(os.listdir(home)):
-            let_go(os.path.join(home, inside))
+            point = os.path.join(home, inside)
+            if not let_go(point):
+                problems.append(point)
         try:
             os.rmdir(home)
         except OSError:
             pass
     for name, found in wanted.items():
-        sync_view(name, found)
+        problems.extend(sync_view(name, found))
+    return problems
+
+
+def report(problems):
+    """Say what could not be put right, in the journal and in Health.
+
+    A share that would not unmount is still reachable by an account that has lost
+    it, so this is not a note to keep to itself."""
+    if not problems:
+        return
+    for point in problems:
+        print(f"fnas: the SFTP view at {point} could not be rebuilt", file=sys.stderr)
+    alerts.send_alert("high", "An SFTP share could not be withdrawn",
+                      "These folders could not be unmounted or mounted, so an account may still reach "
+                      "a share it has lost, or not reach one it has:\n" + "\n".join(problems))
 
 
 def rebuild(known=None):
@@ -193,7 +236,7 @@ def rebuild(known=None):
     one with no SFTP accounts has no views to build, and nothing is touched then."""
     if not accounts() and not os.path.isdir(VIEW_ROOT):
         return
-    sync_views(known)
+    report(sync_views(known))
 
 
 def sync(known=None):
@@ -201,4 +244,4 @@ def sync(known=None):
     is the share list when the caller has just read it."""
     ensure_shell()
     sync_accounts()
-    sync_views(known)
+    report(sync_views(known))

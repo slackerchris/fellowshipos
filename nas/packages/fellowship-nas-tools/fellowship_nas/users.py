@@ -4,8 +4,9 @@ import grp
 import os
 import pwd
 import re
+import time
 
-from .common import ACCOUNT_NAME, FnasError, run
+from .common import ACCOUNT_NAME, STATE_DIR, FnasError, locked, read_json, run, write_json
 
 
 ADMIN_GROUP = "nas-admins"
@@ -54,6 +55,10 @@ def smb_accounts():
 SHADOW = "/etc/shadow"
 # Turning an account off sets its expiry to this day, the day after 1970 began
 OFF_EXPIRY = "1"
+# When every session an account had was ended. The desktop's helper reads it, so
+# a password that has been changed can't leave somebody else signed in.
+SIGNED_OUT_FILE = os.path.join(STATE_DIR, "signed-out.json")
+SIGNED_OUT_LOCK = os.path.join(STATE_DIR, "signed-out.lock")
 
 
 def shadow():
@@ -176,6 +181,22 @@ def check_full_name(full_name):
         raise FnasError("full names can't contain : or , and are at most 64 characters")
 
 
+def end_sessions(name):
+    """Say that every session this account had is over.
+
+    A password change is what somebody does when they think another person has
+    had it, so it signs them out everywhere as well: the helper reads this and
+    refuses any session that started before it. A damaged file is started over
+    rather than left to stop a password from being set."""
+    with locked(SIGNED_OUT_LOCK):
+        try:
+            stamps = read_json(SIGNED_OUT_FILE, {})
+        except FnasError:
+            stamps = {}
+        stamps[name] = int(time.time())
+        write_json(SIGNED_OUT_FILE, stamps)
+
+
 def set_password(name, password):
     """One password for Linux and Samba."""
     find_user(name)
@@ -183,6 +204,7 @@ def set_password(name, password):
     run("chpasswd", stdin=f"{name}:{password}\n")
     if os.path.isdir("/etc/samba"):
         run("smbpasswd", "-s", "-a", name, stdin=f"{password}\n{password}\n")
+    end_sessions(name)
 
 
 def admins():
@@ -246,6 +268,7 @@ def change_user(name, full_name=None, kind=None, admin=None, groups=None, enable
         run("usermod", "--lock", "--expiredate", OFF_EXPIRY, name)
         if user["smb_password"]:
             run("smbpasswd", "-d", name)
+        end_sessions(name)
     elif enabled is True:
         run("usermod", "--unlock", "--expiredate", "", name)
         if user["smb_password"]:
@@ -265,6 +288,7 @@ def remove_user(name, keep_home, confirm, shares_lost):
     if user["smb_password"]:
         run("smbpasswd", "-x", name, check=False)
     run("userdel", *([] if keep_home else ["--remove"]), name)
+    end_sessions(name)
 
 
 def create_group(name, members):

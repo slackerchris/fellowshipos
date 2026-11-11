@@ -11,6 +11,7 @@ package front
 import (
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -122,8 +123,15 @@ func (s *Server) davPut(w http.ResponseWriter, r *http.Request, who davPerson, w
 		writeError(w, http.StatusServiceUnavailable, noHelper)
 		return
 	}
-	response, err := send(request, r.Body)
+	// The same cap as the desktop's upload: a share is not a place to fill a disk
+	body := http.MaxBytesReader(w, r.Body, MaxUpload)
+	response, err := send(request, body)
 	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "that file is too big to put here")
+			return
+		}
 		log.Printf("webdav put: %v", err)
 		writeError(w, http.StatusServiceUnavailable, noHelper)
 		return
@@ -306,8 +314,12 @@ func (s *Server) davMoveCopy(w http.ResponseWriter, r *http.Request, who davPers
 	dest, err := davDestination(r)
 	if err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, errHidden) {
+		switch {
+		case errors.Is(err, errHidden):
 			status = http.StatusForbidden
+		case errors.Is(err, errOtherHost):
+			// RFC 4918 asks for 502 when the destination is another server
+			status = http.StatusBadGateway
 		}
 		writeError(w, status, err.Error())
 		return
@@ -389,16 +401,33 @@ func (s *Server) davReadable(token string, where davWhere) string {
 	return response.Error
 }
 
+// errOtherHost is a Destination that names another server.
+var errOtherHost = errors.New("a move or copy has to stay on this NAS")
+
 // davDestination reads where a MOVE or COPY is going, in the same shape as the
-// address itself, with the same refusals.
+// address itself, with the same refusals. The header is a URL, so its path is
+// still escaped: it goes through the same reading, a segment at a time, that a
+// request's own address does, so %2F can't become a folder either way.
 func davDestination(r *http.Request) (davWhere, error) {
 	header := strings.TrimSpace(r.Header.Get("Destination"))
 	if header == "" {
 		return davWhere{}, errors.New("a move or copy has to say where it is going in Destination")
 	}
 	parsed, err := url.Parse(header)
-	if err != nil {
+	if err != nil || parsed.EscapedPath() == "" {
 		return davWhere{}, errors.New("the Destination address can't be read")
 	}
-	return davWhereOf(parsed.Path)
+	if parsed.Host != "" && davHostName(parsed.Host) != davHostName(r.Host) {
+		return davWhere{}, errOtherHost
+	}
+	return davWhereIn(parsed.EscapedPath())
+}
+
+// davHostName is the host part of an address without its port, so a client that
+// writes :443 in a Destination still means this NAS.
+func davHostName(address string) string {
+	if name, _, err := net.SplitHostPort(address); err == nil {
+		return strings.ToLower(name)
+	}
+	return strings.ToLower(address)
 }

@@ -32,6 +32,15 @@ const outputLimit = 4 << 20
 // Python process, so a flood of requests mustn't be able to fill the machine.
 const maxRunning = 8
 
+// maxRequestLine is the most one request's JSON may be. The file follows it on
+// the same connection, so only the request itself is bounded here: a larger one
+// is a mistake or a hole in the front, not something to hold in memory.
+const maxRequestLine = 1 << 20
+
+// signedOutFile is where fnas records that every session of an account is over,
+// because its password changed or the account was turned off.
+const signedOutFile = "/var/lib/fellowship-nas/signed-out.json"
+
 var slots = make(chan struct{}, maxRunning)
 
 var (
@@ -171,6 +180,25 @@ func peerUID(conn *net.UnixConn) (int, error) {
 	return int(credentials.Uid), nil
 }
 
+// readLine reads one line no longer than maxRequestLine, so a request can't grow
+// the helper's memory just by being sent.
+func readLine(reader *bufio.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		line = append(line, part...)
+		if len(line) > maxRequestLine {
+			return nil, errors.New("that request is too large")
+		}
+		if err == nil {
+			return line, nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return nil, err
+		}
+	}
+}
+
 func serve(h *helper.Helper, conn *net.UnixConn, allowed int) {
 	defer conn.Close()
 	if uid, err := peerUID(conn); err != nil || (uid != allowed && uid != 0) {
@@ -180,7 +208,7 @@ func serve(h *helper.Helper, conn *net.UnixConn, allowed int) {
 	// The request is one line of JSON. Reading it as a line leaves anything after
 	// it on the connection, which is what an upload is
 	reader := bufio.NewReaderSize(conn, 64<<10)
-	line, err := reader.ReadBytes('\n')
+	line, err := readLine(reader)
 	if err != nil {
 		return
 	}
@@ -231,7 +259,7 @@ func main() {
 	}
 
 	h := helper.New(helper.Config{Authenticate: authenticate, Lookup: lookup, Fnas: runFnas,
-		Child: runChild, Alert: alert})
+		Child: runChild, Alert: alert, SignedOut: signedOutFile})
 	log.Printf("listening on %s", *socket)
 	for {
 		conn, err := listener.AcceptUnix()

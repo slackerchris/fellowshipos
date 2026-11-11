@@ -466,8 +466,10 @@ func (s *Server) zip(w http.ResponseWriter, r *http.Request, session *protocol.S
 	}
 }
 
-// MaxUpload is the most one file may be, matching the helper's own cap.
-const MaxUpload = 10 << 30
+// MaxUpload is the most one file may be, whether it arrives through the desktop
+// or through WebDAV, so the newer way in can't be used to fill a disk the older
+// one refuses. A var so a test can lower it rather than send ten gigabytes.
+var MaxUpload = int64(10 << 30)
 
 // upload receives a file and hands it to the helper, which writes it as the
 // person. The body is the file itself, so nothing is held in memory here.

@@ -2,6 +2,9 @@ package helper
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -99,6 +102,28 @@ func TestLoginRefusals(t *testing.T) {
 	expired := h.Handle(protocol.Request{Op: protocol.OpLogin, User: "kim", Password: "old"})
 	if !strings.Contains(expired.Error, "expired") || expired.Token != "" {
 		t.Errorf("expired: %+v", expired)
+	}
+}
+
+func TestAChangedPasswordEndsEverySession(t *testing.T) {
+	f, h := newFake()
+	signedOut := filepath.Join(t.TempDir(), "signed-out.json")
+	h.config.SignedOut = signedOut
+	token := login(t, h, "sam").Token
+
+	// fnas writes this when the password changes or the account is turned off
+	stamp := f.now.Add(time.Second).Unix()
+	if err := os.WriteFile(signedOut, []byte(fmt.Sprintf(`{"sam": %d}`, stamp)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(2 * time.Second)
+	if h.Handle(protocol.Request{Op: protocol.OpCheck, Session: token}).Code != protocol.CodeUnauthenticated {
+		t.Fatal("a session made with the old password lived on")
+	}
+	// Somebody else's session is nobody else's business
+	other := login(t, h, "kim").Token
+	if h.Handle(protocol.Request{Op: protocol.OpCheck, Session: other}).Code != "" {
+		t.Fatal("a different account was signed out")
 	}
 }
 

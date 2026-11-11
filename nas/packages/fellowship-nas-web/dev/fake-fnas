@@ -274,6 +274,7 @@ def main(args):
                                 "mode": "everyone" if "--everyone" in rest else "chosen",
                                 "access": {"users": {}, "groups": {}}, "engine": "zfs", "snapshots": True,
                                 "nfs": "--nfs" in rest, "smb": "--smb" in rest, "sftp": "--sftp" in rest,
+                                "webdav": "--webdav" in rest,
                                 "smb_options": SMB, "nfs_options": NFS,
                                 "policy": {"hourly": 24, "daily": 30, "monthly": 6}, "readonly": False})
         out = f"Created share {name}"

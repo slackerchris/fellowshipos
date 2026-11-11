@@ -113,7 +113,11 @@ func (d *davHelper) call(request protocol.Request) (protocol.Response, error) {
 // one the "disk" holds, which is the race a stale client loses.
 func (d *davHelper) send(request protocol.Request, body io.Reader) (protocol.Response, error) {
 	d.asked = append(d.asked, request)
-	taken, _ := io.ReadAll(body)
+	taken, err := io.ReadAll(body)
+	if err != nil {
+		// What the real client does when the body stops early, such as at the cap
+		return protocol.Response{}, err
+	}
 	if d.refuseWrite {
 		return protocol.Response{Code: protocol.CodePrecondition,
 			Error: "that file has changed since it was read"}, nil
@@ -227,16 +231,28 @@ func davAskBodyAs(handler http.Handler, user, method, path, password, body strin
 }
 
 func TestWebDAVNeedsAnEncryptedConnection(t *testing.T) {
-	d, handler := davSetup(t, "http")
-	answer := davAsk(handler, "PROPFIND", "/dav/", "right", nil)
-	if answer.Code != http.StatusForbidden {
-		t.Fatalf("over plain HTTP the answer was %d %q", answer.Code, answer.Body.String())
-	}
-	if !strings.Contains(answer.Body.String(), "only served over HTTPS") {
-		t.Errorf("the reason was %q", answer.Body.String())
-	}
-	if len(d.asked) != 0 {
-		t.Errorf("a password was checked over plain HTTP: %v", d.asked)
+	// What the server was told about itself on the command line is not evidence
+	// that this connection is encrypted. The request's own TLS state decides, so
+	// a plain HTTP request is refused even when Scheme is empty or says https.
+	for _, scheme := range []string{"", "http", "https"} {
+		t.Run("Scheme="+scheme, func(t *testing.T) {
+			d, handler := davSetup(t, scheme)
+			request := httptest.NewRequest("PROPFIND", "http://nas.local/dav/", nil)
+			request.SetBasicAuth("sam", "right")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("a plain HTTP request answered %d %q", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), "only served over HTTPS") {
+				t.Errorf("the reason was %q", recorder.Body.String())
+			}
+			for _, one := range d.asked {
+				if one.Op == protocol.OpLogin {
+					t.Fatal("the helper was asked to check a password over plain HTTP")
+				}
+			}
+		})
 	}
 }
 
@@ -519,6 +535,10 @@ func TestWebDAVMoveAndCopyRefuse(t *testing.T) {
 			code: http.StatusForbidden},
 		{name: "the share itself", method: "MOVE", dest: "/dav/media",
 			code: http.StatusBadRequest},
+		{name: "another server", method: "MOVE", dest: "https://elsewhere.example/dav/media/x.txt",
+			code: http.StatusBadGateway},
+		{name: "a slash hidden inside a name", method: "COPY", dest: "/dav/media/a%2Fb.txt",
+			code: http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -570,6 +590,81 @@ func TestWebDAVWillNotTouchTheSnapshots(t *testing.T) {
 
 // A lock is what a word processor takes before it will save, so the token it is
 // given has to be the only way in until it lets go.
+func TestALockOnAShareCoversWhatIsInIt(t *testing.T) {
+	// Nothing can take a lock on a share itself over WebDAV today, since a write
+	// has to name something inside one, but a lock that did would have to hold
+	// everything in it rather than only the root
+	root := davLock{share: "media", inside: "", depth: "infinity"}
+	for _, inside := range []string{"", "notes.txt", "photos/sunrise.png"} {
+		if !root.covers("media", inside) {
+			t.Errorf("a lock on the share itself did not cover %q", inside)
+		}
+	}
+	if root.covers("private", "notes.txt") {
+		t.Errorf("a lock on one share covered another")
+	}
+	folder := davLock{share: "media", inside: "photos", depth: "infinity"}
+	if !folder.covers("media", "photos/sunrise.png") {
+		t.Errorf("a folder lock did not cover a file in it")
+	}
+	if folder.covers("media", "photographs/sunrise.png") {
+		t.Errorf("a folder lock covered a name that only starts the same")
+	}
+	one := davLock{share: "media", inside: "notes.txt", depth: "0"}
+	if one.covers("media", "notes.txt/child") {
+		t.Errorf("a Depth: 0 lock covered something beneath it")
+	}
+}
+
+func TestTheLocksInsideAShareAreFoundFromItsRoot(t *testing.T) {
+	s := &Server{}
+	s.davLocks.held = []davLock{
+		{token: "opaquelocktoken:x", user: "sam", share: "media", inside: "photos/sunrise.png",
+			depth: "0", expires: time.Now().Add(time.Hour)},
+	}
+	if found := s.davLocksUnder("media", ""); len(found) != 1 {
+		t.Errorf("a lock inside the share was not found from its root: %v", found)
+	}
+	if found := s.davLocksUnder("private", ""); len(found) != 0 {
+		t.Errorf("a lock was found in another share: %v", found)
+	}
+}
+
+func TestWebDAVTellsTheHelperWhereALoginCameFrom(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	davAsk(handler, "PROPFIND", "/dav/", "right", nil)
+	loggedIn := false
+	for _, one := range d.asked {
+		if one.Op != protocol.OpLogin {
+			continue
+		}
+		loggedIn = true
+		// httptest asks from 192.0.2.1, so that is what the helper must be told:
+		// guessing is slowed down per address, not in one bucket shared by every
+		// WebDAV client on the network
+		if one.Remote != "192.0.2.1" {
+			t.Errorf("the helper was told the login came from %q", one.Remote)
+		}
+	}
+	if !loggedIn {
+		t.Fatal("the helper was never asked to check a password")
+	}
+}
+
+func TestWebDAVPutWillNotFillADisk(t *testing.T) {
+	d, handler := davSetup(t, "https")
+	kept := MaxUpload
+	MaxUpload = 8
+	t.Cleanup(func() { MaxUpload = kept })
+	answer := davAskBody(handler, "PUT", "/dav/media/big.bin", "right", strings.Repeat("x", 64), nil)
+	if answer.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("an oversized PUT answered %d %q", answer.Code, answer.Body.String())
+	}
+	if _, taken := d.files["media/big.bin"]; taken {
+		t.Error("an oversized upload was kept")
+	}
+}
+
 func TestWebDAVLockKeepsOthersOutUntilItIsLetGo(t *testing.T) {
 	d, handler := davSetup(t, "https")
 	locked := davAsk(handler, "LOCK", "/dav/media/notes.txt", "right", http.Header{

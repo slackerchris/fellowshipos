@@ -214,9 +214,10 @@ export function accessNames(share: Share) {
     return names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
 }
 
-/** The protocols a share is on, as one short line: "SMB · NFS · SFTP". */
+/** The protocols a share is on, as one short line: "SMB · NFS · WebDAV · SFTP". */
 function protocolsOf(share: Share) {
-    return [share.smb ? "SMB" : "", share.nfs ? "NFS" : "", share.sftp ? "SFTP" : ""]
+    return [share.smb ? "SMB" : "", share.nfs ? "NFS" : "", share.webdav ? "WebDAV" : "",
+            share.sftp ? "SFTP" : ""]
         .filter(Boolean).join(" · ");
 }
 
@@ -229,6 +230,10 @@ function connectLines(share: Share) {
     }
     if (share.nfs) {
         lines.push(`mount ${host}:${share.path} /media/${share.name}`);
+    }
+    if (share.webdav) {
+        // The address a phone's file app or a mapped drive is pointed at
+        lines.push(`https://${host}/dav/${share.name}/`);
     }
     return lines;
 }
@@ -243,7 +248,7 @@ const FolderIcon = () => (
 /** One share's panel: how to reach it, which ways it is shared, and its settings. */
 function SharePanel({ share, lan, busy, toggle, onDone }: {
     share: Share; lan: string; busy: boolean;
-    toggle: (share: Share, protocol: "nfs" | "smb" | "sftp") => void;
+    toggle: (share: Share, protocol: "nfs" | "smb" | "webdav" | "sftp") => void;
     onDone: () => void;
 }) {
     const lines = connectLines(share);
@@ -253,7 +258,7 @@ function SharePanel({ share, lan, busy, toggle, onDone }: {
                 <span class="field-label">Connect from another device</span>
                 {lines.length
                     ? lines.map(line => <code key={line} class="mono small">{line}</code>)
-                    : <span class="muted small">Turn on SMB or NFS below to reach it from another machine.</span>}
+                    : <span class="muted small">Turn on a way to share it below to reach it from another machine.</span>}
                 <span class="muted small mono">{share.path}</span>
             </div>
             <div class="row share-toggles">
@@ -267,6 +272,11 @@ function SharePanel({ share, lan, busy, toggle, onDone }: {
                            onChange={() => toggle(share, "nfs")} />
                     <span>NFS{share.nfs && share.nfs_options.clients.length
                         ? ` (${share.nfs_options.clients.length} chosen computers)` : ""}</span>
+                </label>
+                <label class="check">
+                    <input type="checkbox" checked={share.webdav} disabled={busy || share.readonly}
+                           onChange={() => toggle(share, "webdav")} />
+                    <span>WebDAV <span class="muted small">(a drive over HTTPS)</span></span>
                 </label>
                 <label class="check">
                     <input type="checkbox" checked={share.sftp} disabled={busy || share.readonly}
@@ -289,7 +299,7 @@ function ShareList({ shares, lan, reload, creating, setCreating }: {
     const [deleting, setDeleting] = useState<{ name: string; phrase: string; lost: string[] } | null>(null);
     const action = useAction(reload);
     const deleteAction = useAction(reload);
-    const toggle = (share: Share, protocol: "nfs" | "smb" | "sftp") =>
+    const toggle = (share: Share, protocol: "nfs" | "smb" | "webdav" | "sftp") =>
         action.run(() => fnas(["share", "set", share.name, `--${protocol}`, share[protocol] ? "off" : "on"]));
     const choose = (name: string) => { setMenu(null); setOpen(open === name ? null : name); };
 

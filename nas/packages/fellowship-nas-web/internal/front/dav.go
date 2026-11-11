@@ -55,10 +55,9 @@ const (
 
 // davToken is one client's session, kept so its password isn't checked again.
 type davToken struct {
-	user   string
-	token  string
-	at     time.Time
-	failed string
+	user  string
+	token string
+	at    time.Time
 }
 
 // davPerson is who a request is from: the account, and the session the helper gave
@@ -105,9 +104,10 @@ type davSessions struct {
 
 // dav is the handler for everything under /dav/.
 func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
-	// Scheme is empty on a real NAS, where this server terminates the TLS itself,
-	// and "http" only when the desktop is being tried out on this machine
-	if s.Scheme != "" && s.Scheme != "https" {
+	// This server terminates the TLS itself, so the connection is what decides
+	// whether a password may be read: a scheme passed on the command line is not
+	// evidence that this request came in over HTTPS
+	if r.TLS == nil {
 		writeError(w, http.StatusForbidden, davNoTLS)
 		return
 	}
@@ -117,7 +117,7 @@ func (s *Server) dav(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Sign in with your NAS user name and password.")
 		return
 	}
-	token, said := s.davSession(user, password)
+	token, said := s.davSession(user, password, remoteAddress(r))
 	if said != "" {
 		w.Header().Set("WWW-Authenticate", davRealm)
 		writeError(w, http.StatusUnauthorized, said)
@@ -174,8 +174,10 @@ func davAllowHeaders(w http.ResponseWriter) {
 }
 
 // davSession returns the session for these credentials, checking the password
-// with the helper when it has not seen it lately.
-func (s *Server) davSession(user, password string) (string, string) {
+// with the helper when it has not seen it lately. The address goes with it, so a
+// machine guessing passwords is slowed down on its own rather than through
+// everybody else's WebDAV logins.
+func (s *Server) davSession(user, password, remote string) (string, string) {
 	key := sha256.Sum256([]byte(user + "\x00" + password))
 	now := time.Now()
 	s.davKept.mu.Lock()
@@ -184,7 +186,8 @@ func (s *Server) davSession(user, password string) (string, string) {
 	if seen && now.Sub(kept.at) < davKeep {
 		return kept.token, ""
 	}
-	response, err := s.Call(protocol.Request{Op: protocol.OpLogin, User: user, Password: password})
+	response, err := s.Call(protocol.Request{Op: protocol.OpLogin, User: user, Password: password,
+		Remote: remote})
 	if err != nil {
 		log.Printf("webdav login: %v", err)
 		return "", "The NAS's web helper isn't running."
@@ -207,18 +210,25 @@ func (s *Server) davSession(user, password string) (string, string) {
 	return response.Token, ""
 }
 
-// davPath turns what the client asked for into a share and a path inside it,
-// one segment at a time, so an escaped slash can't become a folder.
+// davPath turns what the client asked for into a share and a path inside it.
 func davPath(escaped string) (davWhere, error) {
+	return davWhereIn(escaped)
+}
+
+// davWhereIn splits an escaped address under /dav into a share and a path
+// inside it, one segment at a time, so an escaped slash can't become a folder.
+// A request's own address and a Destination header both come through here, so
+// a name means the same thing however it arrived.
+func davWhereIn(escaped string) (davWhere, error) {
 	rest, found := strings.CutPrefix(escaped, "/dav")
 	if !found {
 		return davWhere{}, fmt.Errorf("not a WebDAV address")
 	}
 	rest = strings.TrimPrefix(rest, "/")
-	parts := strings.Split(strings.TrimSuffix(rest, "/"), "/")
 	if rest == "" {
 		return davWhere{}, nil
 	}
+	parts := strings.Split(strings.TrimSuffix(rest, "/"), "/")
 	clean := make([]string, 0, len(parts))
 	for _, part := range parts {
 		name, err := url.PathUnescape(part)
@@ -228,20 +238,6 @@ func davPath(escaped string) (davWhere, error) {
 		clean = append(clean, name)
 	}
 	return davWhereFrom(clean)
-}
-
-// davWhereOf is the same for an address that is already read, like a
-// Destination header.
-func davWhereOf(decoded string) (davWhere, error) {
-	rest, found := strings.CutPrefix(decoded, "/dav")
-	if !found {
-		return davWhere{}, fmt.Errorf("not a WebDAV address")
-	}
-	rest = strings.TrimPrefix(rest, "/")
-	if rest == "" {
-		return davWhere{}, nil
-	}
-	return davWhereFrom(strings.Split(strings.TrimSuffix(rest, "/"), "/"))
 }
 
 // davWhereFrom is where both of those end, so an address means the same thing

@@ -115,6 +115,12 @@ def drop_in(current):
         # both groups are above and this is only about what nas-sftp may do.
         f"Match Group {users.SFTP_GROUP}",
         *[f"    {option}" for option in sftp.MATCH_OPTIONS],
+        # Debian puts the Include for this directory near the top of sshd_config,
+        # so every line after it would be read inside this Match: UsePAM and
+        # Subsystem are not allowed there, and sshd -t would refuse the lot.
+        # Match all puts the rest of the file back in the global context.
+        "",
+        "Match all",
     ]) + "\n"
 
 

@@ -9,10 +9,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -90,6 +92,10 @@ type Config struct {
 		extra ...string) (io.ReadCloser, error)
 	Alert func(title, message string)
 	Now   func() time.Time
+	// SignedOut is the file fnas writes when every session of an account is over,
+	// which it does when the password changes or the account is turned off. Empty
+	// leaves that check out.
+	SignedOut string
 }
 
 type session struct {
@@ -106,6 +112,10 @@ type Helper struct {
 	// once rather than once a picture
 	rootsMu sync.Mutex
 	known   map[string]knownRoots
+	// When fnas last ended each account's sessions, read at most once a second
+	stampMu  sync.Mutex
+	stamps   map[string]int64
+	stampsAt time.Time
 }
 
 func New(config Config) *Helper {
@@ -116,12 +126,14 @@ func New(config Config) *Helper {
 		known: map[string]knownRoots{}}
 }
 
-func randomText(bytes int) string {
+// randomText is a token no other client will guess. A failure here means the
+// machine has no working randomness, which is no way to start a session.
+func randomText(bytes int) (string, error) {
 	buffer := make([]byte, bytes)
 	if _, err := rand.Read(buffer); err != nil {
-		panic(err)
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(buffer)
+	return base64.RawURLEncoding.EncodeToString(buffer), nil
 }
 
 func failure(code, text string) protocol.Response {
@@ -236,9 +248,18 @@ func (h *Helper) login(request protocol.Request) protocol.Response {
 	// The address keeps its count, so one good account can't reset guessing at others
 	h.limiter.succeed(keys[:1])
 
-	token := randomText(32)
+	token, err := randomText(32)
+	if err != nil {
+		log.Printf("login: no session token: %v", err)
+		return failure(protocol.CodeFailed, "The NAS can't start a session right now.")
+	}
+	csrf, err := randomText(24)
+	if err != nil {
+		log.Printf("login: no session secret: %v", err)
+		return failure(protocol.CodeFailed, "The NAS can't start a session right now.")
+	}
 	digest := sha256.Sum256([]byte(token))
-	created := &session{id: hex.EncodeToString(digest[:6]), user: request.User, csrf: randomText(24),
+	created := &session{id: hex.EncodeToString(digest[:6]), user: request.User, csrf: csrf,
 		remote: request.Remote, started: now, lastSeen: now}
 	h.mu.Lock()
 	h.sessions[digest] = created
@@ -270,7 +291,39 @@ func (h *Helper) prune(now time.Time) {
 }
 
 func (h *Helper) ended(s *session, now time.Time) bool {
-	return now.Sub(s.lastSeen) > IdleTimeout || now.Sub(s.started) > MaxAge
+	if now.Sub(s.lastSeen) > IdleTimeout || now.Sub(s.started) > MaxAge {
+		return true
+	}
+	// A session made before the account's sessions were ended is over, even if it
+	// was made with the password that has just been changed and nobody since has
+	// touched it. "At or before" rather than "before": a session made in the same
+	// second as the change must not slip through.
+	return s.started.Unix() <= h.signedOutAt(s.user)
+}
+
+// signedOutAt is when fnas last ended every session of this account, or 0 if it
+// never has. The file is small, and reading it once a second is enough for a
+// change made in another process to take effect while somebody is looking at
+// the desktop.
+func (h *Helper) signedOutAt(user string) int64 {
+	if h.config.SignedOut == "" {
+		return 0
+	}
+	now := h.config.Now()
+	h.stampMu.Lock()
+	defer h.stampMu.Unlock()
+	if h.stampsAt.IsZero() || now.Sub(h.stampsAt) >= time.Second || now.Before(h.stampsAt) {
+		stamps := map[string]int64{}
+		if content, err := os.ReadFile(h.config.SignedOut); err == nil {
+			if json.Unmarshal(content, &stamps) != nil {
+				// A file being written as it is read is no reason to end
+				// somebody's session, so a damaged one is ignored
+				stamps = map[string]int64{}
+			}
+		}
+		h.stamps, h.stampsAt = stamps, now
+	}
+	return h.stamps[user]
 }
 
 // find returns the live session for token, counting this as activity when touch is set

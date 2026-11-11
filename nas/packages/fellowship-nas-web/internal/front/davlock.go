@@ -91,6 +91,11 @@ func (one davLock) covers(share, inside string) bool {
 	if one.depth != "infinity" {
 		return false
 	}
+	if one.inside == "" {
+		// A lock on the share itself is over everything in it. The prefix test
+		// below can't say so, since an address inside a share has no leading slash.
+		return true
+	}
 	return strings.HasPrefix(inside, strings.TrimSuffix(one.inside, "/")+"/")
 }
 
@@ -131,6 +136,11 @@ func (one davLock) settled(r *http.Request, who davPerson) bool {
 // of that folder would take with it.
 func (s *Server) davLocksUnder(share, inside string) []davLock {
 	prefix := strings.TrimSuffix(inside, "/") + "/"
+	if inside == "" {
+		// Everything in the share is under its root, and no address inside a
+		// share starts with a slash for the prefix test to find
+		prefix = ""
+	}
 	s.davLocks.mu.Lock()
 	defer s.davLocks.mu.Unlock()
 	var found []davLock
@@ -267,7 +277,7 @@ func (s *Server) davLock(w http.ResponseWriter, r *http.Request, who davPerson, 
 		share: where.Share, inside: where.Inside, depth: depth, owner: davOwnerOf(text),
 		expires: s.davLocks.clock().Add(s.davLocks.expiry(r.Header.Get("Timeout")))}
 	s.davLocks.held = append(s.davLocks.held, one)
-	davSendLock(w, one, http.StatusOK)
+	s.davSendLock(w, one, http.StatusOK)
 }
 
 // davRenew pushes a lock's time out, for a client in the middle of working on the
@@ -289,18 +299,18 @@ func (s *Server) davRenew(w http.ResponseWriter, r *http.Request, who davPerson,
 			continue
 		}
 		s.davLocks.held[i].expires = s.davLocks.clock().Add(s.davLocks.expiry(r.Header.Get("Timeout")))
-		davSendLock(w, s.davLocks.held[i], http.StatusOK)
+		s.davSendLock(w, s.davLocks.held[i], http.StatusOK)
 		return
 	}
 	writeError(w, http.StatusPreconditionFailed, "that lock isn't held here")
 }
 
 // davSendLock answers with the token and what the client now holds.
-func davSendLock(w http.ResponseWriter, one davLock, status int) {
+func (s *Server) davSendLock(w http.ResponseWriter, one davLock, status int) {
 	w.Header().Set("Lock-Token", "<"+one.token+">")
 	w.Header().Set(contentType, "application/xml; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprint(w, davLockBody(one))
+	fmt.Fprint(w, davLockBody(one, s.davLocks.clock()))
 }
 
 // davUnlock lets go of a lock, which only the client holding it can do.
@@ -315,26 +325,24 @@ func (s *Server) davUnlock(w http.ResponseWriter, r *http.Request, who davPerson
 		return
 	}
 	s.davLocks.mu.Lock()
-	var found *davLock
+	held, found := davLock{}, false
 	for _, one := range s.davLocks.live() {
 		if one.token == want && one.share == where.Share && one.inside == where.Inside {
-			held := one
-			found = &held
+			held, found = one, true
 		}
 	}
-	if found == nil {
+	if !found {
 		s.davLocks.mu.Unlock()
 		writeError(w, http.StatusConflict, "that lock isn't held here")
 		return
 	}
-	if found.user != who.name {
+	if held.user != who.name {
 		s.davLocks.mu.Unlock()
 		writeError(w, http.StatusLocked, "that lock belongs to another account")
 		return
 	}
 	s.davLocks.drop(want)
 	s.davLocks.mu.Unlock()
-	_ = found
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -345,8 +353,8 @@ func davUnquoteToken(header string) string {
 
 // davLockBody is the lockdiscovery a client expects back: what it holds, what
 // kind of lock it is, and how long it has left.
-func davLockBody(one davLock) string {
-	left := one.expires.Sub(time.Now())
+func davLockBody(one davLock, now time.Time) string {
+	left := one.expires.Sub(now)
 	if left < time.Second {
 		left = time.Second
 	}
