@@ -139,6 +139,8 @@ type Clip = { share: string; folder: string; names: string[]; cut: boolean };
 export function Files() {
     const shares = useLoad(fileShares);
     const [share, setShare] = useState<FileShare | null>(null);
+    // With one share there is nothing to choose, so it opens straight away
+    const shown = share ?? (shares.data?.shares.length === 1 ? shares.data.shares[0] : null);
     const [view, setView] = useState<"list" | "grid">("list");
     // Kept here, above the folder being shown, so it lasts while the person goes to another folder
     const [clip, setClip] = useState<Clip | null>(null);
@@ -160,8 +162,8 @@ export function Files() {
                                 <p class="files-side-title">Shares</p>
                                 {shares.data!.shares.map(item => (
                                     <button key={item.share} type="button"
-                                            class={`files-share ${share?.share === item.share ? "current" : ""}`}
-                                            aria-current={share?.share === item.share}
+                                            class={`files-share ${shown?.share === item.share ? "current" : ""}`}
+                                            aria-current={shown?.share === item.share}
                                             onClick={() => setShare(item)}>
                                         <Icon of="folder" />
                                         <span class="files-share-name">{item.share}</span>
@@ -170,8 +172,8 @@ export function Files() {
                                 ))}
                             </nav>
                             <div class="files-body">
-                                {share
-                                    ? <Browser key={share.share} share={share} view={view} setView={setView}
+                                {shown
+                                    ? <Browser key={shown.share} share={shown} view={view} setView={setView}
                                                clip={clip} setClip={setClip} columns={columns} setColumns={setColumns} />
                                     : <p class="files-blank">Choose a share to look inside.</p>}
                             </div>

@@ -208,6 +208,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
     onAgain: (again: string) => void;
 }) {
     const set = (change: Partial<Settings>) => onChange({ ...settings, ...change });
+    const [reveal, setReveal] = useState(false);
     // The user name follows the name until it has been edited by hand. It still
     // follows while it holds the suggestion for the name as it was before this
     // keystroke, which covers typing the name for the first time and carrying
@@ -236,15 +237,21 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
                 </Field>
                 <Field label="Password" hint="At least 8 characters">
-                    <input type="password" value={settings.password} autoComplete="new-password"
-                           onInput={event => set({ password: event.currentTarget.value })} />
+                    <div class="row">
+                        <input type={reveal ? "text" : "password"} value={settings.password} autoComplete="new-password"
+                               onInput={event => set({ password: event.currentTarget.value })} />
+                        <button class="button" type="button" onClick={() => setReveal(!reveal)}>
+                            {reveal ? "Hide" : "Show"}</button>
+                    </div>
                 </Field>
                 <Field label="Password again">
-                    <input type="password" value={again} autoComplete="new-password" onInput={event => onAgain(event.currentTarget.value)} />
+                    <input type={reveal ? "text" : "password"} value={again} autoComplete="new-password"
+                           onInput={event => onAgain(event.currentTarget.value)} />
                 </Field>
             </div>
             {settings.hostname && !HOST.test(settings.hostname) && <p class="small">The name may use lowercase letters, numbers and -.</p>}
             {settings.user && !USER.test(settings.user) && <p class="small">The user name may use lowercase letters, numbers, - and _, starting with a letter.</p>}
+            {settings.password && settings.password.length < 8 && <p class="small warning-text">At least 8 characters.</p>}
             {again && again !== settings.password && <p class="small">The passwords don't match.</p>}
         </div>
     );
@@ -255,7 +262,7 @@ function aboutReady(settings: Settings, again: string) {
         && again === settings.password && !!settings.timezone;
 }
 
-function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: Layout; settings: Settings; onInstall: (typed: string) => Promise<void> }) {
+function Confirm({ disk, layout, settings, edition, onInstall }: { disk: Disk; layout: Layout; settings: Settings; edition?: string; onInstall: (typed: string) => Promise<void> }) {
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
     return (
@@ -274,6 +281,7 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
         }}>
             <table>
                 <tbody>
+                    <tr><th>Image</th><td>{edition === "nas" ? "FellowshipOS NAS" : "FellowshipOS Multi-purpose"}</td></tr>
                     <tr><th>Disk</th><td>{size(disk.size)} {disk.model} <span class="mono small">{shortName(disk.path)}</span>
                         {disk.contents?.length ? <><br /><span class="small warning-text">Holds {disk.contents.join(", ")}. It is erased.</span></> : null}</td></tr>
                     <tr><th>Layout</th><td>System {size(layout.system)}{layout.reserve ? `, room to grow ${size(layout.reserve)}` : ""}, swap {size(layout.swap)}
@@ -283,6 +291,8 @@ function Confirm({ disk, layout, settings, onInstall }: { disk: Disk; layout: La
                     <tr><th>Time zone</th><td>{settings.timezone}</td></tr>
                 </tbody>
             </table>
+            {edition === "nas" && <p class="muted small">The NAS role finishes on the first start: it needs the network,
+                and Secure Boot must be off for the ZFS module to load.</p>}
             {error && <Notice kind="error">{error}</Notice>}
             <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
@@ -355,6 +365,13 @@ function Installer({ greeting }: { greeting: Hello }) {
         setInfo(found);
         document.title = `Install ${found.title}`;
         setSettings(previous => ({ ...previous, timezone: guessTimezone(found.timezones) }));
+        // When one disk is the only one that can be used, choosing it for them is
+        // the only answer there is
+        const usable = found.disks.filter(candidate => !candidate.refused);
+        if (usable.length === 1) {
+            setDisk(usable[0]);
+            setLayout(usable[0].layout || null);
+        }
     }, failure => setError(failure.message));
     useEffect(() => { load(); }, []);
 
@@ -423,7 +440,7 @@ function Installer({ greeting }: { greeting: Hello }) {
                 <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
             )}
             {step === 3 && canInstall && disk && layout && (
-                <Confirm disk={disk} layout={layout} settings={settings} onInstall={async typed => {
+                <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition} onInstall={async typed => {
                     await install({ ...settings, disk: disk.path, system: layout.system }, typed);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />

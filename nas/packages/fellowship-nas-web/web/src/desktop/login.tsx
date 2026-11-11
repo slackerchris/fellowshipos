@@ -45,7 +45,8 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
                 {error && <div class="notice notice-error" role="alert">{error}</div>}
                 <button type="submit" class="button button-primary" disabled={busy || !user || !password}>
                     {busy ? "Logging in…" : "Log in"}</button>
-                <p class="small muted">Use your account on this NAS: the user name and password set in Users.</p>
+                <p class="small muted">Use your account on this NAS: the one made during setup, or one an administrator
+                    made in Users.</p>
             </form>
         </div>
     );

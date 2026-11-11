@@ -272,9 +272,14 @@ input[type="range"] { min-height: 0; padding: 0; border: 0; background: none; ac
 }
 
 .steps { display: flex; gap: 6px; flex-wrap: wrap; list-style: none; padding: 0; margin: 0; }
-.steps li { padding: 4px 12px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 0.85rem; }
-.steps li.current { background: var(--accent); color: var(--accent-text); font-weight: 600; }
-.steps li.done { background: var(--good-soft); color: var(--good); }
+.steps li { padding: 0; background: none; }
+.steps button {
+    font: inherit; font-size: 0.85rem; color: var(--muted); background: var(--raised);
+    border: 1px solid transparent; border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+.steps button:hover { border-color: var(--border); color: var(--text); }
+.steps li.current button { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.steps li.done button { background: var(--good-soft); color: var(--good); }
 
 .split { display: grid; grid-template-columns: 190px 1fr; min-height: 100%; }
 .split-nav { display: grid; align-content: start; gap: 2px; padding: 12px 8px; border-right: 1px solid var(--border); background: var(--surface-sunk); }
@@ -569,12 +574,31 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .row-menu .danger-text { color: var(--bad); }
 .share-open > td { background: var(--surface-sunk); }
 .share-panel { padding: 6px 2px 4px; }
+/* A share's ways in the table are a quiet set of chips, not a sentence */
+.share-protocols { white-space: nowrap; }
+.proto-chip {
+    display: inline-block; margin-right: 4px; padding: 1px 7px; border-radius: 4px;
+    background: var(--raised); font-size: 0.76rem; letter-spacing: 0.02em;
+}
 .connect-block {
-    display: grid; gap: 5px; padding: 10px 12px; border-radius: 8px;
+    display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px;
     background: var(--surface); border: 1px solid var(--border);
 }
 .connect-block .field-label { color: var(--muted); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; }
-.share-toggles { gap: 22px; }
+.connect-list { display: grid; gap: 3px; margin: 0; }
+.connect-line { display: grid; grid-template-columns: 4.6rem 1fr; gap: 8px; align-items: baseline; }
+.connect-line dt { color: var(--muted); font-size: 0.8rem; }
+.connect-line dd { margin: 0; overflow-wrap: anywhere; }
+.connect-path { padding-top: 2px; border-top: 1px solid var(--border); }
+/* One switch per way to share, so a share's protocols are stated once */
+.protocol-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.protocol-switch {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 0.86rem;
+}
+.protocol-switch input { margin: 0; accent-color: var(--accent); }
+.protocol-switch.on { border-color: var(--accent); color: var(--text); background: var(--raised); }
+.protocol-switch.disabled { opacity: 0.55; cursor: default; }
 .proto-row { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
 .proto { display: inline-flex; align-items: center; gap: 8px; }
 .proto-planned { margin: 10px 0 0; }

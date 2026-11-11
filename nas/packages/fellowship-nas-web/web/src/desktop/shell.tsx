@@ -90,6 +90,7 @@ function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => 
     const health = status.health;
     const checks = health?.checks || [];
     const passed = checks.filter(check => check.state === "passed").length;
+    const waiting = checks.filter(check => check.state === "na").length;
     const [worst] = health?.problems || [];
     const severity = severityOf(worst);
     const system = health?.system;
@@ -108,7 +109,7 @@ function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => 
                     <span class="medallion-text">
                         <strong>{worst ? worst.title : "Nothing needs attention"}</strong>
                         <span class="small muted">{worst ? SEVERITY_WORD[worst.severity]
-                            : `${passed} of ${checks.length} checks passed`}</span>
+                            : `${passed} of ${checks.length} checks passed${waiting ? ` · ${waiting} not applicable` : ""}`}</span>
                     </span>
                 </span>
                 <span class="mini-gauges">
@@ -207,6 +208,7 @@ function DisksWidget({ status, open }: { status: Status; open: (app: AppId) => v
                             <span>{name(disks[worst.index], worst.index)} · {bayWord(worst.state)}</span>
                         </>
                         : <span class="muted">All drives healthy</span>}
+                    {states.includes("unknown") && <span class="muted small">· ? means no SMART data</span>}
                 </p>
             </>}
         </section>

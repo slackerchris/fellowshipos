@@ -89,14 +89,18 @@ export function useWindows(user: string, allowed: AppId[]) {
                 }
                 const { w: width, h: height } = area();
                 const place = previous.places[app];
+                // A small screen has no room for two windows beside each other, so
+                // each app opens over the whole desktop
+                const small = width <= 720;
                 const offset = (previous.windows.length % 6) * 28;
-                const w = Math.min(APPS[app].width, width - 40);
-                const h = Math.min(APPS[app].height, height - 40);
-                const geometry = place ? clamp(place) : clamp({ w, h, x: Math.round((width - w) / 2) + offset - 70,
-                                                              y: Math.max(16, Math.round((height - h) / 3)) + offset });
+                const w = small ? width : Math.min(APPS[app].width, width - 40);
+                const h = small ? height : Math.min(APPS[app].height, height - 40);
+                const geometry = small ? { x: 0, y: 0, w, h }
+                    : place ? clamp(place) : clamp({ w, h, x: Math.round((width - w) / 2) + offset - 70,
+                                                     y: Math.max(16, Math.round((height - h) / 3)) + offset });
                 const id = previous.windows.reduce((highest, win) => Math.max(highest, win.id), 0) + 1;
                 return { ...previous, windows: [...previous.windows, { id, app, ...geometry, z: top(previous.windows),
-                                                                      minimized: false, maximized: place?.maximized || false }] };
+                                                                      minimized: false, maximized: small || place?.maximized || false }] };
             });
         },
         close(id: number) {

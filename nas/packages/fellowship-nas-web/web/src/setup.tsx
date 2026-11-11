@@ -22,7 +22,7 @@ function StorageStep() {
                             <div key={pool.name} class="row">
                                 <strong>{pool.name}</strong>
                                 <Badge kind={pool.health === "ONLINE" ? "good" : "warning"}>{pool.health.toLowerCase()}</Badge>
-                                <span class="muted small">{humanSize(pool.size)}</span>
+                                <span class="muted small">{humanSize(pool.free)} free of {humanSize(pool.size)}</span>
                             </div>
                         ))}
                     </Card>
@@ -90,7 +90,10 @@ export function Setup() {
             <div class="row">
                 <ol class="steps">
                     {STEPS.map((name, index) => (
-                        <li key={name} class={index === step ? "current" : index < step ? "done" : ""}>{index + 1}. {name}</li>
+                        <li key={name} class={index === step ? "current" : index < step ? "done" : ""}>
+                            <button type="button" onClick={() => setStep(index)}
+                                    aria-current={index === step ? "step" : undefined}>{index + 1}. {name}</button>
+                        </li>
                     ))}
                 </ol>
                 {step < STEPS.length - 1 && <Button busy={finish.busy} onClick={() => close(true)}>Skip setup for now</Button>}

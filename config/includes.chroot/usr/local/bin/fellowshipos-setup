@@ -185,35 +185,34 @@ echo "    1) Base only"
 echo "    2) Docker node"
 echo "    3) Server (web / app / database / proxy)"
 echo "    4) Monitor node"
-echo "    5) Storage node (mergerfs + SnapRAID)"
 # Containers can't load ZFS or own disks, and only the NAS image carries the
 # NAS packages
 if systemd-detect-virt --container --quiet; then
     NAS_AVAILABLE="N"
-    echo "    6) NAS / Home Server (full installs only)"
+    echo "    5) NAS / Home Server (full installs only)"
 elif [ ! -d /usr/share/fellowshipos/nas-repo ]; then
     NAS_AVAILABLE="N"
-    echo "    6) NAS / Home Server (install the NAS image for this)"
+    echo "    5) NAS / Home Server (install the NAS image for this)"
 else
     NAS_AVAILABLE="Y"
-    echo "    6) NAS / Home Server (ZFS + web UI)"
+    echo "    5) NAS / Home Server (ZFS + web UI)"
 fi
-echo "    7) Skip for now"
+echo "    6) Skip for now"
 echo ""
 
 # The NAS installer records the role chosen in the boot menu
 ROLE_DEFAULT=1
-[ "$(cat /etc/fellowshipos/install-role 2>/dev/null)" = "nas" ] && [ "$NAS_AVAILABLE" = "Y" ] && ROLE_DEFAULT=6
+[ "$(cat /etc/fellowshipos/install-role 2>/dev/null)" = "nas" ] && [ "$NAS_AVAILABLE" = "Y" ] && ROLE_DEFAULT=5
 
 while true; do
     prompt "Choice" "$ROLE_DEFAULT" SETUP_FLAVOR_CHOICE
     case "$SETUP_FLAVOR_CHOICE" in
-        6)
+        5)
             [ "$NAS_AVAILABLE" = "Y" ] && break
             echo -e "  ${RED}The NAS role needs a full install from the NAS image. Choose another option.${RESET}"
             ;;
-        1|2|3|4|5|7) break ;;
-        *) echo -e "  ${RED}Please enter a number between 1 and 7.${RESET}" ;;
+        1|2|3|4|6) break ;;
+        *) echo -e "  ${RED}Please enter a number between 1 and 6.${RESET}" ;;
     esac
 done
 
@@ -243,7 +242,7 @@ fi
 
 # NAS shares are only offered to this subnet
 SETUP_NAS_LAN=""
-if [ "$SETUP_FLAVOR_CHOICE" = "6" ]; then
+if [ "$SETUP_FLAVOR_CHOICE" = "5" ]; then
     NAS_LAN_DEVICE=$(ip -4 route show default | awk '{print $5; exit}')
     NAS_LAN_DEFAULT=""
     [ -n "$NAS_LAN_DEVICE" ] && NAS_LAN_DEFAULT=$(ip -4 route show dev "$NAS_LAN_DEVICE" scope link | awk '{print $1; exit}')
@@ -267,9 +266,8 @@ case "$SETUP_FLAVOR_CHOICE" in
     2) FLAVOR_LABEL="Docker node" ;;
     3) FLAVOR_LABEL="Server" ;;
     4) FLAVOR_LABEL="Monitor node" ;;
-    5) FLAVOR_LABEL="Storage node" ;;
-    6) FLAVOR_LABEL="NAS / Home Server" ;;
-    7) FLAVOR_LABEL="Skip" ;;
+    5) FLAVOR_LABEL="NAS / Home Server" ;;
+    6) FLAVOR_LABEL="Skip" ;;
 esac
 
 echo ""
@@ -502,10 +500,6 @@ case "$SETUP_FLAVOR_CHOICE" in
         ;;
     5)
         apt-get update -qq >> "$LOG_FILE" 2>&1
-        apply_flavor "storage-node"
-        ;;
-    6)
-        apt-get update -qq >> "$LOG_FILE" 2>&1
         mkdir -p /etc/fellowshipos
         [ -z "$SETUP_NAS_LAN" ] || echo "$SETUP_NAS_LAN" > /etc/fellowshipos/nas-lan
         apply_flavor "nas-node"
@@ -533,17 +527,17 @@ else
     echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
 fi
 echo ""
-if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
+if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
     echo -e "  ${YELLOW}NAS role did not finish. Retry with:${RESET} ${BOLD}sudo homelabos-flavor nas-node${RESET}"
     echo ""
 fi
-if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ -f "$NAS_DONE_FLAG" ]; then
+if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ -f "$NAS_DONE_FLAG" ]; then
     NAS_ADDRESS=$(ip -4 route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
     echo -e "  Finish setting up the NAS in a browser: ${BOLD}https://${NAS_ADDRESS:-this-machine}${RESET}"
     echo -e "  (log in as ${BOLD}$SETUP_USER${RESET}, then open NAS Setup)"
     echo ""
 fi
-if [ "$SETUP_FLAVOR_CHOICE" = "6" ] && [ -f "$NAS_DONE_FLAG" ] && [ ! -d /sys/module/zfs ]; then
+if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ -f "$NAS_DONE_FLAG" ] && [ ! -d /sys/module/zfs ]; then
     echo -e "  ${YELLOW}Reboot before using the NAS role:${RESET} ZFS was built for a newer kernel."
     echo ""
 fi

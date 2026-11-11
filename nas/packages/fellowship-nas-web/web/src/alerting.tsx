@@ -79,6 +79,8 @@ export function AlertSetup() {
                 const { email, ntfy } = channels.data!;
                 return (
                     <div class="stack">
+                        <p class="muted small">Alerts are always kept on the NAS: a finding appears in the bell and in
+                            Health. Email and the phone are extra ways to be told about one.</p>
                         <div class="row">
                             <span><strong>Email:</strong> {email ? `to ${email.to} through ${email.host}` : "off"}</span>
                             {email?.needs_password && <span class="small">needs its password again</span>}

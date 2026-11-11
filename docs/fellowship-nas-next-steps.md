@@ -132,11 +132,9 @@ Left, in order:
 6. Rebuild both ISOs and walk the boot menu and install page again. The fixes
    in `c7dcc2e` to the default entry, the finished page, the Multi-purpose
    wording and the step rail have tests and builds, but haven't been seen
-   running. While there, take the wizard's "Storage node" entry out, which the
-   plan says is gone. Then pick from the walkthrough's suggestions: the
-   first-boot wizard asking again for what the installer collected, Debian
-   branding in the boot menu and the firmware entry, and kernel messages over
-   the wizard.
+   running. Then pick from the walkthrough's suggestions: the first-boot
+   wizard asking again for what the installer collected, Debian branding in
+   the boot menu and the firmware entry, and kernel messages over the wizard.
 7. FTP, FTPS by default, sharing the same chroot view SFTP builds.
 8. Hand-made partition layouts, if the automatic plan isn't enough for someone.
    The checks are in `installer/internal/layout/manual.go` with their tests —

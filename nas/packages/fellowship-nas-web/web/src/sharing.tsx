@@ -67,13 +67,16 @@ const SHARE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 type Choice = "none" | Level;
 
 /** Who can use a share: everyone, or chosen users and groups with read or read and write. */
-export function AccessEditor({ everyone, setEveryone, access, setAccess, users, groups }: {
+export function AccessEditor({ everyone, setEveryone, access, setAccess, users, groups, label = true }: {
     everyone: boolean;
     setEveryone: (everyone: boolean) => void;
     access: Access;
     setAccess: (access: Access) => void;
     users: User[];
     groups: Group[];
+    // Inside a share's panel the tab above already names this, so only the
+    // name a screen reader needs is kept
+    label?: boolean;
 }) {
     const pick = (kind: "users" | "groups", name: string, level: Choice) => {
         const { [name]: _, ...rest } = access[kind];
@@ -97,8 +100,8 @@ export function AccessEditor({ everyone, setEveryone, access, setAccess, users, 
         ? systemGroups.filter(group => group.name.toLowerCase().includes(filter.trim().toLowerCase()))
         : systemGroups;
     return (
-        <div class="field">
-            <span class="field-label">Who can use it</span>
+        <div class="field" role="group" aria-label="Who can use it">
+            {label && <span class="field-label">Who can use it</span>}
             <label class="choice">
                 <input type="radio" name="access" checked={everyone} onChange={() => setEveryone(true)} />
                 <span><strong>Everyone on the home network</strong><br /><span class="muted small">
@@ -224,7 +227,7 @@ export function CreateShare({ onCreated }: { onCreated: (name: string) => void }
                             </label>
                         </div>
                         <p class="muted small">Each share's SMB and NFS settings, such as read-only, guests, the recycle bin,
-                            Time Machine and which computers can mount it, are under Settings once it exists.</p>
+                            Time Machine and which computers can mount it, are in the Shares app.</p>
                         {problem && name && !noPool && <p class="muted small">{problem}</p>}
                         <div class="row">
                             <Button kind="primary" type="submit" busy={action.busy} disabled={!!problem}>Create share</Button>

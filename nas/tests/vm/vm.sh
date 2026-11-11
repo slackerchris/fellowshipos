@@ -7,7 +7,8 @@
 #   vm.sh nas       Boot the NAS image's graphical installer
 #   vm.sh multi     Boot the multi-purpose image's graphical installer
 #   vm.sh remote    Boot the NAS image's installer served over HTTPS on
-#                   127.0.0.1:8443, for a browser here instead of the window
+#                   127.0.0.1:8443 (FELLOWSHIP_HTTPS_PORT), for a browser here
+#                   instead of the window
 #   vm.sh clean     Delete the VM disks
 # FELLOWSHIP_EDITION picks the image (nas or multi, default nas);
 # FELLOWSHIP_ISO points at another ISO file.
@@ -35,6 +36,13 @@ OVMF_VARS="/usr/share/OVMF/OVMF_VARS_4M.fd"
 
 mkdir -p "$WORK"
 read -ra DATA_SIZES <<< "${FELLOWSHIP_DATA_DISKS-2G 2G 2G 2G}"
+# Host ports, so a second VM can run beside the first
+SSH_PORT="${FELLOWSHIP_SSH_PORT:-2222}"
+HTTPS_PORT="${FELLOWSHIP_HTTPS_PORT:-8443}"
+HTTP_PORT="${FELLOWSHIP_HTTP_PORT:-8088}"
+# A unix socket's path is limited to 108 bytes, which a deep FELLOWSHIP_VM_DIR can
+# pass, so the monitor socket lives under /tmp instead of the work directory
+MONITOR="${FELLOWSHIP_MONITOR:-/tmp/fellowship-vm-$$.sock}"
 
 qemu() {
     # Listed first so the OS disk is /dev/vda, the installer's default choice
@@ -55,10 +63,10 @@ qemu() {
         -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE" \
         -drive "if=pflash,format=raw,file=$WORK/vars.fd" \
         "${disks[@]}" \
-        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8443-:443,hostfwd=tcp:127.0.0.1:8088-:80 \
+        -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22,hostfwd=tcp:127.0.0.1:${HTTPS_PORT}-:443,hostfwd=tcp:127.0.0.1:${HTTP_PORT}-:80 \
         -display "${FELLOWSHIP_VM_DISPLAY:-none}" \
         -serial "file:$WORK/serial-$MODE.log" \
-        -monitor "unix:$WORK/monitor.sock,server,nowait" \
+        -monitor "unix:$MONITOR",server,nowait \
         "$@"
 }
 
@@ -106,7 +114,7 @@ boot_live_with() {
 keys() {
     local key
     for key in "$@"; do
-        echo "sendkey $key" | socat - "UNIX-CONNECT:$WORK/monitor.sock" > /dev/null
+        echo "sendkey $key" | socat - "UNIX-CONNECT:$MONITOR" > /dev/null
         sleep 0.2
     done
 }
@@ -143,8 +151,8 @@ case "$MODE" in
         sleep 70; keys ret; sleep 3; keys ret; sleep 3; keys ret   # Language, location, keyboard
         sleep 60; type_line tester              # Full name
         sleep 3;  keys ret                      # Username
-        sleep 3;  type_line vmtest              # Password
-        sleep 3;  type_line vmtest
+        sleep 3;  type_line vmtest123           # Password
+        sleep 3;  type_line vmtest123
         sleep 15; keys ret                      # Time zone
         sleep 15
         # Kept data disks have free space, so the menu gains a first entry
@@ -175,7 +183,10 @@ case "$MODE" in
         ;;
     live)
         create_disks
-        boot_iso
+        boot_iso -no-reboot &
+        VM=$!
+        boot_with_hotkey l               # GRUB: Try FellowshipOS (live)
+        wait "$VM"
         ;;
     nas)
         create_disks
@@ -195,7 +206,7 @@ case "$MODE" in
         # The same page the kiosk shows, over HTTPS on every interface, so it
         # can be used from this machine's browser. The console prints the
         # certificate's fingerprint and the pairing code. Port 443 is the one
-        # qemu forwards to 127.0.0.1:8443 here.
+        # qemu forwards to 127.0.0.1:$HTTPS_PORT here.
         create_disks
         boot_live_with "fellowship.installer=nas fellowship.installer.remote=:443"
         ;;
