@@ -23,7 +23,7 @@ All the Open questions have since been answered; the plan's Open questions secti
 ## Sharing
 
 7. **Agreed, built** in Phase 8: an always-visible "Ways to share" section, with each protocol's state, what it's for, how to connect, and its own settings.
-8. **Agreed:** add SFTP, FTP and WebDAV now. DLNA and iSCSI come later. FTP uses TLS (FTPS) by default, and plain FTP, which sends passwords unencrypted, is an opt-in.
+8. **Agreed:** add SFTP, FTP and WebDAV now. DLNA and iSCSI come later. **Built** in Phase 13 (Nov 10): WebDAV over HTTPS with writes and locks, and Files over SFTP. FTP is still to come. FTP uses TLS (FTPS) by default, and plain FTP, which sends passwords unencrypted, is an opt-in.
 9. **Built** in Phase 9. The audit had found no per-user permissions on shares. A share was either "shared" (everyone writes as one account) or "matched" (one owner), with no "Alice can read, Bob can write". Shares now grant read or write access per user and group.
 
 ## Users
@@ -55,8 +55,8 @@ All the Open questions have since been answered; the plan's Open questions secti
 
 ## Snapshots and files
 
-25. **Found:** snapshots can be scheduled but not browsed or restored from the desktop.
-26. **Found:** the Files app (a real file manager, with "Previous versions") is in the plan but not built. **Partly built, Nov 10:** browsing, downloading and previewing shipped in Phase 12; uploading, file operations and Previous Versions are still to come.
+25. **Found:** snapshots can be scheduled but not browsed or restored from the desktop. **Built** in Phase 12 (Nov 10): Files' **Earlier versions…** lists the snapshots holding a file, opens one, and puts one back as a copy beside it.
+26. **Found:** the Files app (a real file manager, with "Previous versions") is in the plan but not built. **Built** in Phase 12 (Nov 10): browsing, previews, uploads, folders, rename, move, delete, several at once, copy and paste, search, permissions and earlier versions. The installable phone app is kept as its own project, and the gate is still to be walked on real hardware.
 
 ## FygoOS features not in the plan
 

@@ -5,7 +5,8 @@ brought up to date against `059a150` when Phase 12 started, again on
 November 10 against `c29fe37` when the SFTP work landed, again the same day
 against `238700b`, the commit that brought the documents up to Phase 13, and
 again the same day for the working tree on top of it: the two-edition build, the
-reworked install page and the verification that went with them.
+reworked install page and the verification that went with them (committed as
+`c6ae5fb`, `e7840d5` and `a442697`), and once more after a review of the docs.
 The three canonical documents remain [the plan](fellowship-nas-plan.md),
 [the overview](fellowship-nas-overview.md) and
 [the review notes](fellowship-nas-changes.md). This file is a short brief for
@@ -21,7 +22,7 @@ picking work back up, not a fourth source of truth.
 | Phase 13 | WebDAV is built three times over: read over HTTPS, then writes with a strong `ETag` and `If-Match` checked as the write commits, then `LOCK`/`UNLOCK` with locks bound to the account that took them and folders that carry the locks inside them. SFTP is built: an account set to Files over SFTP is chrooted to a view of just its shares, with no shell, no forwarding and its view rebuilt whenever a share changes and at boot. **FTP is what is left of the phase**, FTPS first with plain FTP an opt-in |
 | Next | FTP, then the release gates on real hardware: everything in section 3, and the protocol gate in the plan (`An SFTP-only user can't get a shell and sees only their shares`, two accounts over SFTP, FTP and WebDAV) |
 | Tests | 285 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, the installer's edition, layout, engine and server tests pass, and CI runs on every push |
-| Docs baseline | The overview describes `238700b` plus the two-edition build and the reworked install page, and the plan's Sharing section records each WebDAV and SFTP slice built and what was seen of it |
+| Docs baseline | The overview describes `a442697`, which includes the two-edition build and the reworked install page, and the plan's Sharing section records each WebDAV and SFTP slice built and what was seen of it |
 
 **The running VM predates all of Phase 13.** The SFTP views, the sshd `Match`
 block and `fellowship-nas-refresh.service` are new files, so they exist only
@@ -78,8 +79,9 @@ Carried from Phase 11:
   `fellowship-nas-refresh.service` runs
 - [ ] Importing a mergerfs + SnapRAID setup that fnas did not make
 
-One VM session with four and sixteen disks should clear the list. Doing it before
-Phase 12 keeps this debt from riding into a phase that carries a new kind of risk.
+One VM session with four and sixteen disks should clear the list. It was meant to
+come before Phase 12 and didn't; do it before the release candidate, so this debt
+doesn't ride into the release.
 
 ## 4. Phase 12: the Files app (built; gate left)
 
