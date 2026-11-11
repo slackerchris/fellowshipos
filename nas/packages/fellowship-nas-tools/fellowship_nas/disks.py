@@ -80,6 +80,7 @@ def system_data_part(device, pool_devices, part_links):
             "serial": "",
             "state": state,
             "reason": reason or "the free part of the system disk",
+            "pool": pool_name(part, pool_devices),
             "partitions": [],
             "kind": "partition",
             "bay": None,
@@ -137,6 +138,14 @@ def identify(wanted, on=True):
     return f"Stopped reading from {disk['path']}"
 
 
+def pool_name(device, pool_devices):
+    """The pool holding a disk or one of its partitions, if one does."""
+    for part in walk(device):
+        if part["path"] in pool_devices:
+            return pool_devices[part["path"]]
+    return None
+
+
 def list_disks():
     output = run("lsblk", "-J", "-b", "-o",
                  "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINTS,PARTLABEL").stdout
@@ -158,6 +167,7 @@ def list_disks():
             "serial": (device.get("serial") or "").strip(),
             "state": state,
             "reason": reason,
+            "pool": pool_name(device, pool_devices),
             "partitions": [d["path"] for d in walk(device)][1:],
             "kind": "disk",
             "bay": slots.get(device["path"], {}).get("bay"),

@@ -274,6 +274,13 @@ bump.
   the connect lines name the machine to use. **Ways to share** moved to Sharing
   settings, and the action on a row is **Manage**, since the panel holds the
   switches and settings as well as the paths.
+- Storage is three tabs — Pools, Disks and Attached pools — with one **Rescan
+  disks** button for the lists. The Disks tab lists every drive by bay, model,
+  capacity and what it is assigned to, and the selected drive opens beside it
+  with its serial, device name, the verdict Health gives it and the two things
+  that make sense there: identify it, or open its pool's details. `fnas disk
+  list` now names the pool holding each disk, so assignment comes from fnas
+  rather than from the wording of a reason.
 - Nothing destructive asks to be typed any more. The dialog names what will be
   lost and its own red button is the answer, with Cancel holding the focus so a
   stray Enter does nothing. This covers deleting a share or files, destroying a

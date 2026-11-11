@@ -173,6 +173,21 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
 tr:last-child td { border-bottom: none; }
 td.actions { text-align: right; white-space: nowrap; }
 
+/* Storage: a quiet rail of tabs, with the disk inventory and the disk beside it */
+.storage-bar { justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.disks-view { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.disks-table tbody tr { cursor: pointer; }
+.disks-table tbody tr:hover { background: var(--raised); }
+.disks-table tbody tr.current { background: var(--info-soft); }
+.disks-table tbody tr.current td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+.disks-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.disk-facts { display: grid; gap: 10px; margin: 0; }
+.disk-facts dt { color: var(--muted); font-size: 0.76rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.disk-facts dd { margin: 2px 0 0; }
+@media (max-width: 900px) {
+    .disks-view { grid-template-columns: 1fr; }
+}
+
 .button {
     border: 1px solid var(--border);
     background: var(--raised);

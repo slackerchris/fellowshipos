@@ -17,10 +17,10 @@ def over_time(now, count, step, value):
     return [[now - (count - 1 - i) * step, *value(i)] for i in range(count)]
 
 
-def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=(), bay=None):
+def disk(n, size, model, state="empty", reason="", temp=34, verdict="healthy", notes=(), bay=None, pool=None):
     return {"path": f"/dev/sd{n}", "by_id": f"/dev/disk/by-id/ata-{model.replace(' ', '_')}_SN{n.upper()}0042",
             "size": size, "model": model, "serial": f"SN{n.upper()}0042", "state": state, "reason": reason,
-            "kind": "disk", "bay": bay, "partitions": [],
+            "pool": pool, "kind": "disk", "bay": bay, "partitions": [],
             "temperature": temp, "hours": 18000, "verdict": verdict, "notes": list(notes)}
 
 
@@ -148,11 +148,11 @@ DEFAULT = {
          "engine": "zfs", "snapshots": True, "readonly": False},
     ],
     "disks": [disk("a", 256 * GB, "Samsung SSD 870", "os", "holds the system"),
-              disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36, bay="Bay 1"),
-              disk("c", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 38, bay="Bay 2"),
+              disk("b", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 36, bay="Bay 1", pool="tank"),
+              disk("c", 8 * 10 ** 12, "WDC WD80EFZZ", "in-use", "in pool tank", 38, bay="Bay 2", pool="tank"),
               disk("d", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 41, "watch",
-                   ["8 reallocated sectors: keep a spare disk ready"], bay="Bay 3"),
-              disk("e", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 39, bay="Bay 4"),
+                   ["8 reallocated sectors: keep a spare disk ready"], bay="Bay 3", pool="tank"),
+              disk("e", 8 * 10 ** 12, "ST8000VN004", "in-use", "in pool tank", 39, bay="Bay 4", pool="tank"),
               disk("f", 4 * 10 ** 12, "WDC WD40EFRX", "empty", "", 33, bay="Bay 5"),
               disk("g", 4 * 10 ** 12, "WDC WD40EFRX", "has-data", "has an ext4 file system", 32, bay="Bay 6")],
     "lan": "192.168.1.0/24",

@@ -18,8 +18,8 @@ function healthBadge(health: string) {
 const DISK_STATE = {
     os: "System disk",
     "in-use": "In use",
-    "has-data": "Has old data",
-    empty: "Empty",
+    "has-data": "Old data",
+    empty: "Free",
 } as const;
 
 /** The disk list's entry for a disk in a pool, which ZFS names by partition. */
@@ -402,34 +402,89 @@ function PoolCard({ pool, engine, disks, reload, details }: {
     );
 }
 
-function Disks({ disks }: { disks: Disk[] }) {
+/** Where a disk is: its bay, the system disk, or the free part of it. */
+function locationOf(disk: Disk) {
+    if (disk.kind === "partition") {
+        return "Free part of the system disk";
+    }
+    return disk.bay || (disk.state === "os" ? "System disk" : "Internal");
+}
+
+/** What a disk is doing: the pool it is in, the system, or nothing yet. */
+function assignmentOf(disk: Disk) {
+    return disk.pool || DISK_STATE[disk.state];
+}
+
+function verdictBadge(verdict?: string) {
+    switch (verdict) {
+        case "healthy": return <Badge kind="good">Healthy</Badge>;
+        case "watch": return <Badge kind="warning">Watch</Badge>;
+        case "failing": return <Badge kind="bad">Failing</Badge>;
+        default: return <Badge kind="neutral">No health data</Badge>;
+    }
+}
+
+/** The disk inventory: where each disk sits, what it is, and its assignment. */
+function PhysicalDisks({ disks, openPool }: { disks: Disk[]; openPool: (pool: string) => void }) {
+    // The verdict is Health's, so a drive with reallocated sectors says so here too
+    const health = useLoad(() => fnasJson<{ disks: { path: string; verdict: string }[] }>(["health"]));
+    const [picked, setPicked] = useState<string | null>(null);
     const action = useAction();
+    // A disk in a pool says more than the system disk, so it opens first
+    const chosen = disks.find(disk => disk.path === picked) || disks.find(disk => disk.pool) || disks[0];
+    const verdict = (disk: Disk) => health.data?.disks.find(found => found.path === disk.path)?.verdict;
     return (
-        <Card title="Disks">
-            <div class="table-wrap">
-                <table>
-                    <thead><tr><th>Disk</th><th>Size</th><th>State</th><th /></tr></thead>
-                    <tbody>
-                        {disks.map(disk => (
-                            <tr key={disk.path}>
-                                <td>{disk.kind === "partition" ? "Free part of the system disk" : disk.model || "Disk"}
-                                    {disk.bay && <> <Badge kind="neutral">{disk.bay}</Badge></>}
-                                    <br /><span class="mono small muted">{diskName(disk)}</span></td>
-                                <td>{humanSize(disk.size)}</td>
-                                <td>{DISK_STATE[disk.state]}{disk.reason && <><br /><span class="small muted">{disk.reason}</span></>}</td>
-                                <td class="actions">
-                                    {disk.kind === "disk" && (
-                                        <Button busy={action.busy} onClick={() => action.run(() => fnas(["disk", "identify", disk.path]))}>
-                                            Identify</Button>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-            <Result outcome={action.outcome} />
-        </Card>
+        <div class="disks-view">
+            <Card title="Physical disks"
+                  actions={<Badge kind="neutral">{disks.filter(disk => disk.kind === "disk").length} disks</Badge>}>
+                <div class="table-wrap">
+                    <table class="disks-table">
+                        <thead><tr><th>Location</th><th>Model</th><th>Capacity</th><th>Assignment</th></tr></thead>
+                        <tbody>
+                            {disks.map(disk => (
+                                <tr key={disk.path} class={chosen?.path === disk.path ? "current" : ""}
+                                    tabIndex={0} aria-current={chosen?.path === disk.path}
+                                    onClick={() => setPicked(disk.path)}
+                                    onKeyDown={event => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            setPicked(disk.path);
+                                        }
+                                    }}>
+                                    <td><strong>{locationOf(disk)}</strong></td>
+                                    <td>{disk.model || "Disk"}</td>
+                                    <td>{humanSize(disk.size)}</td>
+                                    <td>{assignmentOf(disk)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                <Result outcome={action.outcome} />
+            </Card>
+            {chosen && (
+                <Card title={locationOf(chosen)} actions={verdictBadge(verdict(chosen))}>
+                    <div class="stack">
+                        <span class="muted small">{chosen.model || "Disk"}</span>
+                        <dl class="disk-facts">
+                            <div><dt>Serial</dt><dd class="mono">{chosen.serial || "not reported"}</dd></div>
+                            <div><dt>Assigned to</dt><dd>{assignmentOf(chosen)}</dd></div>
+                            <div><dt>Device</dt><dd class="mono small">{diskName(chosen)}</dd></div>
+                        </dl>
+                        {chosen.state === "has-data" && chosen.reason &&
+                            <p class="muted small">It {chosen.reason}. A pool made on it erases that.</p>}
+                        <div class="row">
+                            {chosen.kind === "disk" && (
+                                <Button busy={action.busy}
+                                        onClick={() => action.run(() => fnas(["disk", "identify", chosen.path]))}>
+                                    Identify disk</Button>
+                            )}
+                            {chosen.pool && <Button onClick={() => openPool(chosen.pool!)}>Details and history</Button>}
+                        </div>
+                    </div>
+                </Card>
+            )}
+        </div>
     );
 }
 
@@ -437,6 +492,7 @@ export function Storage() {
     const pools = useLoad(() => fnasJson<Pool[]>(["pool", "list"]));
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list", "--all"]));
     const engines = useLoad(loadEngines);
+    const [tab, setTab] = useState<"pools" | "disks" | "attached">("pools");
     const [creating, setCreating] = useState(false);
     const [created, setCreated] = useState("");
     const [viewing, setViewing] = useState<string | null>(null);
@@ -447,24 +503,39 @@ export function Storage() {
         return <Page><PoolDetailsView name={viewing} back={() => setViewing(null)} /></Page>;
     }
     return (
-        <Page intro="Pools hold your shares. Each pool is made from one or more disks.">
+        <Page intro={tab === "pools" ? "Pools hold your shares. Each pool is made from one or more disks." : undefined}>
             <RunningJobs jobs={jobs} />
-            <Loading loaded={pools}>{() => <Loading loaded={disks}>{() => <Loading loaded={engines}>{() => (
-                <div class="stack">
-                    {!pools.data!.length && (
-                        <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from attached disks.</p></Card>
-                    )}
-                    {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} engine={engines.data![pool.engine]}
-                                                       disks={disks.data!} reload={reload} details={() => setViewing(pool.name)} />)}
+            <div class="row storage-bar">
+                <div class="segmented page-tabs" role="tablist">
+                    {([["pools", "Pools"], ["disks", "Disks"], ["attached", "Attached pools"]] as const).map(
+                        ([key, title]) => (
+                            <button key={key} type="button" role="tab" aria-selected={tab === key}
+                                    class={tab === key ? "current" : ""} onClick={() => setTab(key)}>{title}</button>
+                        ))}
                 </div>
-            )}</Loading>}</Loading>}</Loading>
-            {created && <Result outcome={{ kind: "done", text: `Created pool ${created}` }} />}
-            {creating
-                ? <CreatePool taken={(pools.data || []).map(pool => pool.name)}
-                              onCreated={name => { setCreating(false); setCreated(name); reload(); }} />
-                : <div class="row"><Button kind="primary" onClick={() => { setCreating(true); setCreated(""); }}>Create a pool</Button></div>}
-            <ImportPools onChange={reload} />
-            <Loading loaded={disks}>{() => <Disks disks={disks.data!} />}</Loading>
+                <Button onClick={reload}>Rescan disks</Button>
+            </div>
+            {tab === "pools" && <>
+                <Loading loaded={pools}>{() => <Loading loaded={disks}>{() => <Loading loaded={engines}>{() => (
+                    <div class="stack">
+                        {!pools.data!.length && (
+                            <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from
+                                attached disks.</p></Card>
+                        )}
+                        {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} engine={engines.data![pool.engine]}
+                                                           disks={disks.data!} reload={reload} details={() => setViewing(pool.name)} />)}
+                    </div>
+                )}</Loading>}</Loading>}</Loading>
+                {created && <Result outcome={{ kind: "done", text: `Created pool ${created}` }} />}
+                {creating
+                    ? <CreatePool taken={(pools.data || []).map(pool => pool.name)}
+                                  onCreated={name => { setCreating(false); setCreated(name); reload(); }} />
+                    : <div class="row"><Button kind="primary" onClick={() => { setCreating(true); setCreated(""); }}>Create a pool</Button></div>}
+            </>}
+            {tab === "disks" && (
+                <Loading loaded={disks}>{() => <PhysicalDisks disks={disks.data!} openPool={setViewing} />}</Loading>
+            )}
+            {tab === "attached" && <ImportPools onChange={reload} />}
         </Page>
     );
 }

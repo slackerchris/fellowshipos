@@ -103,6 +103,8 @@ export interface Disk {
     serial: string;
     state: "os" | "in-use" | "has-data" | "empty";
     reason: string;
+    // The pool holding it, where one does
+    pool: string | null;
     // A partition is the free part of the system disk, left by the installer
     kind: "disk" | "partition";
     // The drive bay, where the enclosure reports one
