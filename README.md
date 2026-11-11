@@ -67,7 +67,7 @@ sudo fnas share smb media --recycle on --recycle-days 14
 sudo fnas share nfs media --client 192.168.1.0/24=ro
 ```
 
-Create the referenced users and groups before assigning them to a share. Shares for everyone map access to a common account so SMB and NFS clients can edit the same files. Set the share subnet during Setup. NFS client rules can allow other private networks or hosts. NFS clients using per-user access need numeric IDs that match the NAS. Changing a share's access can rewrite existing file permissions. Deleting a share destroys its dataset and snapshots and requires typed confirmation.
+Create the referenced users and groups before assigning them to a share. Shares for everyone map access to a common account so SMB and NFS clients can edit the same files. Set the share subnet during Setup. NFS client rules can allow other private networks or hosts. NFS clients using per-user access need numeric IDs that match the NAS. Changing a share's access can rewrite existing file permissions. Deleting a share destroys its dataset and snapshots; the desktop asks first, and the CLI needs `--confirm NAME`.
 
 ### Accounts and SSH
 

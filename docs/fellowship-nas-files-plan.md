@@ -48,7 +48,7 @@ than one name.
   clears, and Shift with the arrow keys extends.
 - The preview pane shows a single picked file; with several picked it says
   "4 items picked" and offers the actions instead.
-- Bulk actions: **Delete** (typed phrase names the count and the share, as fnas
+- Bulk actions: **Delete** (the confirmation names the count and the share, as fnas
   does elsewhere), **Download** as a zip (server side, see below), and **Move**
   once slice B lands.
 - Download of several files: `POST /api/files/zip` with the list, answered by a

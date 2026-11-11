@@ -140,8 +140,9 @@ export function Field({ label, hint, children }: { label: string; hint?: Compone
 }
 
 /**
- * Ask for a typed phrase before something that can't be undone, the same
- * phrase fnas itself checks.
+ * Ask before something that can't be undone: the dialog names what will be
+ * lost, and its own red button is the answer. fnas still refuses without the
+ * phrase it asks for, which is what the button sends; nobody retypes it.
  */
 export function Confirm({ title, phrase, children, busy, outcome, onConfirm, onCancel }: {
     title: string;
@@ -149,25 +150,24 @@ export function Confirm({ title, phrase, children, busy, outcome, onConfirm, onC
     children: ComponentChildren;
     busy: boolean;
     outcome: Outcome | null;
-    onConfirm: (typed: string) => void;
+    onConfirm: (phrase: string) => void;
     onCancel: () => void;
 }) {
-    const [typed, setTyped] = useState("");
-    // The autofocus attribute only works when a page loads, not in a dialog added later
-    const input = useRef<HTMLInputElement>(null);
-    useEffect(() => input.current?.focus(), []);
+    // Focus starts on Cancel, so a stray Enter answers the safe way. The
+    // autofocus attribute only works when a page loads, not for a dialog added
+    // later, so this is done by hand.
+    const cancel = useRef<HTMLButtonElement>(null);
+    useEffect(() => cancel.current?.focus(), []);
     return (
         <div class="overlay" role="dialog" aria-modal="true" aria-label={title}>
-            <form class="dialog" onSubmit={event => { event.preventDefault(); onConfirm(typed); }}>
+            <form class="dialog" onSubmit={event => { event.preventDefault(); onConfirm(phrase); }}>
                 <h2>{title}</h2>
                 {children}
-                <Field label={`Type "${phrase}" to confirm`}>
-                    <input ref={input} value={typed} onInput={event => setTyped(event.currentTarget.value)} />
-                </Field>
+                <p class="small muted">This can't be undone.</p>
                 <Result outcome={outcome} />
                 <div class="row row-end">
-                    <Button onClick={onCancel}>Cancel</Button>
-                    <Button kind="danger" type="submit" busy={busy} disabled={typed !== phrase}>{title}</Button>
+                    <button ref={cancel} class="button button-plain" type="button" onClick={onCancel}>Cancel</button>
+                    <Button kind="danger" type="submit" busy={busy}>{title}</Button>
                 </div>
             </form>
         </div>

@@ -274,10 +274,12 @@ bump.
   the connect lines name the machine to use. **Ways to share** moved to Sharing
   settings, and the action on a row is **Manage**, since the panel holds the
   switches and settings as well as the paths.
-- Deleting a share asks for the share's name, as deleting a file does, rather
-  than a sentence such as "delete media and 3 snapshots". The dialog still
-  lists the snapshots that go with it, and `fnas share delete` still refuses
-  until it is given the name.
+- Nothing destructive asks to be typed any more. The dialog names what will be
+  lost and its own red button is the answer, with Cancel holding the focus so a
+  stray Enter does nothing. This covers deleting a share or files, destroying a
+  pool, erasing disks, repairing an array, exporting a pool, removing a user and
+  the power actions. `fnas` still refuses without `--confirm` and its expected
+  phrase, which the dialog sends as the button is pressed.
 - Setup's steps are clickable, as the installer's rail is, and **Your pools**
   shows free space instead of the disk's size.
 - The desktop opens a window over the whole screen below 720 px wide, so two
