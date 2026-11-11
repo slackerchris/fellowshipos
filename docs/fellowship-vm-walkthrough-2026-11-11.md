@@ -133,6 +133,28 @@ until the ISOs are rebuilt.
 
 ## Suggestions, by screen
 
+**Status, November 11.** The UI pass (`d8e6480` to `0a3221e`) took the cheap
+half of this list; the rest is still open. Done: the graphical install moved
+ahead of the text one, Enter no longer starts the text installer, and the
+console prints the real address (`c7dcc2e`); the only usable disk is preselected,
+the disk is a card rather than a checkbox, the time zone is detected from the
+browser and the finish screen shows the name and the IP (`c7dcc2e`, `d8e6480`);
+the password has **Show** and a red under-eight hint; the summary names the image
+and says the role finishes on the first start with Secure Boot off; **Storage
+node** is gone from the wizard; the login card names the installer's account;
+the Health widget adds the not-applicable count; a **?** in the Disks widget is
+explained; a narrow window opens apps maximised; **Your pools** shows free
+space; Setup's steps are clickable; the stale "Settings once it exists" copy is
+gone and the alerts step says findings are always kept; Files opens its only
+share; and every harness note is fixed.
+
+Still open: GRUB, firmware and live-session branding, the pairing page's
+wording, the Space number box and the time-zone list, the fixed layout height,
+the Shut down button, the wizard asking again for the host name and time zone,
+"Choose all" and the system disk, and the text wizard.
+
+All of it was checked in the development container, not in a VM or on an ISO.
+
 ### Boot menu and branding
 - **FellowshipOS identity:**
   - Give GRUB a FellowshipOS theme (the palette and mountains) in place of

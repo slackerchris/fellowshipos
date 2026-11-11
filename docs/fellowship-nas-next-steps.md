@@ -24,8 +24,8 @@ picking work back up, not a fourth source of truth.
 | Phase 13 | WebDAV is built three times over: read over HTTPS, then writes with a strong `ETag` and `If-Match` checked as the write commits, then `LOCK`/`UNLOCK` with locks bound to the account that took them and folders that carry the locks inside them. SFTP is built: an account set to Files over SFTP is chrooted to a view of just its shares, with no shell, no forwarding and its view rebuilt whenever a share changes and at boot. **FTP is what is left of the phase**, FTPS first with plain FTP an opt-in |
 | Next | FTP, then the release gates on real hardware: everything in section 3, and the protocol gate in the plan (`An SFTP-only user can't get a shell and sees only their shares`, two accounts over SFTP, FTP and WebDAV) |
 | Tests | 286 Python unit tests pass locally, the Go tests cover the resolver, every file op on real files (as the account running the tests), the zip and the stream, the installer's edition, layout, engine and server tests pass, and CI runs on every push |
-| Docs baseline | The overview describes `c7dcc2e`, which includes the two-edition build, the reworked install page and the walkthrough's fixes. The plan's Phase 13 test results record each WebDAV and SFTP slice and what was seen of it, which the overview summarizes and links |
-| VM walkthrough | Nov 11: both ISOs live-booted, installed and started from disk, with the NAS taken through Setup, a pool, a share and Files. The 11 bugs found are fixed in `c7dcc2e`. [The notes](fellowship-vm-walkthrough-2026-11-11.md) keep the suggestions still open |
+| Docs baseline | The overview describes `0a3221e`, which includes the two-edition build, the reworked install page, the walkthrough's fixes and the November 11 UI pass (Shares, Storage and the dialogs). The plan's Phase 13 test results record each WebDAV and SFTP slice and what was seen of it, which the overview summarizes and links |
+| VM walkthrough | Nov 11: both ISOs live-booted, installed and started from disk, with the NAS taken through Setup, a pool, a share and Files. The 11 bugs found are fixed in `c7dcc2e`. The UI pass after it is checked in the development container only, not in a VM. [The notes](fellowship-vm-walkthrough-2026-11-11.md) keep the suggestions still open |
 
 **The running VM predates all of Phase 13.** The SFTP views, the sshd `Match`
 block and `fellowship-nas-refresh.service` are new files, so they exist only
@@ -132,9 +132,12 @@ Left, in order:
 6. Rebuild both ISOs and walk the boot menu and install page again. The fixes
    in `c7dcc2e` to the default entry, the finished page, the Multi-purpose
    wording and the step rail have tests and builds, but haven't been seen
-   running. Then pick from the walkthrough's suggestions: the first-boot
-   wizard asking again for what the installer collected, Debian branding in
-   the boot menu and the firmware entry, and kernel messages over the wizard.
+   running. The UI pass (`d8e6480` to `0a3221e`) is in the same state: built
+   and walked in the development container, not in a VM. Take the share panel,
+   the three Storage tabs, the disk preselect and the dialogs in the same walk.
+   Then pick from the walkthrough's suggestions: the first-boot wizard asking
+   again for what the installer collected, Debian branding in the boot menu and
+   the firmware entry, and kernel messages over the wizard.
 7. FTP, FTPS by default, sharing the same chroot view SFTP builds.
 8. Hand-made partition layouts, if the automatic plan isn't enough for someone.
    The checks are in `installer/internal/layout/manual.go` with their tests —
@@ -194,6 +197,15 @@ What is true in the desktop today, so changes have a reference point:
   --system`).
 - Lists hold one line per thing, with its actions in a menu on the row, as Shares
   and Users now do; a form opens under the list rather than in a separate page.
+- A share states each way to share it once: four switches, and a settings tab
+  only for the ways that are on. Its row action is **Manage**, not Connect,
+  because the panel holds the paths, the switches and the settings.
+- Storage is three tabs — Pools, Disks and Attached pools — with one **Rescan
+  disks** button. The Disks tab is the inventory: bay, model, capacity and
+  assignment, with the selected drive's serial and health beside it.
+- Nothing destructive asks to be typed. The dialog names what will be lost and
+  its red button acts, with Cancel holding the focus; `fnas` still requires
+  `--confirm`, and the dialog passes it.
 - Files is shaped like a browser: shares down the left, a toolbar of back, up and
   refresh over a breadcrumb that starts at the share's name, a sortable list or a
   grid of thumbnails, and the picked file in a pane beside the list. Clicking

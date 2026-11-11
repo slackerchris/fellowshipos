@@ -724,7 +724,7 @@ The desktop is the interface from the start. Every app opens in a window; there 
 
 | App | What it does |
 | --- | --- |
-| Storage | Pools on every engine; disks by bay; create (engine, then disks, then layout); grow; scrub, check or sync; guided disk replacement; identify light |
+| Storage | Three tabs. Pools: every engine, create (engine, then disks, then layout), grow, scrub, check or sync, guided disk replacement, identify light. Disks: every drive by bay, model, capacity and assignment, with the selected drive's serial, device and verdict beside it. Attached pools: import a pool made elsewhere |
 | Shares | Two tabs: Shared folders, one line per share with its access and protocols and a panel holding its paths, its switches and its settings, and Sharing settings for the SMB and NFS server and the LAN subnet; permissions per user and group; the LAN subnet |
 | Users | Accounts, passwords, groups, `nas-admins`, and the shares each person can reach |
 | Snapshots and backup | Snapshot schedules per share; browse and restore; backup jobs with last and next run |
