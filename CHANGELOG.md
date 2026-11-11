@@ -262,6 +262,14 @@ bump.
 
 ### Changed
 
+- The helper records every file change that goes through — an upload, a new
+  folder, a rename, a copy, a deletion or a restored version — with the account
+  that asked for it, so a file that has gone can be traced afterwards. It also
+  caps the file children running at once, so a client opening many files waits
+  its turn rather than having the machine open a process for each.
+- CI builds pushes to `master` as well as `nas-edition`, runs the Go tests under
+  the race detector, and lints the Python with ruff's error rules.
+
 - The boot menu is generated for each image instead of being committed. Each
   edition's entry names itself — **Install FellowshipOS NAS (graphical)** or
   **Install FellowshipOS Multi-purpose (graphical)** — carries its own

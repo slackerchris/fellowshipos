@@ -35,6 +35,13 @@ type rootResponse struct {
 // fnas run rather than one a picture.
 const RootsFor = 5 * time.Second
 
+// audit records a change that went through. The child's own log holds what it
+// refused; this is the other half, since a file that has gone is what people
+// ask about afterwards and only the helper knows whose session asked for it.
+func audit(user, action, share, inside string) {
+	log.Printf("%s %s: %s/%s", user, action, share, inside)
+}
+
 type knownRoots struct {
 	at    time.Time
 	roots []files.Root
@@ -355,6 +362,11 @@ func (h *Helper) fileWrite(user string, request protocol.Request, body io.Reader
 	if counting.wrote > MaxUpload {
 		return failure(protocol.CodeBadRequest, "that file is larger than the 10 GB this allows")
 	}
+	action := "upload"
+	if request.Replace {
+		action = "replace"
+	}
+	audit(user, action, request.Share, request.Path)
 	return protocol.Response{Size: counting.wrote, Tag: tag}
 }
 
@@ -409,6 +421,7 @@ func (h *Helper) fileRename(user string, request protocol.Request) protocol.Resp
 	if answer := childSaid(out); answer != "" {
 		return failure(protocol.CodeFailed, answer)
 	}
+	audit(user, "rename", request.Share, request.Path+" -> "+request.To)
 	return protocol.Response{}
 }
 
@@ -450,6 +463,7 @@ func (h *Helper) fileCopy(user string, request protocol.Request) protocol.Respon
 	if answer := childSaid(out); answer != "" {
 		return failure(protocol.CodeFailed, answer)
 	}
+	audit(user, "copy", request.Share, request.Path+" -> "+request.To)
 	return protocol.Response{}
 }
 
@@ -576,6 +590,7 @@ func (h *Helper) change(user string, request protocol.Request, failed string,
 	if answer := childSaid(out); answer != "" {
 		return failure(protocol.CodeFailed, answer)
 	}
+	audit(user, strings.Join(command, " "), request.Share, request.Path)
 	return protocol.Response{}
 }
 

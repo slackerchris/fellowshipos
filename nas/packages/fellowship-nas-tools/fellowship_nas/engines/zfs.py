@@ -337,11 +337,6 @@ def repair_pool(name, confirm=""):
     raise FnasError("ZFS mends its own blocks from their checksums: a scrub is all it needs")
 
 
-def last_scrub(name):
-    """When a scrub last finished, in seconds since the epoch, or 0."""
-    return scrub_finished(name) or 0
-
-
 def leaves(vdev):
     if "disks" not in vdev:
         return [vdev]

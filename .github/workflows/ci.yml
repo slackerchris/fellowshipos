@@ -7,7 +7,9 @@ name: CI
 
 on:
   push:
-    branches: [nas-edition, main]
+    # master is the default branch, so it has to be named here: a PR run tests
+    # the branch being merged, never the tip master ends up with
+    branches: [nas-edition, master]
   pull_request:
   workflow_dispatch:
 
@@ -27,6 +29,13 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest nas/tests/unit/test_fnas.py
       - name: Byte-compile every module
         run: python3 -m compileall -q nas/packages/fellowship-nas-tools/fellowship_nas
+      # Errors only to start with, like ShellCheck: a name used before it is
+      # defined, an import that isn't there, an f-string with no placeholders.
+      # Widen the selection once the package is quiet.
+      - name: Lint
+        run: |
+          pip install --quiet ruff
+          ruff check --select E9,F nas/packages/fellowship-nas-tools nas/tests/unit/test_fnas.py
 
   go:
     name: Go (${{ matrix.module }})
@@ -63,7 +72,10 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           go vet ./...
-          go test ./...
+          # The helper and the daemon share state between requests, so the
+          # race detector is part of the test, and coverage shows what a new
+          # file op still needs
+          go test -race -cover ./...
 
   web:
     name: Desktop build (${{ matrix.folder }})

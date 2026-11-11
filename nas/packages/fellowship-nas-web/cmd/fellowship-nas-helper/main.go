@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"fellowship-nas-web/internal/filechild"
@@ -31,6 +32,14 @@ const outputLimit = 4 << 20
 // maxRunning caps how many fnas processes run at once. Each one is a root
 // Python process, so a flood of requests mustn't be able to fill the machine.
 const maxRunning = 8
+
+// maxChildren caps how many file children run at once. Each one is a process as
+// the person asking, and a download keeps its child for as long as the client
+// takes to read it, so a client opening a hundred files waits its turn rather
+// than having the machine open a hundred processes for it.
+const maxChildren = 32
+
+var children = make(chan struct{}, maxChildren)
 
 // maxRequestLine is the most one request's JSON may be. The file follows it on
 // the same connection, so only the request itself is bounded here: a larger one
@@ -129,22 +138,31 @@ func runChild(account helper.Account, body io.Reader, op, root, path string, sta
 	if err != nil {
 		return nil, err
 	}
+	children <- struct{}{}
 	if err := command.Start(); err != nil {
+		<-children
 		return nil, err
 	}
 	// The child is reaped by the same reader finishing, so a half-read file
 	// still ends the process rather than leaving it behind
-	return &childOut{ReadCloser: out, command: command}, nil
+	return &childOut{ReadCloser: out, command: command, release: func() { <-children }}, nil
 }
 
 type childOut struct {
 	io.ReadCloser
 	command *exec.Cmd
+	release func()
+	once    sync.Once
 }
 
+// Close ends the child and gives back its slot, once, however often it is
+// called.
 func (c *childOut) Close() error {
-	c.command.Process.Kill()
-	c.command.Wait()
+	c.once.Do(func() {
+		c.command.Process.Kill()
+		c.command.Wait()
+		c.release()
+	})
 	return c.ReadCloser.Close()
 }
 

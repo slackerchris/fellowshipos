@@ -247,5 +247,6 @@ func (h *Helper) fileRestore(user string, request protocol.Request) protocol.Res
 	if said := childSaid(out); said != "" {
 		return failure(protocol.CodeFailed, said)
 	}
+	audit(user, "restore", request.Share, request.Path+" -> "+target)
 	return protocol.Response{}
 }
