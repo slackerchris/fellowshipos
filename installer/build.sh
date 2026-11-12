@@ -4,6 +4,8 @@
 set -e
 
 cd "$(dirname "$0")"
+# The shared theme files, which the page's build reads from outside its copy
+export FELLOWSHIP_THEMES_DIR="$(pwd)/../themes"
 
 OUT="$(pwd)/../config/packages.chroot"
 WORK="$(mktemp -d)"

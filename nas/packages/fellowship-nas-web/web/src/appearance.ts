@@ -4,19 +4,15 @@
 // answers.
 import { useState } from "preact/hooks";
 import { fnasJson } from "./api";
+import { PALETTES } from "./themes.gen";
 
 export type Mode = "system" | "light" | "dark";
 
 export const MODES: readonly Mode[] = ["system", "light", "dark"];
 
-/** The themes, with the colours their choice shows: the dark window and the accent.
-    The full palettes live in themes.mjs, which builds themes.css. */
-export const PALETTES = [
-    { id: "fellowship", title: "Fellowship", swatch: ["#101a17", "#c5a465"] },
-    { id: "silverwater", title: "Silverwater", swatch: ["#192b3b", "#9ac8e7"] },
-    { id: "hearthfield", title: "Hearthfield", swatch: ["#292d1f", "#e5aa75"] },
-    { id: "highwatch", title: "Highwatch", swatch: ["#252126", "#d5a4be"] },
-] as const;
+/** The themes, with the colours their choice shows: the dark window and the
+    accent. Built from the shared theme files (themes/*.toml) by build.mjs. */
+export { PALETTES };
 
 export type Palette = typeof PALETTES[number]["id"];
 

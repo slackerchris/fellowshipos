@@ -5,6 +5,8 @@ set -e
 cd "$(dirname "$0")"
 
 REPO="$(pwd)/../../config/includes.chroot/usr/share/fellowshipos/nas-repo"
+# The shared theme files, which the desktop build reads from outside its copy
+export FELLOWSHIP_THEMES_DIR="$(pwd)/../../themes"
 WORK="$(mktemp -d)"
 
 for package in fellowship-nas-tools fellowship-nas fellowship-nas-smb fellowship-nas-web; do

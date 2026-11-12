@@ -1,0 +1,17 @@
+# Hearthfield: parchment and rust, the hill homes. Chris, 2026-11-09.
+name = "Hearthfield"
+order = 3
+
+[dark]
+window = "#292D1F"
+panel = "#3A3F2A"
+text = "#F5EAD5"
+accent = "#E5AA75"
+wallpaper = "hearthfield-night.webp"   # by night
+
+[light]
+window = "#EEE5CF"
+panel = "#FBF6E8"
+text = "#362A1D"
+accent = "#8E492C"
+wallpaper = "hearthfield.webp"   # by day

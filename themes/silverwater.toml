@@ -1,0 +1,17 @@
+# Silverwater: slate blue, the waterfall city. Chris, 2026-11-09.
+name = "Silverwater"
+order = 2
+
+[dark]
+window = "#192B3B"
+panel = "#243C50"
+text = "#E9F3FA"
+accent = "#9AC8E7"
+wallpaper = "silverwater-night.webp"   # by night
+
+[light]
+window = "#E6EDF3"
+panel = "#F6F9FC"
+text = "#22374B"
+accent = "#366B91"
+wallpaper = "silverwater.webp"   # by day

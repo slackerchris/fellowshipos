@@ -1,9 +1,9 @@
-// Bundles the install page into dist/. It shares the desktop's stylesheet
-// and wallpapers, so the NAS looks the same from install to desktop.
+// Bundles the install page into dist/. It shares the desktop's stylesheet and
+// the Fellowship theme file, so the NAS looks the same from install to desktop.
 import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-
-const desktop = "../../nas/packages/fellowship-nas-web/web";
+import { join } from "node:path";
+import { THEMES, THEMES_DIR, themesCss } from "../../nas/packages/fellowship-nas-web/web/themes.mjs";
 
 mkdirSync("dist", { recursive: true });
 writeFileSync("dist/index.html", `<!DOCTYPE html>
@@ -14,6 +14,7 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <meta name="color-scheme" content="dark light">
   <title>Install FellowshipOS</title>
   <link rel="stylesheet" href="main.css">
+  <link rel="stylesheet" href="themes.css">
 </head>
 <body>
   <div id="app"></div>
@@ -21,8 +22,13 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
 </body>
 </html>
 `);
-copyFileSync(`${desktop}/wallpapers/dark.jpg`, "dist/wallpaper-dark.jpg");
-copyFileSync(`${desktop}/wallpapers/light.jpg`, "dist/wallpaper-light.jpg");
+// The installer always looks like Fellowship, the default theme
+const fellowship = THEMES.fellowship;
+writeFileSync("dist/themes.css", themesCss({ fellowship }));
+for (const mode of ["dark", "light"]) {
+    const file = fellowship[mode].wallpaper;
+    copyFileSync(join(THEMES_DIR, "wallpapers", file), `dist/wallpaper-${file}`);
+}
 
 const options = {
     entryPoints: ["src/main.tsx"],

@@ -1,0 +1,42 @@
+# Fellowship: midnight forest, dark pine, parchment and aged gold.
+# Chris's palette (2026-11-07). The light mode is the same palette turned to
+# daylight.
+name = "Fellowship"
+order = 1
+
+[dark]
+window = "#101A17"     # midnight forest
+panel = "#1B2923"      # dark pine
+text = "#EFE7D5"       # pale parchment
+accent = "#C5A465"     # aged gold
+wallpaper = "fellowship-dark.jpg"
+
+# Chris chose these by hand; they win over the worked-out colours.
+[dark.pinned]
+surface-sunk = "#15211C"
+raised = "#29392F"     # moss charcoal
+border = "#405247"     # weathered green
+muted = "#B7B29E"      # muted linen
+# The taskbar and icon tiles, dark in either mode
+bar-muted = "#B7B29E"
+bar-border = "#405247"
+bar-pressed = "#29392F"
+tile-top = "#344A3D"
+tile-bottom = "#1E2E27"
+
+[light]
+window = "#F4EFE3"
+panel = "#FBF8F0"
+text = "#1B2923"
+accent = "#8A6A2C"
+wallpaper = "fellowship-light.jpg"
+
+[light.pinned]
+desktop = "#E3DCCB"
+surface-sunk = "#EDE6D6"
+raised = "#E6DEC9"
+border = "#CFC4AB"
+muted = "#5E5A4C"
+accent-text = "#FFF8E8"
+gold = "#9C7A36"
+icon-label = "#101A17"

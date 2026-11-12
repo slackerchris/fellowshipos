@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && node build.mjs",
+    "build": "node build.mjs --themes && tsc --noEmit && node build.mjs",
     "watch": "node build.mjs --watch"
   },
   "dependencies": {

@@ -1,24 +1,15 @@
 @import "./desktop.css";
 
-/* Chris's palette: midnight forest, dark pine, parchment and aged gold.
-   The light theme is the same palette turned to daylight. */
+/* The colours that don't change with the theme: chart series, status and
+   severity, and shadows. The theme colours (window, panel, text, accent and
+   everything worked out from them) are in themes.css, built from the shared
+   theme files in themes/ at the top of the repository. */
 :root {
-    --desktop: #e3dccb;
     /* Chart series, checked for colour blindness and contrast with the dataviz validator */
     --series-1: #2a78d6;
     --series-2: #1baf7a;
     --series-3: #6250d6;
     --series-4: #e87ba4;
-    --bg: #f4efe3;
-    --surface: #fbf8f0;
-    --surface-sunk: #ede6d6;
-    --raised: #e6dec9;
-    --border: #cfc4ab;
-    --text: #1b2923;
-    --muted: #5e5a4c;
-    --accent: #8a6a2c;
-    --accent-text: #fff8e8;
-    --gold: #9c7a36;
     --good: #3f7a46;
     --warning: #9a6316;
     --bad: #a8463a;
@@ -27,20 +18,7 @@
     --sev-medium: #b05f14;
     --sev-high: #a8463a;
     --sev-critical: #6b4a9e;
-    --wallpaper: url("wallpaper-light.jpg"), url("wallpaper-light.svg");
-    /* The taskbar and icon labels are dark in either mode, from the theme's dark colours */
-    --bar: #101a17;
-    --bar-text: #efe7d5;
-    --bar-muted: #b7b29e;
-    --bar-border: #405247;
-    --bar-hover: #1b2923;
-    --bar-pressed: #29392f;
-    --bar-accent: #c5a465;
-    --tile-top: #344a3d;
-    --tile-bottom: #1e2e27;
-    --icon-label: #101a17;
     --icon-shadow: 0 1px 2px rgb(244 239 227 / 0.9);
-    --icon-hover: rgb(251 248 240 / 0.6);
     --shadow: 0 18px 50px rgb(40 32 12 / 0.22), 0 2px 8px rgb(40 32 12 / 0.12);
     color-scheme: light;
 }
@@ -51,17 +29,6 @@
         --series-2: #199e70;
         --series-3: #9085e9;
         --series-4: #d55181;
-        --desktop: #101a17;
-        --bg: #101a17;
-        --surface: #1b2923;
-        --surface-sunk: #15211c;
-        --raised: #29392f;
-        --border: #405247;
-        --text: #efe7d5;
-        --muted: #b7b29e;
-        --accent: #c5a465;
-        --accent-text: #101a17;
-        --gold: #c5a465;
         --good: #86b88a;
         --warning: #e0a452;
         --bad: #d87667;
@@ -69,10 +36,7 @@
         --sev-medium: #c8762b;
         --sev-high: #b85144;
         --sev-critical: #7b5ba6;
-        --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
-        --icon-label: #efe7d5;
         --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
-        --icon-hover: rgb(16 26 23 / 0.45);
         --shadow: 0 18px 50px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
         color-scheme: dark;
     }
@@ -83,17 +47,6 @@
     --series-2: #199e70;
     --series-3: #9085e9;
     --series-4: #d55181;
-    --desktop: #101a17;
-    --bg: #101a17;
-    --surface: #1b2923;
-    --surface-sunk: #15211c;
-    --raised: #29392f;
-    --border: #405247;
-    --text: #efe7d5;
-    --muted: #b7b29e;
-    --accent: #c5a465;
-    --accent-text: #101a17;
-    --gold: #c5a465;
     --good: #86b88a;
     --warning: #e0a452;
     --bad: #d87667;
@@ -101,10 +54,7 @@
     --sev-medium: #c8762b;
     --sev-high: #b85144;
     --sev-critical: #7b5ba6;
-    --wallpaper: url("wallpaper-dark.jpg"), url("wallpaper-dark.svg");
-    --icon-label: #efe7d5;
     --icon-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
-    --icon-hover: rgb(16 26 23 / 0.45);
     --shadow: 0 18px 50px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
     color-scheme: dark;
 }

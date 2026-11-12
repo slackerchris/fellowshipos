@@ -1,0 +1,17 @@
+# Highwatch: mauve stone, the mountain fortress. Chris, 2026-11-09.
+name = "Highwatch"
+order = 4
+
+[dark]
+window = "#252126"
+panel = "#37303A"
+text = "#F4ECE4"
+accent = "#D5A4BE"
+wallpaper = "highwatch-night.webp"   # by night
+
+[light]
+window = "#E9E1DF"
+panel = "#F7F1EB"
+text = "#352B35"
+accent = "#754963"
+wallpaper = "highwatch.webp"   # by day

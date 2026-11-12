@@ -817,7 +817,7 @@ nas/
     fellowship-nas/          meta-package: every engine's and protocol's tools, schedules, kernel hook, alert hooks
     fellowship-nas-smb/      Samba and discovery
     fellowship-nas-tools/    fnas, its fellowship_nas package (engines/ holds one module per engine), fellowship-nas-notify, and each engine's packages and hooks
-    fellowship-nas-web/      Go server and helpers, plus the desktop (web/: wallpapers/, themes.mjs, icons in src/desktop/icons.tsx)
+    fellowship-nas-web/      Go server and helpers, plus the desktop (web/: themes.mjs reads ../../../../themes/, icons in src/desktop/icons.tsx)
   tests/
     vm/                      vm.sh: install from the ISO's boot menu, with up to 16 virtual disks
     unit/                    fnas tests that never touch a real disk

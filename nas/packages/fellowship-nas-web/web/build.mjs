@@ -1,7 +1,15 @@
 // Bundles the desktop into dist/, which the server serves as it is
 import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { THEMES, themesCss } from "./themes.mjs";
+import { join } from "node:path";
+import { THEMES_DIR, palettesTs, themesCss, wallpapers } from "./themes.mjs";
+
+// The theme list the account menu shows, from the shared theme files. Written
+// before anything else so `tsc` can check it; `--themes` stops here.
+writeFileSync("src/themes.gen.ts", palettesTs());
+if (process.argv.includes("--themes")) {
+    process.exit(0);
+}
 
 mkdirSync("dist", { recursive: true });
 
@@ -133,16 +141,13 @@ ${layers.map((layer, i) => `<path d="${fill(layer.points)}${layer.trees}" fill="
 `;
 }
 
-// Chris's wallpapers, made in Canva. The drawn mountains sit behind them and
-// show only if a photo can't be loaded.
-copyFileSync("wallpapers/dark.jpg", "dist/wallpaper-dark.jpg");
-copyFileSync("wallpapers/light.jpg", "dist/wallpaper-light.jpg");
+// Chris's wallpapers, from the shared theme folder. The drawn mountains sit
+// behind them and show only if a photo can't be loaded.
+for (const file of wallpapers()) {
+    copyFileSync(join(THEMES_DIR, "wallpapers", file), `dist/wallpaper-${file}`);
+}
 writeFileSync("dist/wallpaper-dark.svg", wallpaper("dark"));
 writeFileSync("dist/wallpaper-light.svg", wallpaper("light"));
-// Chris's other themes, each with its own wallpaper, behind the drawn mountains too
-for (const theme of Object.values(THEMES)) {
-    copyFileSync(`wallpapers/${theme.wallpaper}`, `dist/wallpaper-${theme.wallpaper}`);
-}
 writeFileSync("dist/themes.css", themesCss());
 
 const options = {
