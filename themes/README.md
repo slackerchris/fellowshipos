@@ -7,7 +7,10 @@ desktop for the desktop role (`fellowship-theme` in the fellowship-desktop
 repository, at run time). Installed systems get them in
 `/usr/share/fellowship/themes`.
 
-Fellowship (`fellowship.toml`) is the default and must exist.
+Fellowship (`fellowship.toml`) is the default and must exist. The Rust desktop
+also carries a copy of it, built in, for when this folder can't be read; its
+tests fail when the copy differs, so a change to `fellowship.toml` is copied
+to fellowship-desktop's `assets/themes/fellowship.toml` too.
 
 ## A theme file
 
@@ -51,7 +54,9 @@ share `s` of `b` mixed in (sRGB, rounded):
 | accent-text | window | panel |
 | icon-label | text | text |
 
-The taskbar and app tiles are dark in either mode, from the dark colours:
+The bars and app tiles are dark in either mode, from the dark colours. The NAS
+desktop's taskbar uses the bar colours, and so do the Rust desktop's top bar
+and dock:
 
 | Colour | Value |
 | --- | --- |
