@@ -47,6 +47,17 @@ def main():
 
     checks = []
 
+    # What the machine actually looks like before the verdicts: the
+    # fragments wireplumber should have, the sound processes, and the sink
+    # list. When a check below fails, this is what says why.
+    print("=== diagnosis ===")
+    ser.run("ls /usr/share/wireplumber/wireplumber.conf.d/ 2>&1; pgrep -a pipewire | head -2; "
+            "pgrep -a wireplumber; aplay -L 2>/dev/null | grep -A1 ':\\|hdg\\|pcsp' | head -8",
+            "DIAG_DONE", timeout=60)
+    ser.run("timeout 10 wpctl status 2>&1 | sed -n '/Sinks/,/Sources/p'; "
+            "timeout 10 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>&1",
+            "WPCTL_DONE", timeout=60)
+
     def check(name, cmd, marker, timeout=90):
         # The marker is split so the echo of the typed line never contains
         # it, and printed only when the check itself passed: an early match
