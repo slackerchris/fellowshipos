@@ -28,3 +28,4 @@ config/bootloaders/grub-pc/grub.cfg
 
 # Written by auto/config for the desktop edition
 config/package-lists/desktop.list.chroot
+config/includes.chroot/etc/chromium.d/fellowship

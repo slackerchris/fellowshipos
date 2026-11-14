@@ -151,6 +151,8 @@ The helper supports `base`, `docker`, `monitor`, and `storage` container presets
 
 ## Develop and test
 
+The [November 14 desktop VM handoff](docs/fellowship-desktop-vm-session-2026-11-14.md) records the current ISO, app additions, cursor investigation, pending compositor input fix, and VM verification steps.
+
 Run the Python and Go suites from the repository root. The Go modules require Go 1.24 or later. The web helper uses cgo and PAM development headers.
 
 ```bash
