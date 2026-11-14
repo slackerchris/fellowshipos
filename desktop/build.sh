@@ -52,6 +52,7 @@ install_bin fellowship-comp
 install_bin fellowship-shell
 install_bin fellowship-msg
 install_bin fellowship-portal
+install_bin fellowship-notifyd
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
 install -Dm644 desktop/session/fellowship-session.sh "$STAGE/etc/profile.d/fellowship-session.sh"
 install -Dm440 desktop/session/sudoers "$STAGE/etc/sudoers.d/fellowship-session"
@@ -69,6 +70,14 @@ install -d "$STAGE/usr/share/fellowship/themes/wallpapers" "$STAGE/usr/share/fel
 install -m644 "$WORK"/assets/icons/* "$STAGE/usr/share/fellowship/icons/"
 install -m644 themes/*.toml "$STAGE/usr/share/fellowship/themes/"
 install -m644 themes/wallpapers/* "$STAGE/usr/share/fellowship/themes/wallpapers/"
+
+# The notification service: it claims the standard bus name on activation,
+# so the first app that notifies starts it. Both names point at one binary.
+NDATA=$WORK/crates/fellowship-notifyd/data
+install -Dm644 "$NDATA/org.freedesktop.Notifications.service" \
+    "$STAGE/usr/share/dbus-1/services/org.freedesktop.Notifications.service"
+install -Dm644 "$NDATA/org.fellowship.Notifications.service" \
+    "$STAGE/usr/share/dbus-1/services/org.fellowship.Notifications.service"
 
 # The colour-scheme backend, selected through XDG_CURRENT_DESKTOP=Fellowship
 PORTAL=$WORK/crates/fellowship-portal/data
@@ -93,12 +102,13 @@ Priority: optional
 Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
- xdg-desktop-portal, xdg-desktop-portal-gtk
+ xdg-desktop-portal, xdg-desktop-portal-gtk,
+ pipewire, pipewire-pulse, wireplumber
 Description: The FellowshipOS desktop
  The Wayland compositor, the shell (top bar, dock, launcher), the
- fellowship-msg control tool and the xdg-desktop-portal Settings backend that
- answers the colour-scheme signal, with the shared themes and the console
- session starter.
+ fellowship-msg control tool, the notification service, and the
+ xdg-desktop-portal Settings backend that answers the colour-scheme
+ signal, with the shared themes and the console session starter.
 EOF
 
 mkdir -p "$ROOT/config/packages.chroot"

@@ -20,6 +20,13 @@ kbd
 xdg-desktop-portal
 xdg-desktop-portal-gtk
 
+# Sound: PipeWire with WirePlumber, and the Pulse-compatible socket the
+# media apps reach for. fellowship-session starts all three; the volume
+# keys and the top bar speak to them through wpctl (in wireplumber).
+pipewire
+pipewire-pulse
+wireplumber
+
 # Look: fonts, icons and pointer the shell and the apps ask for.
 fonts-dejavu-core
 adwaita-icon-theme
@@ -36,4 +43,6 @@ atril
 engrampa
 qalculate-gtk
 mpv
+chromium
+rhythmbox
 zenity

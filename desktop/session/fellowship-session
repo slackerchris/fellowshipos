@@ -45,7 +45,15 @@ if [ -n "$VT" ] && [ "$(cat /sys/class/tty/tty0/active 2>/dev/null)" != "tty$VT"
 fi
 
 export XDG_CURRENT_DESKTOP=Fellowship
-export XCURSOR_THEME="${XCURSOR_THEME:-Breeze}"
+export XCURSOR_THEME="${XCURSOR_THEME:-breeze_cursors}"
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+
+# Sound: PipeWire, its Pulse-compatible socket, and WirePlumber belong to
+# the session, not to any one app. They are reached through sockets in
+# XDG_RUNTIME_DIR, so apps find them from the moment they start, and the
+# volume keys and the top bar both speak to the pair through wpctl.
+for daemon in pipewire pipewire-pulse wireplumber; do
+    command -v "$daemon" >/dev/null 2>&1 && "$daemon" >/dev/null 2>&1 &
+done
 
 exec dbus-run-session -- fellowship-comp --backend drm --mod super "$@"
