@@ -1,0 +1,39 @@
+# Extra packages for the desktop edition, copied into
+# config/package-lists/desktop.list.chroot by auto/config. The desktop itself
+# (compositor, shell, portals) comes from the fellowship-desktop .deb that
+# desktop/build.sh makes.
+
+# Wayland session and software rendering. QEMU's virtio-gpu has no 3D of its
+# own, so the desktop draws through llvmpipe; on real hardware the same Mesa
+# package picks the GPU driver.
+libegl-mesa0
+libgl1-mesa-dri
+libglx-mesa0
+xkb-data
+dbus
+# chvt: the session switches the screen to its own console, which the live
+# image's autologin does not necessarily leave active
+kbd
+
+# Portals: the frontend, and the GTK backend for the file picker and friends.
+# The Settings (colour-scheme) interface is answered by fellowship-portal.
+xdg-desktop-portal
+xdg-desktop-portal-gtk
+
+# Look: fonts, icons and pointer the shell and the apps ask for.
+fonts-dejavu-core
+adwaita-icon-theme
+breeze-icon-theme
+breeze-cursor-theme
+
+# The everyday apps chosen in the desktop checklist: GTK 3 where there is a
+# choice, so the session's GTK theme reaches them.
+foot
+mousepad
+nemo
+ristretto
+atril
+engrampa
+qalculate-gtk
+mpv
+zenity

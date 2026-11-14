@@ -1,6 +1,6 @@
 # FellowshipOS
 
-FellowshipOS builds two Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS** and **FellowshipOS Multi-purpose**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools, traditional RAID arrays and Unraid-style pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances, with four themes chosen in **Settings → Appearance**.
+FellowshipOS builds three Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS**, **FellowshipOS Multi-purpose** and **FellowshipOS Desktop**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools, traditional RAID arrays and Unraid-style pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances, with four themes chosen in **Settings → Appearance**.
 
 [Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
@@ -16,9 +16,33 @@ On a Linux host with Docker, internet access, and at least 10 GB of free space, 
 | --- | --- |
 | `fellowshipos-nas-amd64-1.0.hybrid.iso` | Install FellowshipNAS, or try it live |
 | `fellowshipos-multi-amd64-1.0.hybrid.iso` | Install a general FellowshipOS machine, or try it live |
+| `fellowshipos-desktop-amd64-1.0.hybrid.iso` | Boot into the Fellowship desktop, or install it |
 | `fellowshipos-trixie-amd64-1.0_lxc.tar.gz` | Create a general-purpose Proxmox container |
 
-Both images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The template version is set in [build.sh](build.sh). If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) as well.
+The NAS and multi-purpose images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The template version is set in [build.sh](build.sh). If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) as well.
+
+### The desktop image
+
+The desktop image is that same live system with the Fellowship desktop in it. Build it from a checkout with the `fellowship-desktop` repository beside this one:
+
+```bash
+FELLOWSHIP_EDITIONS=desktop ./build.sh
+```
+
+`desktop/build.sh` builds the Rust desktop in the build container (rustup's stable; trixie's rustc is too old for its dependencies), packs it as `fellowship-desktop` — compositor, shell, `fellowship-msg`, the portal Settings backend, the shared themes and the console session starter — and `live-build` installs it. The extra packages, the session's portals, software rendering, fonts, icons and everyday GTK apps, are listed in [desktop/package-list.chroot](desktop/package-list.chroot).
+
+Booting it live autologins as `user` on the console the kernel shows, and the desktop starts on the panel by itself: a login on a text console starts the session, the first one to take the lock wins, and any other console stays a plain shell — the way in if the session needs looking at. The package keeps that console's `getty` alive — the stock unit is skipped at boot because `/dev/tty0` is not there yet, so the package clears that condition and asks for the getty once the consoles exist — and lets the session switch the screen to its own VT, which DRM requires. The session's own output goes to `/tmp/fellowship-session.log`. In QEMU:
+
+```bash
+qemu-system-x86_64 -enable-kvm -m 4G -smp 2 \
+    -drive file=fellowshipos-desktop-amd64-1.0.hybrid.iso,media=cdrom,readonly=on \
+    -device virtio-gpu-pci -device qemu-xhci -device usb-kbd -device usb-tablet \
+    -display gtk
+```
+
+The session draws through Mesa's software renderer, so a VM with no 3D acceleration still shows the desktop. On an installed system, logging in on a text console starts the desktop the same way. The installer records no desktop role: the desktop is part of the image rather than a role first boot adds.
+
+`desktop/tests/vm.sh` boots the image in QEMU, waits for the session and writes a picture of the screen (`desktop.png`), failing if the picture is not the desktop. It needs OVMF and `python3` with Pillow.
 
 ## Install FellowshipNAS
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Console login for the FellowshipOS desktop
+Documentation=man:agetty(8)
+After=dev-tty1.device
+Before=getty.target
+
+# getty@tty1 is wanted by getty.target, but on the live image it is skipped at
+# boot and only starts when something asks for it later — which is why the
+# console the panel shows had no login, and the desktop had nowhere to start.
+# Asking for it here, once the console devices exist, is that ask.
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/systemctl start getty@tty1.service
+
+[Install]
+WantedBy=multi-user.target

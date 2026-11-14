@@ -9,7 +9,8 @@ WORKDIR="/build"
 VERSION="1.0"
 TEMPLATE_NAME="fellowshipos-trixie-amd64-${VERSION}"
 # Both images are the same live system, built twice. FELLOWSHIP_EDITIONS picks
-# which to build; the LXC template comes from the multi-purpose one.
+# which to build; the LXC template comes from the multi-purpose one. Add
+# `desktop` for the image that boots into the Fellowship desktop.
 EDITIONS="${FELLOWSHIP_EDITIONS:-nas multi}"
 TEMPLATE_FROM="multi"
 
@@ -36,19 +37,36 @@ run() {
 > "$LOG"
 rm -f "${TEMPLATE_NAME}_lxc.tar.gz"
 
-# The packages are the same for both images, so they are built once
-run "Building the packages" docker run --rm \
-    --privileged \
-    -v "$(pwd):${WORKDIR}" \
-    -w "${WORKDIR}" \
-    "$IMAGE" \
-    bash -c '
+# The packages are the same for both images, so they are built once. The
+# desktop package needs the fellowship-desktop checkout beside this
+# repository; building it costs a Rust build, so it runs only when asked for.
+PACKAGES='
         set -e
         apt-get update -qq
         apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev
         nas/packages/build.sh
         installer/build.sh
     '
+DESKTOP_MOUNT=()
+case " $EDITIONS " in
+    *" desktop "*)
+        PACKAGES="$PACKAGES
+        desktop/build.sh"
+        DESKTOP_MOUNT=(-v "$(cd .. && pwd)/fellowship-desktop:/fellowship-desktop:ro")
+        ;;
+esac
+
+if [ "${FELLOWSHIP_SKIP_PACKAGES:-}" = 1 ]; then
+    echo "[fellowshipos] Building the packages... skipped (FELLOWSHIP_SKIP_PACKAGES)"
+else
+    run "Building the packages" docker run --rm \
+        --privileged \
+        -v "$(pwd):${WORKDIR}" \
+        "${DESKTOP_MOUNT[@]}" \
+        -w "${WORKDIR}" \
+        "$IMAGE" \
+        bash -c "$PACKAGES"
+fi
 
 for edition in $EDITIONS; do
     run "Building the ${edition} image" docker run --rm \
@@ -70,6 +88,20 @@ for edition in $EDITIONS; do
                     { echo 'the NAS packages are missing: run nas/packages/build.sh' >&2; exit 1; }
             else
                 rm -rf config/includes.chroot/usr/share/fellowshipos/nas-repo
+            fi
+
+            # live-build installs every .deb in packages.chroot, so the
+            # desktop's package is there for the desktop image and kept aside
+            # for the images that are not it
+            mkdir -p .build/desktop-package
+            if [ \"$edition\" = desktop ]; then
+                ls .build/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
+                    mv .build/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
+                ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 ||
+                    { echo 'the desktop package is missing: run desktop/build.sh' >&2; exit 1; }
+            else
+                ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 &&
+                    mv config/packages.chroot/fellowship-desktop_*.deb .build/desktop-package/
             fi
 
             lb clean
@@ -126,7 +158,7 @@ for edition in $EDITIONS; do
     fi
 done
 
-if [ ! -f "$TEMPLATE" ]; then
+if [ ! -f "$TEMPLATE" ] && [ "$(echo " $EDITIONS " | grep -c " $TEMPLATE_FROM ")" = 1 ]; then
     echo "[fellowshipos] FAILED: expected LXC template not found: $TEMPLATE"
     exit 1
 fi
@@ -135,7 +167,9 @@ echo ""
 for edition in $EDITIONS; do
     echo "[fellowshipos] ISO:      fellowshipos-${edition}-amd64-${VERSION}.hybrid.iso"
 done
-echo "[fellowshipos] Template: ${TEMPLATE}"
-echo ""
-echo "Deploy to Proxmox:"
-echo "  scp ${TEMPLATE} root@proxmox:/var/lib/vz/template/cache/"
+if [ -f "$TEMPLATE" ]; then
+    echo "[fellowshipos] Template: ${TEMPLATE}"
+    echo ""
+    echo "Deploy to Proxmox:"
+    echo "  scp ${TEMPLATE} root@proxmox:/var/lib/vz/template/cache/"
+fi

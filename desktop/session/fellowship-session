@@ -1,0 +1,51 @@
+#!/bin/bash
+# Start the FellowshipOS desktop session on the console.
+#
+#   fellowship-session [fellowship-comp arguments...]
+#
+# Starts the compositor on the panel through DRM, as a Wayland session with
+# its own D-Bus: single-instance apps land inside the session, and the portal
+# frontend finds fellowship-portal there. A login on a text console starts it
+# through /etc/profile.d/fellowship-session.sh.
+set -e
+
+# One session per seat. The image autologins on more than one console, so a
+# second login must not start a second compositor and fight over the panel.
+LOCK=${FELLOWSHIP_SESSION_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/fellowship-session.lock}
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    echo "a FellowshipOS session is already running (lock: $LOCK)"
+    exit 0
+fi
+
+# The console shows what the session prints, and so does this file: when the
+# compositor fails before it can paint, the console is the only place its
+# error would land and nobody can read a console that died with the session.
+LOG=${FELLOWSHIP_SESSION_LOG:-/tmp/fellowship-session.log}
+exec > >(tee -a "$LOG") 2>&1
+echo "--- $(date -Is) fellowship-session on $(tty) as $(id -un)"
+
+# DRM only works for the VT that is on screen, and the console the image
+# autologins on is not always the active one. Switching needs root; when that
+# is not available without a password the compositor says so and the shell
+# stays, which is still better than a session that half-starts.
+VT=${XDG_VTNR:-}
+if [ -n "$VT" ] && [ "$(cat /sys/class/tty/tty0/active 2>/dev/null)" != "tty$VT" ]; then
+    echo "switching the screen to tty$VT"
+    if sudo -n chvt "$VT" 2>/dev/null; then
+        # logind marks the session active as the switch lands, a moment after
+        # chvt returns; the device is handed over once it has.
+        for _ in $(seq 20); do
+            [ "$(cat /sys/class/tty/tty0/active 2>/dev/null)" = "tty$VT" ] && break
+            sleep 0.5
+        done
+    else
+        echo "could not switch; the session needs vt$VT to be on screen"
+    fi
+fi
+
+export XDG_CURRENT_DESKTOP=Fellowship
+export XCURSOR_THEME="${XCURSOR_THEME:-Breeze}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+
+exec dbus-run-session -- fellowship-comp --backend drm --mod super "$@"

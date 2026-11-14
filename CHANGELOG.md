@@ -14,6 +14,36 @@ bump.
 
 ### Added
 
+- A third image, **FellowshipOS Desktop**: the same live system with the
+  Fellowship desktop in it. `FELLOWSHIP_EDITIONS=desktop ./build.sh` builds the
+  Rust desktop in the build container (`desktop/build.sh`, rustup's stable,
+  because trixie's rustc is older than its dependencies ask for), installs it as
+  the `fellowship-desktop` package — compositor, shell, `fellowship-msg`, the
+  portal Settings backend, the shared themes and the console session starter —
+  and adds the portal frontend, software rendering, fonts, icons and the chosen
+  everyday GTK apps from `desktop/package-list.chroot`. The live image logs in
+  as `user` on tty1 and starts the desktop on the panel by itself, which is what
+  makes the desktop testable in a VM rather than only on hardware.
+- The desktop image's session reaches the panel. Two faults in the compositor's
+  DRM path kept the screen black, both visible only on hardware: the card was
+  opened twice without handing the first one back to the seat session (the
+  second open failed with `WouldBlock`), and nothing ever flushed the Wayland
+  clients, so the shell connected and then waited for a registry that was
+  never sent. With both fixed the VM shows the wallpaper, the top bar, the dock
+  and the pointer, and `desktop/tests/vm.sh` photographs it.
+- A console login starts the desktop session on the desktop image, from
+  whichever console autologins or is logged into first, with a lock so a second
+  console stays a shell. The image autologins on tty2 while the kernel shows
+  tty1, and DRM only works from the active VT, so the session switches to its
+  own console first — `kbd` for `chvt`, and one sudoers rule allowing `%sudo` to
+  run `chvt` without a password, nothing more. The image's `getty@tty1` was
+  skipped at boot because `ConditionPathExists=/dev/tty0` is tested before
+  devtmpfs has it, so the console the kernel shows had no login and the desktop
+  had nowhere to start; the package clears that condition for tty1. What the
+  session does goes to `/tmp/fellowship-session.log`.
+- The installer knows the `desktop` image: it records no role (the desktop is in
+  the image, not a role first boot adds) and gives the system the whole disk,
+  like the multi-purpose image.
 - The install page walks in any order. Its four steps — **Disk**, **Space**,
   **You** and **Install** — are buttons in the rail at the top, so any of them
   opens at any time, and the rail shows how far the install has got rather than

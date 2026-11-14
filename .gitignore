@@ -25,3 +25,6 @@ config/bootloaders/grub-pc/grub.cfg
 
 # Scratch build output, such as a demo installer built outside Docker
 /tmp/
+
+# Written by auto/config for the desktop edition
+config/package-lists/desktop.list.chroot

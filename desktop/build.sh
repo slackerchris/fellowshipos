@@ -1,0 +1,109 @@
+#!/bin/bash
+# Build the Fellowship desktop package that the desktop edition installs.
+#
+#   FELLOWSHIP_EDITIONS=desktop ./build.sh
+#
+# build.sh runs this inside its Debian trixie container with the desktop
+# checkout mounted at /fellowship-desktop. The result is one .deb in
+# config/packages.chroot/, which live-build installs into the image: the
+# compositor, shell, message tool and portal backend, the shared themes, the
+# portal's configuration and the console-session starter.
+set -e
+
+cd "$(dirname "$0")/.."                     # the FellowshipOS repository root
+ROOT=$(pwd)
+DESKTOP=${FELLOWSHIP_DESKTOP_SRC:-/fellowship-desktop}
+VERSION=1.0
+
+if [ ! -f "$DESKTOP/Cargo.toml" ]; then
+    echo "desktop/build.sh: no fellowship-desktop checkout at $DESKTOP" >&2
+    echo "Set FELLOWSHIP_DESKTOP_SRC, or keep the two repositories side by side." >&2
+    exit 1
+fi
+
+# Debian trixie ships rustc 1.85, and the desktop's zbus needs 1.87, so the
+# compiler comes from rustup inside this container. The binaries still link
+# against trixie's glibc, which is what the image runs.
+if ! command -v cargo >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq build-essential pkg-config curl ca-certificates \
+        libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgbm-dev libudev-dev \
+        libseat-dev libinput-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+    curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+    . "$HOME/.cargo/env"
+fi
+
+export CARGO_TARGET_DIR=/tmp/desktop-target
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# Build out of tree, so the checkout keeps its own target/ and the image gets
+# what this run produced.
+tar --exclude=.git --exclude=target -cf - -C "$DESKTOP" . | tar -xf - -C "$WORK"
+(
+    cd "$WORK"
+    cargo build --release --workspace --locked
+)
+
+STAGE=$WORK/stage
+install_bin() { install -Dm755 "$CARGO_TARGET_DIR/release/$1" "$STAGE/usr/bin/$1"; }
+install_bin fellowship-comp
+install_bin fellowship-shell
+install_bin fellowship-msg
+install_bin fellowship-portal
+install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
+install -Dm644 desktop/session/fellowship-session.sh "$STAGE/etc/profile.d/fellowship-session.sh"
+install -Dm440 desktop/session/sudoers "$STAGE/etc/sudoers.d/fellowship-session"
+install -Dm644 desktop/session/systemd/getty-tty1.conf \
+    "$STAGE/etc/systemd/system/getty@tty1.service.d/10-fellowship-console.conf"
+install -Dm644 desktop/session/systemd/fellowship-console.service \
+    "$STAGE/usr/lib/systemd/system/fellowship-console.service"
+install -d "$STAGE/etc/systemd/system/multi-user.target.wants"
+ln -sf /usr/lib/systemd/system/fellowship-console.service \
+    "$STAGE/etc/systemd/system/multi-user.target.wants/fellowship-console.service"
+
+# One place for the themes, read by the Rust desktop at run time, and the
+# tree the dock draws in the middle
+install -d "$STAGE/usr/share/fellowship/themes/wallpapers" "$STAGE/usr/share/fellowship/icons"
+install -m644 "$WORK"/assets/icons/* "$STAGE/usr/share/fellowship/icons/"
+install -m644 themes/*.toml "$STAGE/usr/share/fellowship/themes/"
+install -m644 themes/wallpapers/* "$STAGE/usr/share/fellowship/themes/wallpapers/"
+
+# The colour-scheme backend, selected through XDG_CURRENT_DESKTOP=Fellowship
+PORTAL=$WORK/crates/fellowship-portal/data
+install -d "$STAGE/usr/share/xdg-desktop-portal/portals" "$STAGE/usr/share/dbus-1/services"
+install -m644 "$PORTAL/fellowship.portal" "$STAGE/usr/share/xdg-desktop-portal/portals/"
+install -m644 "$PORTAL/fellowship-portals.conf" "$STAGE/usr/share/xdg-desktop-portal/"
+sed 's|^Exec=.*|Exec=/usr/bin/fellowship-portal|' \
+    "$PORTAL/org.freedesktop.impl.portal.desktop.fellowship.service" \
+    > "$STAGE/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.fellowship.service"
+chmod 644 "$STAGE/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.fellowship.service"
+
+SIZE=$(du -sk "$STAGE" | cut -f1)
+install -d "$STAGE/DEBIAN"
+cat > "$STAGE/DEBIAN/control" <<EOF
+Package: fellowship-desktop
+Version: $VERSION
+Architecture: amd64
+Maintainer: Chris <chris@fellowshipos.invalid>
+Installed-Size: $SIZE
+Section: x11
+Priority: optional
+Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
+ libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
+ libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
+ xdg-desktop-portal, xdg-desktop-portal-gtk
+Description: The FellowshipOS desktop
+ The Wayland compositor, the shell (top bar, dock, launcher), the
+ fellowship-msg control tool and the xdg-desktop-portal Settings backend that
+ answers the colour-scheme signal, with the shared themes and the console
+ session starter.
+EOF
+
+mkdir -p "$ROOT/config/packages.chroot"
+rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb
+dpkg-deb --build --root-owner-group "$STAGE" \
+    "$ROOT/config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"
+
+echo "desktop/build.sh: config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"

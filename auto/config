@@ -18,6 +18,12 @@ case "$EDITION" in
         ENTRY="Install FellowshipOS Multi-purpose (graphical)"
         HOTKEY="m"
         ;;
+    desktop)
+        TITLE="FellowshipOS Desktop"
+        VOLUME="FELLOWSHIPOS_DESKTOP"
+        ENTRY="Install FellowshipOS Desktop (graphical)"
+        HOTKEY="d"
+        ;;
     *)
         echo "auto/config: no such edition: $EDITION" >&2
         exit 1
@@ -53,3 +59,12 @@ lb config noauto \
 # that starts the graphical installer, and it says which image this is.
 sed -e "s|@ENTRY@|$ENTRY|g" -e "s|@EDITION@|$EDITION|g" -e "s|@HOTKEY@|$HOTKEY|g" \
     config/bootloaders/grub-pc/grub.cfg.in > config/bootloaders/grub-pc/grub.cfg
+
+# live-build installs every list in package-lists, so the desktop's extra
+# packages are written for that edition and removed for the others: an
+# earlier desktop build in this checkout must not leave them behind.
+if [ "$EDITION" = desktop ]; then
+    cp desktop/package-list.chroot config/package-lists/desktop.list.chroot
+else
+    rm -f config/package-lists/desktop.list.chroot
+fi
