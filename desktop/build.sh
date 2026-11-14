@@ -79,6 +79,11 @@ install -Dm644 "$NDATA/org.freedesktop.Notifications.service" \
 install -Dm644 "$NDATA/org.fellowship.Notifications.service" \
     "$STAGE/usr/share/dbus-1/services/org.fellowship.Notifications.service"
 
+# WirePlumber's fallback sink, so a machine with no sound hardware (a plain
+# QEMU guest) still has a default sink for the volume keys and media apps.
+install -Dm644 desktop/session/wireplumber/50-fallback-sink.conf \
+    "$STAGE/usr/share/wireplumber/wireplumber.conf.d/50-fellowship-fallback-sink.conf"
+
 # The colour-scheme backend, selected through XDG_CURRENT_DESKTOP=Fellowship
 PORTAL=$WORK/crates/fellowship-portal/data
 install -d "$STAGE/usr/share/xdg-desktop-portal/portals" "$STAGE/usr/share/dbus-1/services"

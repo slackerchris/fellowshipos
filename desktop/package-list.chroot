@@ -26,6 +26,8 @@ xdg-desktop-portal-gtk
 pipewire
 pipewire-pulse
 wireplumber
+# notify-send: the small client every desktop has for scripts and tests.
+libnotify-bin
 
 # Look: fonts, icons and pointer the shell and the apps ask for.
 fonts-dejavu-core
