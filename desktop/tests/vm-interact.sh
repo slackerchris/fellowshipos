@@ -49,7 +49,9 @@ if [ -n "$DEB" ]; then
     echo "sharing $(basename "$DEB") for the guest"
 fi
 
-if [ ! -f "$WORK/vmlinuz" ] || [ ! -f "$WORK/initrd.img" ]; then
+# Re-extract whenever the image is newer than the copy: testing a rebuilt
+# ISO with a cached old kernel proves nothing about the image on disk.
+if [ ! -f "$WORK/vmlinuz" ] || [ ! -f "$WORK/initrd.img" ] || [ "$ISO" -nt "$WORK/vmlinuz" ]; then
     file=$(isoinfo -i "$ISO" -R -f 2>/dev/null | grep -m1 '^/live/vmlinuz-') || true
     [ -n "$file" ] || { echo "no live kernel in $ISO" >&2; exit 1; }
     xorriso -osirrox on -indev "$ISO" -extract "$file" "$WORK/vmlinuz" 2>/dev/null
