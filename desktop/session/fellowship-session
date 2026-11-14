@@ -48,12 +48,24 @@ export XDG_CURRENT_DESKTOP=Fellowship
 export XCURSOR_THEME="${XCURSOR_THEME:-breeze_cursors}"
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 
-# Sound: PipeWire, its Pulse-compatible socket, and WirePlumber belong to
-# the session, not to any one app. They are reached through sockets in
-# XDG_RUNTIME_DIR, so apps find them from the moment they start, and the
-# volume keys and the top bar both speak to the pair through wpctl.
-for daemon in pipewire pipewire-pulse wireplumber; do
-    command -v "$daemon" >/dev/null 2>&1 && "$daemon" >/dev/null 2>&1 &
-done
+# Sound: PipeWire, its Pulse-compatible socket, and WirePlumber. Debian
+# ships these as *user* systemd units that a logind session starts on its
+# own, so the usual case is simply to make sure they are up — asking
+# systemd, which keeps exactly one of each. Backgrounding the binaries
+# ourselves instead would double them against systemd's copies: two
+# WirePlumbers on one PipeWire fight over the default sink and every
+# client of it (wpctl included) hangs. Only if there is no user manager
+# at all do we start them directly, once.
+if systemctl --user enable --now pipewire.socket pipewire.service \
+                  pipewire-pulse.service wireplumber.service 2>/dev/null; then
+    :
+else
+    for daemon in pipewire pipewire-pulse wireplumber; do
+        if command -v "$daemon" >/dev/null 2>&1 &&
+           ! pgrep -u "$(id -u)" -x "$daemon" >/dev/null 2>&1; then
+            "$daemon" >/dev/null 2>&1 &
+        fi
+    done
+fi
 
 exec dbus-run-session -- fellowship-comp --backend drm --mod super "$@"
