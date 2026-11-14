@@ -11,6 +11,7 @@ func TestEachImageSaysWhatItInstalls(t *testing.T) {
 	}{
 		{NAS, "FellowshipOS NAS", "nas", false},
 		{Multi, "FellowshipOS Multi-purpose", "", true},
+		{Desktop, "FellowshipOS Desktop", "", true},
 	} {
 		if got := c.which.Title(); got != c.title {
 			t.Errorf("%s is called %q", c.which, got)
@@ -27,13 +28,14 @@ func TestEachImageSaysWhatItInstalls(t *testing.T) {
 func TestParseAcceptsWhatTheBuildWrites(t *testing.T) {
 	for value, want := range map[string]Edition{
 		"nas": NAS, "NAS": NAS, "": NAS, "multi": Multi, "Multi": Multi, "standard": Multi,
+		"desktop": Desktop, "Desktop": Desktop,
 	} {
 		got, err := Parse(value)
 		if err != nil || got != want {
 			t.Errorf("Parse(%q) gave %q, %v", value, got, err)
 		}
 	}
-	if _, err := Parse("desktop"); err == nil {
+	if _, err := Parse("tablet"); err == nil {
 		t.Error("an image that doesn't exist was accepted")
 	}
 }
@@ -49,8 +51,11 @@ func TestFromCmdline(t *testing.T) {
 	if got := FromCmdline("boot=live components"); got != NAS {
 		t.Errorf("no option read as %q", got)
 	}
+	if got := FromCmdline("boot=live fellowship.installer=desktop"); got != Desktop {
+		t.Errorf("the desktop image read as %q", got)
+	}
 	// A value nobody knows doesn't leave the installer without an image
-	if got := FromCmdline("fellowship.installer=desktop"); got != NAS {
+	if got := FromCmdline("fellowship.installer=tablet"); got != NAS {
 		t.Errorf("an unknown image read as %q", got)
 	}
 	// The remote option is a different key and must not be read as the image
