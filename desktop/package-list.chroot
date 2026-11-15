@@ -30,10 +30,26 @@ wireplumber
 libnotify-bin
 
 # Look: fonts, icons and pointer the shell and the apps ask for.
+# DejaVu alone leaves whole scripts with no glyphs, measured on the seat
+# 2026-11-15: Arabic renders (DejaVu covers it), CJK draws tofu boxes and
+# emoji has no colour glyphs. Noto core is 42 MB across 2 packages and the
+# colour emoji font 11 MB in 1. `fonts-noto-cjk` (91 MB) is the one that
+# fixes the CJK tofu, and that is a size decision rather than an obvious
+# yes.
 fonts-dejavu-core
+fonts-noto-core
+fonts-noto-color-emoji
 adwaita-icon-theme
 breeze-icon-theme
 breeze-cursor-theme
+
+# The folders a desktop is expected to have. Nothing else creates them in
+# this session: Debian's own hook sits in /etc/xdg/autostart, which the
+# compositor deliberately does not read until FellowshipOS ships its own
+# system autostart, so `fellowship-session` runs the updater at login. The
+# screenshot path reads the file this writes, and Nemo's sidebar and
+# Rhythmbox's library assume the folders exist.
+xdg-user-dirs
 
 # The everyday apps chosen in the desktop checklist: GTK 3 where there is a
 # choice, so the session's GTK theme reaches them.

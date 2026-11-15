@@ -68,4 +68,14 @@ else
     done
 fi
 
+# The user folders: Desktop, Downloads, Pictures and friends, with the
+# `user-dirs.dirs` file that says where they are. Nothing else does this
+# here — Debian's own hook lives in `/etc/xdg/autostart`, and the session
+# reads only the person's autostart folder until FellowshipOS ships its own
+# (see `fellowship-apps`), so the system entry never runs. The screenshot
+# path reads that file, and Nemo's sidebar and Rhythmbox's library assume
+# the folders exist. Best-effort: a machine without the package still
+# starts.
+command -v xdg-user-dirs-update >/dev/null 2>&1 && xdg-user-dirs-update
+
 exec dbus-run-session -- fellowship-comp --backend drm --mod super "$@"
