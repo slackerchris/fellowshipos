@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 """Launch every bundled app in the desktop VM and report pass/fail.
 
-    desktop/tests/vm-appcheck.py [output-dir]
+    desktop/tests/vm-appcheck.py [--as-shipped] [output-dir]
 
 Boots the current desktop ISO with vm-interact.sh, waits for the session,
-then for each of the ten everyday apps: spawns it through the compositor
-(so it gets the session's environment, the way the launcher would), polls
-`fellowship-msg windows` for its window, photographs the screen through the
-QEMU monitor, records the window's size and decoration mode, and kills it
-before the next one. Chromium gets a longer allowance and a crop of its own
-title-bar area — that is where the double-bar question is answered.
+hot-swaps in the newest desktop package from the host if one exists (so a
+fix committed after the image was built is what actually gets tested),
+then for each app: spawns it through the compositor (so it gets the
+session's environment, the way the launcher would), polls `fellowship-msg
+windows` for its window, photographs the screen through the QEMU monitor,
+records the window's size and decoration mode, and kills it before the
+next one. Chromium gets a longer allowance and a crop of its own title-bar
+area — that is where the double-bar question is answered.
+
+`--as-shipped` skips the swap: it tests the image exactly as built, which
+is the control half of any change that is not in an image yet — the pair
+of runs is what separates a fix that worked from a change that moved
+something else as well.
+
+Pass means the window appeared *and*, for the apps in DECOR, the frame is
+whosever the desktop promises it is: that column is how the decoration
+rules for the silent clients (GTK 4 drawing its own, foot and mpv taking
+ours) are measured on the seat rather than assumed.
 
 Results are one line per app on stdout, and the pictures land in
-<output-dir>/shots/. Exits non-zero if any app failed to show a window.
+<output-dir>/shots/. Exits non-zero if any app failed to show a window or
+landed in the wrong decoration mode.
 
 FELLOWSHIP_ISO picks the image; the app list and its matchers live in APPS
 below — a matcher is a substring of the lower-cased app_id or title.
@@ -39,15 +52,47 @@ APPS = [
     ("mpv",           "mpv --force-window --idle",                         ["mpv"],                "mpv", 40),
     ("rhythmbox",     "rhythmbox",                                         ["rhythmbox", "music"], "rhythmbox", 90),
     ("chromium",      "chromium --no-first-run --no-default-browser-check", ["chromium", "chrom"], "chromium", 120),
+    # The silent crowd, which the 2026-11-15 control run split in two, both
+    # halves measured on the seat: zenity --info never asks and draws NO
+    # titlebar (its bold "Information" is dialog content), so our frame is
+    # its only one — the 2026-11-14 note mistook that label for a client
+    # headerbar, and the decoration guess built on it stripped the dialog's
+    # only bar. mousepad, nemo, ristretto, atril, engrampa, qalculate and
+    # rhythmbox are silent in the same way but DO draw their own titlebar,
+    # so those seven really are double-barred and stay open: nothing in the
+    # protocol, the surface geometry, or GTK_CSD=0 separates the two halves
+    # (docs/title-bars.md carries the measurements).
+    ("zenity",        "zenity --info --text=appcheck",                     ["zenity", "information"], "zenity", 40),
 ]
+
+# Who draws each window's frame, where that is a promise rather than an
+# observation: True is our Fellowship bar, False is the app's own. Anything
+# not listed opens a window, and its mode is recorded but not asserted —
+# nobody has tested those and this table does not invent expectations.
+DECOR = {
+    "foot": True,        # silent, plain edges: ours
+    "mpv": True,         # silent, plain edges: ours
+    "zenity": True,      # silent, and draws NO titlebar: ours is its only one
+    "chromium": False,   # asks for ClientSide, and is answered in kind
+}
 
 
 def main():
-    out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/fellowship-desktop-appcheck")
+    args = [a for a in sys.argv[1:]]
+    as_shipped = "--as-shipped" in args
+    dirs = [a for a in args if not a.startswith("--")]
+    out = pathlib.Path(dirs[0] if dirs else "/tmp/fellowship-desktop-appcheck")
     shots = out / "shots"
     shots.mkdir(parents=True, exist_ok=True)
     for old in shots.glob("app-*"):
         old.unlink()
+
+    # Stage the package into the share before the VM boots: the 9p export is
+    # fixed at boot, so anything copied in later is invisible to the guest.
+    deb = None if as_shipped else find_fresh_package()
+    if deb:
+        (out / "share" / "pkg").mkdir(parents=True, exist_ok=True)
+        subprocess.run(["cp", "-f", str(deb), str(out / "share" / "pkg" / deb.name)], check=True)
 
     boot = subprocess.run([str(REPO / "desktop" / "tests" / "vm-interact.sh"), str(out)])
     if boot.returncode != 0:
@@ -56,6 +101,7 @@ def main():
     ser = Serial(out / "serial.sock")
     ser.login()
     wait_session(ser)
+    swap_fresh_package(ser, deb)
 
     mon = Monitor(out / "monitor.sock")
     results = []
@@ -64,16 +110,23 @@ def main():
         ser.run(f"fellowship-msg --socket $SOCK spawn {cmd}", "SPAWNED", timeout=30)
         win = poll_window(ser, matchers, budget)
         shot = shot_screen(mon, shots / f"app-{name}.ppm")
+        expect = DECOR.get(name, "?")
+        ok = False
         if win:
             low = (win["app_id"] + " " + win["title"]).lower()
             matched = next((m for m in matchers if m in low), "?")
-            print(f"{name}: PASS app_id={win['app_id']!r} title={win['title']!r} "
-                  f"{win['width']}x{win['height']} decorated={win['decorated']} matched={matched}")
+            wrong = expect != "?" and win["decorated"] != expect
+            ok = not wrong
+            who = "ours" if win["decorated"] else "its own"
+            said = "" if expect == "?" else f" (expected {'ours' if expect else 'its own'})"
+            print(f"{name}: {'PASS' if ok else 'FAIL'} app_id={win['app_id']!r} "
+                  f"title={win['title']!r} {win['width']}x{win['height']} "
+                  f"decorated={win['decorated']} [{who}]{said} matched={matched}")
             if name == "chromium":
                 crop_titlebar(shot, win, shots / "app-chromium-titlebar.png")
         else:
             print(f"{name}: FAIL no window within {budget}s")
-        results.append((name, bool(win)))
+        results.append((name, ok))
         ser.run(f"pkill -x {proc} 2>/dev/null; pkill -f {proc} 2>/dev/null; sleep 2", "KILLED", timeout=30)
 
     print("\n=== summary ===")
@@ -84,6 +137,36 @@ def main():
     subprocess.run(["kill", (out / "vm.pid").read_text().strip()], check=False)
     print(f"\npictures: {shots}")
     sys.exit(1 if failed else 0)
+
+
+def find_fresh_package():
+    """The newest desktop package on the host, wherever the image build
+    left it: a running NAS build parks it in .build/desktop-package."""
+    found = [d for r in (REPO / "config" / "packages.chroot", REPO / ".build" / "desktop-package")
+             for d in r.glob("fellowship-desktop_*.deb")]
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
+
+
+def swap_fresh_package(ser, deb):
+    """Install the package staged into the share, if there is one, and
+    bring the session back on those binaries. Without this the sweep can
+    only test what was baked into the ISO, which for a fix committed after
+    the image was built is the wrong code — the 2026-11-15 decoration
+    detection is exactly that case. The restart kills the compositor *and*
+    its parent dbus-run-session: a leftover wrapper holds the session lock
+    and the new session half-starts behind it."""
+    if deb is None:
+        print("\n=== sweeping the image exactly as shipped ===")
+        return
+    print(f"\n=== swapping in {deb.name} and restarting the session ===")
+    ser.run("sudo -n true 2>/dev/null || { echo live | sudo -S -v; }", "SUDO_OK", timeout=60)
+    ser.run("mountpoint -q /mnt || sudo mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt",
+            "MOUNTED", timeout=60)
+    ser.run(f"sudo dpkg -i /mnt/pkg/{deb.name} >/tmp/dpkg.log 2>&1; tail -1 /tmp/dpkg.log",
+            "DPKG_DONE", timeout=240)
+    ser.run("pkill -x fellowship-comp; pkill -f dbus-run-session; sleep 2; "
+            "sudo systemctl restart getty@tty1.service", "SWAPPED", timeout=60)
+    wait_session(ser)
 
 
 def wait_session(ser):

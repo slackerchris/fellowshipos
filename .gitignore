@@ -1,4 +1,5 @@
 build.log
+desktop-package-build.log
 chroot.*
 binary.*
 live-image-*
