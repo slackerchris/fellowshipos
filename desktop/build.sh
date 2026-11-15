@@ -79,6 +79,12 @@ install -Dm644 "$NDATA/org.freedesktop.Notifications.service" \
 install -Dm644 "$NDATA/org.fellowship.Notifications.service" \
     "$STAGE/usr/share/dbus-1/services/org.fellowship.Notifications.service"
 
+# The decoration rules: the apps that draw their own title bar and never tell
+# the compositor, measured on this same seat. Read at session start; a person
+# may override any line in ~/.config/fellowship/decorations.
+install -Dm644 "$WORK/crates/fellowship-comp/data/decorations" \
+    "$STAGE/usr/share/fellowship/decorations"
+
 # WirePlumber's fallback sink, so a machine with no sound hardware (a plain
 # QEMU guest) still has a default sink for the volume keys and media apps.
 install -Dm644 desktop/session/wireplumber/50-fallback-sink.conf \

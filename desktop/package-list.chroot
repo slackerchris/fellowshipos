@@ -33,12 +33,16 @@ libnotify-bin
 # DejaVu alone leaves whole scripts with no glyphs, measured on the seat
 # 2026-11-15: Arabic renders (DejaVu covers it), CJK draws tofu boxes and
 # emoji has no colour glyphs. Noto core is 42 MB across 2 packages and the
-# colour emoji font 11 MB in 1. `fonts-noto-cjk` (91 MB) is the one that
-# fixes the CJK tofu, and that is a size decision rather than an obvious
-# yes.
+# colour emoji font 11 MB in 1.
+# `fonts-noto-cjk` is 54 MB downloaded and 89 MB installed — Chris's rule was
+# that the installed footprint is the number that counts, and 54 MB is not
+# 91 MB added to every install, so it is in. No image size budget is written
+# down anywhere in either repository; the desktop image was 1.39 GB before
+# this and lands near 1.45 GB, which fits a 4 GB stick with room to spare.
 fonts-dejavu-core
 fonts-noto-core
 fonts-noto-color-emoji
+fonts-noto-cjk
 adwaita-icon-theme
 breeze-icon-theme
 breeze-cursor-theme

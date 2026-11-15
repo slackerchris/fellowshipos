@@ -69,11 +69,24 @@ APPS = [
 # observation: True is our Fellowship bar, False is the app's own. Anything
 # not listed opens a window, and its mode is recorded but not asserted —
 # nobody has tested those and this table does not invent expectations.
+#
+# The seven `False` rows for silent GTK clients are promises the shipped
+# rules file makes (crates/fellowship-comp/data/decorations), each measured
+# on this seat before it was written down: those apps draw their own titlebar
+# and never ask, so a second bar above them is the defect and one bar is the
+# requirement. zenity is the opposite case and stays ours.
 DECOR = {
-    "foot": True,        # silent, plain edges: ours
-    "mpv": True,         # silent, plain edges: ours
-    "zenity": True,      # silent, and draws NO titlebar: ours is its only one
-    "chromium": False,   # asks for ClientSide, and is answered in kind
+    "foot": True,          # silent, plain edges: ours
+    "mpv": True,           # silent, plain edges: ours
+    "zenity": True,        # silent, draws NO titlebar of its own: ours is the only one
+    "chromium": False,     # asks for ClientSide, and is answered in kind
+    "mousepad": False,     # silent, draws its own titlebar: named in the rules
+    "nemo": False,
+    "ristretto": False,
+    "atril": False,
+    "engrampa": False,
+    "qalculate": False,
+    "rhythmbox": False,
 }
 
 
