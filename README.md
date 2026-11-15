@@ -196,7 +196,8 @@ For disk and reinstall testing, use the [QEMU/KVM VM harness](nas/tests/vm/vm.sh
 | [installer/](installer/) | Graphical NAS installer in Go and TypeScript |
 | [nas/packages/](nas/packages/) | NAS packages, Python CLI, Go services, browser desktop, and scheduled jobs |
 | [nas/tests/](nas/tests/) | Python unit tests and VM harness |
-| [docs/](docs/) | [Architecture plan](docs/fellowship-nas-plan.md), [project overview](docs/fellowship-nas-overview.md) of what is built and verified, [next steps](docs/fellowship-nas-next-steps.md), [Files plan](docs/fellowship-nas-files-plan.md), [November 9 review notes](docs/fellowship-nas-changes.md) and [November 11 VM walkthrough](docs/fellowship-vm-walkthrough-2026-11-11.md) |
+| [PROJECTS.md](PROJECTS.md) | The three products, which folders belong to each, and the branch, commit and push rules |
+| [docs/](docs/) | [Document index](docs/README.md), [architecture plan](docs/fellowship-nas-plan.md), [project overview](docs/fellowship-nas-overview.md) of what is built and verified, [next steps](docs/fellowship-nas-next-steps.md), [Files plan](docs/fellowship-nas-files-plan.md), [November 9 review notes](docs/fellowship-nas-changes.md) and [November 11 VM walkthrough](docs/fellowship-vm-walkthrough-2026-11-11.md) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, and what is waiting to be released |
 
 ## Troubleshooting
