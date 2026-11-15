@@ -3257,9 +3257,33 @@ class SftpViews(unittest.TestCase):
         home = os.path.join(self.root, "view", "kim")
         self.assertEqual(os.stat(home).st_mode & 0o777, 0o755)
         self.assertIn(("mount", "--bind", self.paths["media"], os.path.join(home, "media")), self.calls)
-        self.assertIn(("mount", "--bind", self.paths["private"], os.path.join(home, "private")), self.calls)
+        # kim may only read private, so it is mounted read-only
+        self.assertIn(("mount", "--bind", "-o", "ro", self.paths["private"], os.path.join(home, "private")),
+                      self.calls)
         # The share that isn't shared over SFTP is nowhere in the view
         self.assertFalse(os.path.exists(os.path.join(home, "docs")))
+
+    def test_a_share_whose_access_changes_is_mounted_again_to_match(self):
+        home = os.path.join(self.root, "view", "kim")
+        point = os.path.join(home, "private")
+        os.makedirs(point)
+        # Mounted read-write from before kim's access became read-only
+        with mock.patch.object(self.sftp, "mounts", lambda: {point}), \
+                mock.patch.object(self.sftp, "read_only_mounts", lambda: set()), \
+                mock.patch.object(self.sftp, "shows", lambda point, path: True):
+            self.sftp.sync_view("kim", [one for one in self.sftp.view("kim") if one["share"] == "private"])
+        self.assertIn(("umount", point), self.calls)
+        self.assertIn(("mount", "--bind", "-o", "ro", self.paths["private"], point), self.calls)
+
+    def test_a_share_already_mounted_as_it_should_be_is_left_alone(self):
+        home = os.path.join(self.root, "view", "kim")
+        point = os.path.join(home, "private")
+        os.makedirs(point)
+        with mock.patch.object(self.sftp, "mounts", lambda: {point}), \
+                mock.patch.object(self.sftp, "read_only_mounts", lambda: {point}), \
+                mock.patch.object(self.sftp, "shows", lambda point, path: True):
+            self.sftp.sync_view("kim", [one for one in self.sftp.view("kim") if one["share"] == "private"])
+        self.assertFalse([c for c in self.calls if c[0] in ("mount", "umount")])
 
     def test_a_pool_that_is_not_mounted_shows_nothing(self):
         self.shares[0]["path"] = os.path.join(self.root, "gone")

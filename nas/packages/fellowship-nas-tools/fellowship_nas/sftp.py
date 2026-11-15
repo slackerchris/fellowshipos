@@ -97,6 +97,22 @@ def mounts():
     return found
 
 
+def read_only_mounts():
+    """The mount points the kernel has mounted read-only, from the mount's own
+    options (the sixth field of mountinfo), which is what a bind mount made
+    read-only changes."""
+    found = set()
+    try:
+        with open(MOUNTINFO) as file:
+            for line in file:
+                fields = line.split()
+                if len(fields) > 5 and "ro" in fields[5].split(","):
+                    found.add(os.path.normpath(unescaped(fields[4])))
+    except OSError:
+        pass
+    return found
+
+
 def unescaped(path):
     """A mount point as the kernel writes it, with spaces and the rest put back."""
     for written, plain in (("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\")):
@@ -160,6 +176,7 @@ def sync_view(user, wanted):
     os.chmod(home, 0o755)
     names = {one["share"] for one in wanted}
     here = mounts()
+    frozen = read_only_mounts()
     problems = []
     for entry in sorted(os.listdir(home)):
         if entry not in names:
@@ -170,14 +187,20 @@ def sync_view(user, wanted):
             # Its pool isn't mounted, so there is nothing to show
             continue
         point = os.path.join(home, one["share"])
+        # Someone who may only read a share gets it mounted read-only, so no
+        # upload, overwrite, rename or delete gets through even where a folder's
+        # own permissions are looser than the share's
+        read_only = one["level"] != "write"
         shown = os.path.normpath(point) in here
-        if shown and shows(point, one["path"]):
+        if shown and shows(point, one["path"]) and (os.path.normpath(point) in frozen) == read_only:
             continue
         if shown and not unmount(point):
             problems.append(point)
             continue
         os.makedirs(point, mode=0o755, exist_ok=True)
-        if run("mount", "--bind", one["path"], point, check=False).returncode != 0:
+        bind = ("mount", "--bind", "-o", "ro", one["path"], point) if read_only else \
+            ("mount", "--bind", one["path"], point)
+        if run(*bind, check=False).returncode != 0:
             # An empty folder in its place would look like a share they can't
             # read, so it goes: a share that failed to mount is not shown at all
             try:
