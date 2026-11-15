@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import "./installer.css";
 import {
     Disk, GiB, Hello, Layout, Machine, Progress, Settings, hello, install, layoutFor, machine, pair, progress, reboot,
-    shortName, size,
+    recoveryKey, shortName, size,
 } from "./api";
 import { suggestUser } from "./user";
 
@@ -232,7 +232,8 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                 <Field label="Your name">
                     <input value={settings.full_name} autoComplete="name" onInput={event => setName(event.currentTarget.value)} />
                 </Field>
-                <Field label="User name" hint={info.edition === "nas" ? "For logging in to the desktop and over SSH" : "For logging in here and over SSH"}>
+                <Field label="User name" hint={info.separated ? "For the NAS desktop and shares" : info.edition === "nas"
+                    ? "For logging in to the desktop and over SSH" : "For logging in here and over SSH"}>
                     <input value={settings.user} autoComplete="username" autoCapitalize="none" spellcheck={false}
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
                 </Field>
@@ -257,14 +258,97 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
     );
 }
 
-function aboutReady(settings: Settings, again: string) {
+function aboutReady(settings: Settings, again: string, separated: boolean, rootAgain: string) {
     return HOST.test(settings.hostname) && USER.test(settings.user) && settings.password.length >= 8
-        && again === settings.password && !!settings.timezone;
+        && again === settings.password && !!settings.timezone
+        && (!separated || rootReady(settings, rootAgain));
 }
 
-function Confirm({ disk, layout, settings, edition, onInstall }: { disk: Disk; layout: Layout; settings: Settings; edition?: string; onInstall: (typed: string) => Promise<void> }) {
+function rootReady(settings: Settings, rootAgain: string) {
+    const root = settings.root_password || "";
+    return root.length >= 8 && root === rootAgain && root !== settings.password;
+}
+
+/** Root's own password, on the NAS image: the system administrator, apart from
+    the NAS admin, who has no shell. */
+function RootPassword({ settings, rootAgain, onChange, onRootAgain }: {
+    settings: Settings; rootAgain: string; onChange: (settings: Settings) => void; onRootAgain: (again: string) => void;
+}) {
+    const root = settings.root_password || "";
+    return (
+        <div class="stack">
+            <p class="small"><strong>Root</strong> looks after the system itself: updates of last resort, repairs, and
+                getting the NAS admin back in. It logs in only here, at this machine's screen. Give it its own
+                password, not the one above.</p>
+            <div class="grid-2">
+                <Field label="Root's password" hint="At least 8 characters">
+                    <input type="password" value={root} autoComplete="new-password"
+                           onInput={event => onChange({ ...settings, root_password: event.currentTarget.value })} />
+                </Field>
+                <Field label="Root's password again">
+                    <input type="password" value={rootAgain} autoComplete="new-password"
+                           onInput={event => onRootAgain(event.currentTarget.value)} />
+                </Field>
+            </div>
+            {root && root.length < 8 && <p class="small warning-text">At least 8 characters.</p>}
+            {root && root === settings.password && <p class="small warning-text">Root's password must be different from yours.</p>}
+            {rootAgain && rootAgain !== root && <p class="small">The passwords don't match.</p>}
+        </div>
+    );
+}
+
+/** The recovery key, shown once to be saved: it is the one way back in if both
+    root's password and the NAS admin's are lost. */
+function RecoveryKey({ local, typed, onTyped, keyText }: {
+    local: boolean; typed: string; onTyped: (typed: string) => void; keyText: string;
+}) {
+    const save = () => {
+        const blob = new Blob([`FellowshipOS NAS recovery key\n\n${keyText}\n\nKeep this somewhere other than the NAS. `
+            + `At the boot menu, FellowshipOS recovery asks for it.\n`], { type: "text/plain" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "fellowship-recovery-key.txt";
+        link.click();
+        URL.revokeObjectURL(link.href);
+    };
+    return (
+        <div class="stack recovery-key">
+            <p class="small"><strong>Your recovery key.</strong> If root's password and yours are both lost, FellowshipOS
+                recovery in the boot menu asks for this, and nothing else gets you back in. It is shown only now.</p>
+            <p class="mono recovery-key-text">{keyText || "…"}</p>
+            {local
+                ? <p class="small muted">Write it down or photograph it, and keep it away from the NAS.</p>
+                : <div class="row"><button class="button" type="button" onClick={save}>Save as text file</button></div>}
+            <Field label="Type its last two groups" hint="To show it is saved somewhere">
+                <input value={typed} autoComplete="off" spellcheck={false}
+                       onInput={event => onTyped(event.currentTarget.value)} />
+            </Field>
+        </div>
+    );
+}
+
+function keyEnding(text: string) {
+    return text.split("-").slice(-2).join("").toUpperCase();
+}
+
+function typedEnding(text: string) {
+    return text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function Confirm({ disk, layout, settings, edition, separated, local, onInstall }: {
+    disk: Disk; layout: Layout; settings: Settings; edition?: string; separated: boolean; local: boolean;
+    onInstall: (typed: string, recoveryConfirm: string) => Promise<void>;
+}) {
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
+    const [keyText, setKeyText] = useState("");
+    const [typed, setTyped] = useState("");
+    useEffect(() => {
+        if (separated) {
+            recoveryKey().then(found => setKeyText(found.key), failure => setError((failure as Error).message));
+        }
+    }, [separated]);
+    const keySaved = !separated || (!!keyText && typedEnding(typed) === keyEnding(keyText));
     return (
         <form class="stack" onSubmit={async event => {
             event.preventDefault();
@@ -273,7 +357,7 @@ function Confirm({ disk, layout, settings, edition, onInstall }: { disk: Disk; l
             try {
                 // The server asks for the phrase naming the disk, so the request
                 // itself says which one it erases
-                await onInstall(`erase ${shortName(disk.path)}`);
+                await onInstall(`erase ${shortName(disk.path)}`, typed);
             } catch (failure) {
                 setError((failure as Error).message);
                 setBusy(false);
@@ -287,14 +371,17 @@ function Confirm({ disk, layout, settings, edition, onInstall }: { disk: Disk; l
                     <tr><th>Layout</th><td>System {size(layout.system)}{layout.reserve ? `, room to grow ${size(layout.reserve)}` : ""}, swap {size(layout.swap)}
                         {layout.data ? `, data ${size(layout.data)} left empty` : ""}</td></tr>
                     <tr><th>Name</th><td>{settings.hostname}</td></tr>
-                    <tr><th>Account</th><td>{settings.user}{settings.full_name ? ` (${settings.full_name})` : ""}, administrator</td></tr>
+                    <tr><th>Account</th><td>{settings.user}{settings.full_name ? ` (${settings.full_name})` : ""}, {separated
+                        ? "NAS admin, for the desktop and shares" : "administrator"}</td></tr>
+                    {separated && <tr><th>Root</th><td>its own password, at this machine's screen</td></tr>}
                     <tr><th>Time zone</th><td>{settings.timezone}</td></tr>
                 </tbody>
             </table>
             {edition === "nas" && <p class="muted small">Everything the NAS needs is on this disk once it's installed:
                 the first start needs no network and asks nothing.</p>}
+            {separated && <RecoveryKey local={local} typed={typed} onTyped={setTyped} keyText={keyText} />}
             {error && <Notice kind="error">{error}</Notice>}
-            <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
+            <div class="row"><button class="button button-danger" type="submit" disabled={busy || !keySaved}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
         </form>
     );
@@ -360,6 +447,7 @@ function Installer({ greeting }: { greeting: Hello }) {
     const [settings, setSettings] = useState<Settings>({ disk: "", system: 0, hostname: "fellowship", timezone: "UTC",
                                                           user: "", full_name: "", password: "" });
     const [again, setAgain] = useState("");
+    const [rootAgain, setRootAgain] = useState("");
     const [state, setState] = useState<Progress | null>(null);
 
     const load = () => machine().then(found => {
@@ -411,13 +499,13 @@ function Installer({ greeting }: { greeting: Hello }) {
         return <Frame><p class="muted">Looking at this machine…</p></Frame>;
     }
 
-    const canInstall = !info.blocked && !!disk && !!layout && aboutReady(settings, again);
+    const canInstall = !info.blocked && !!disk && !!layout && aboutReady(settings, again, !!info?.separated, rootAgain);
     // One way on from each step, named after where it goes. The rail above is the
     // rest of the navigation: any step, in any order, and back without a button.
-    const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again);
+    const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again, !!info?.separated, rootAgain);
     // A step reads as answered only once everything before it is too, so the rail
     // shows how far along the install is rather than which boxes happen to be set
-    const answers = [!!disk, !!layout, aboutReady(settings, again), canInstall];
+    const answers = [!!disk, !!layout, aboutReady(settings, again, !!info?.separated, rootAgain), canInstall];
     const answered = answers.map((_, index) => answers.slice(0, index + 1).every(Boolean));
     return (
         <Frame step={step} onStep={setStep} answered={answered}
@@ -441,11 +529,16 @@ function Installer({ greeting }: { greeting: Hello }) {
                 </div>
             )}
             {step === 2 && (
-                <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
+                <div class="stack">
+                    <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
+                    {info.separated && <RootPassword settings={settings} rootAgain={rootAgain} onChange={setSettings}
+                                                     onRootAgain={setRootAgain} />}
+                </div>
             )}
             {step === 3 && canInstall && disk && layout && (
-                <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition} onInstall={async typed => {
-                    await install({ ...settings, disk: disk.path, system: layout.system }, typed);
+                <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition}
+                         separated={!!info.separated} local={!!greeting.local} onInstall={async (typed, recoveryConfirm) => {
+                    await install({ ...settings, disk: disk.path, system: layout.system }, typed, recoveryConfirm);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />
             )}
@@ -454,7 +547,7 @@ function Installer({ greeting }: { greeting: Hello }) {
                     <Notice kind="warning">Not everything is settled yet.</Notice>
                     <div class="row">
                         {!disk && <button class="button" type="button" onClick={() => setStep(0)}>Choose a disk</button>}
-                        {!aboutReady(settings, again) && <button class="button" type="button" onClick={() => setStep(2)}>Finish your account</button>}
+                        {!aboutReady(settings, again, !!info?.separated, rootAgain) && <button class="button" type="button" onClick={() => setStep(2)}>Finish your account</button>}
                     </div>
                 </div>
             )}

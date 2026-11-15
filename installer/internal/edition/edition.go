@@ -100,9 +100,17 @@ func (e Edition) WholeDisk() bool {
 }
 
 // NeedsSecureBootOff is whether the image can only work with Secure Boot off.
-// The NAS keeps its pools on ZFS, whose kernel module is built on the machine
-// itself on first boot, and Secure Boot refuses to load a module built there.
+// The NAS keeps its pools on ZFS, whose kernel module is built by DKMS and
+// isn't signed for Secure Boot, which refuses to load it.
 func (e Edition) NeedsSecureBootOff() bool {
+	return e == NAS
+}
+
+// Separated is whether the image keeps the NAS's people apart from the system
+// (docs/fellowship-nas-account-separation.md): root, with its own password, is
+// the system administrator; the account the installer asks for is a NAS admin
+// with no Linux login; and a recovery key guards recovery.
+func (e Edition) Separated() bool {
 	return e == NAS
 }
 

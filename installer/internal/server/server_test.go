@@ -42,6 +42,9 @@ func setupEdition(which edition.Edition) (*Server, *fakeMachine) {
 		},
 		Reboot: func() error { return nil },
 	}, fstest.MapFS{"index.html": {Data: []byte("installer")}}, which)
+	if s.recoveryKey != "" {
+		s.recoveryKey = testKey
+	}
 	return s, f
 }
 
@@ -170,7 +173,13 @@ func TestOtherSitesAreRefused(t *testing.T) {
 	}
 }
 
-const good = `"hostname":"vault","timezone":"UTC","user":"chris","full_name":"Chris","password":"correct horse","system":34359738368`
+// A separated NAS also needs root's own password and the recovery key's last two
+// groups typed back; the multi-purpose image ignores both
+const good = `"hostname":"vault","timezone":"UTC","user":"chris","full_name":"Chris","password":"correct horse","system":34359738368,` +
+	`"root_password":"root's own one","recovery_confirm":"ggggg-hhhhh"`
+
+// testKey stands in for the key the server makes, so tests can type it back
+const testKey = "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH"
 
 func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 	s, f := setup()
@@ -296,5 +305,52 @@ func TestTheNASWontInstallWithSecureBootOn(t *testing.T) {
 		if !c.blocked && response.Code != 202 {
 			t.Errorf("%s: install answered %d %s", c.which, response.Code, response.Body)
 		}
+	}
+}
+
+func TestTheRecoveryKeyIsShownAndTypedBack(t *testing.T) {
+	s, f := setup()
+	got := send(s, req{method: "GET", path: "/api/recovery-key", remote: screen})
+	if got.Code != 200 || !strings.Contains(got.Body.String(), testKey) || got.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("key: %d %s", got.Code, got.Body)
+	}
+	// Another computer that hasn't paired doesn't get it
+	if code := send(s, req{method: "GET", path: "/api/recovery-key", remote: "192.168.1.30:5000", secure: true}).Code; code == 200 {
+		t.Fatal("an unpaired browser got the recovery key")
+	}
+	for _, c := range []struct{ body, want string }{
+		{strings.Replace(good, `"recovery_confirm":"ggggg-hhhhh"`, `"recovery_confirm":"FFFFF-GGGGG"`, 1), "last two groups"},
+		{strings.Replace(good, `"recovery_confirm":"ggggg-hhhhh"`, `"recovery_confirm":""`, 1), "last two groups"},
+		{strings.Replace(good, `"root_password":"root's own one"`, `"root_password":"correct horse"`, 1), "different"},
+	} {
+		response := send(s, req{method: "POST", path: "/api/install", remote: screen,
+			body: `{"disk":"/dev/sda",` + c.body + `,"confirm":"erase sda"}`})
+		if response.Code != 422 || !strings.Contains(response.Body.String(), c.want) {
+			t.Errorf("%s: %d %s", c.want, response.Code, response.Body)
+		}
+	}
+	response := send(s, req{method: "POST", path: "/api/install", remote: screen,
+		body: `{"disk":"/dev/sda",` + good + `,"confirm":"erase sda"}`})
+	if response.Code != 202 {
+		t.Fatalf("install: %d %s", response.Code, response.Body)
+	}
+	select {
+	case settings := <-f.installed:
+		// The page never sends the key; the server puts in the one it made
+		if settings.RecoveryKey != testKey || settings.RootPassword != "root's own one" {
+			t.Fatalf("installed %+v", settings)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the install never started")
+	}
+}
+
+func TestEachRunMakesItsOwnKey(t *testing.T) {
+	a, b := NewRecoveryKey(), NewRecoveryKey()
+	if a == b || len(a) != 47 || strings.ContainsAny(a, "ILOU01") {
+		t.Fatalf("keys %q %q", a, b)
+	}
+	if strings.ToUpper(a) != a || strings.Count(a, "-") != 7 {
+		t.Fatalf("key shape %q", a)
 	}
 }

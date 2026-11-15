@@ -56,7 +56,8 @@ func (f *fake) Run(input string, name string, args ...string) (string, error) {
 
 func settings(disk string) Settings {
 	return Settings{Disk: disk, System: 32 * layout.GiB, Hostname: "vault", Timezone: "Europe/London",
-		User: "chris", FullName: "Chris", Password: "correct horse", Role: "nas"}
+		User: "chris", FullName: "Chris", Password: "correct horse", Role: "nas",
+		RootPassword: "root's own one", RecoveryKey: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH"}
 }
 
 func setup(t *testing.T, size int64) (*fake, *Engine, *[]string) {
@@ -161,19 +162,73 @@ func TestSystemIsConfigured(t *testing.T) {
 	if !strings.Contains(purge, "fellowship-installer") || strings.Contains(purge, " cog") {
 		t.Errorf("purge: %s", purge)
 	}
-	useradd := find(f, "chroot "+e.Target+" env DEBIAN_FRONTEND=noninteractive LC_ALL=C useradd")[0].String()
-	if !strings.HasSuffix(useradd, "-G sudo,video chris") {
-		t.Errorf("useradd: %s", useradd)
+	// A separated NAS: root gets its own password, and the account asked for is
+	// the first NAS admin, made by fnas in the NAS's store, with no Linux login
+	in := "chroot " + e.Target + " env DEBIAN_FRONTEND=noninteractive LC_ALL=C "
+	if found := find(f, in+"useradd"); len(found) != 0 {
+		t.Errorf("the installer made a Linux account itself: %+v", found)
 	}
-	if chpasswd := find(f, "chroot "+e.Target+" env DEBIAN_FRONTEND=noninteractive LC_ALL=C chpasswd"); len(chpasswd) != 1 ||
-		chpasswd[0].input != "chris:correct horse\n" {
+	if chpasswd := find(f, in+"chpasswd"); len(chpasswd) != 1 || chpasswd[0].input != "root:root's own one\n" {
 		t.Errorf("chpasswd: %+v", chpasswd)
+	}
+	if len(find(f, in+"fnas accounts init")) != 1 {
+		t.Error("the NAS's store wasn't made")
+	}
+	if made := find(f, in+"fnas user create chris --admin --password-stdin --full-name Chris"); len(made) != 1 ||
+		made[0].input != "correct horse\n" {
+		t.Errorf("the NAS admin: %+v", made)
+	}
+	if key := find(f, in+"fellowship-recovery-key set"); len(key) != 1 ||
+		key[0].input != "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH\n" {
+		t.Errorf("the recovery key: %+v", key)
 	}
 	if len(find(f, "chroot "+e.Target+" env DEBIAN_FRONTEND=noninteractive LC_ALL=C grub-install")) != 2 {
 		t.Error("the boot loader and its fallback copy weren't both installed")
 	}
 	if last := f.calls[len(f.calls)-1].String(); last != "sync" {
 		t.Errorf("last command %q", last)
+	}
+}
+
+// The multi-purpose image isn't separated: its first account is a Linux login
+// with sudo, as before
+func TestTheMultiImageMakesASudoAccount(t *testing.T) {
+	f, e, _ := setup(t, 500*layout.GiB)
+	e.WholeDisk = true
+	multi := settings("/dev/sdb")
+	multi.Role, multi.RootPassword, multi.RecoveryKey = "", "", ""
+	if err := e.Install(multi); err != nil {
+		t.Fatal(err)
+	}
+	in := "chroot " + e.Target + " env DEBIAN_FRONTEND=noninteractive LC_ALL=C "
+	useradd := find(f, in+"useradd")[0].String()
+	if !strings.HasSuffix(useradd, "-G sudo,video chris") {
+		t.Errorf("useradd: %s", useradd)
+	}
+	if chpasswd := find(f, in+"chpasswd"); len(chpasswd) != 1 || chpasswd[0].input != "chris:correct horse\n" {
+		t.Errorf("chpasswd: %+v", chpasswd)
+	}
+	if len(find(f, in+"fnas")) != 0 || len(find(f, in+"fellowship-recovery-key")) != 0 {
+		t.Error("the multi-purpose image was separated")
+	}
+}
+
+// A separated NAS refuses root's password when it is missing or the same as the NAS admin's
+func TestRootNeedsItsOwnPassword(t *testing.T) {
+	_, e, _ := setup(t, 500*layout.GiB)
+	for _, c := range []struct{ root, want string }{
+		{"", "at least 8"}, {"short", "at least 8"}, {"correct horse", "different"},
+	} {
+		s := settings("/dev/sdb")
+		s.RootPassword = c.root
+		if err := e.Install(s); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("root %q: %v", c.root, err)
+		}
+	}
+	s := settings("/dev/sdb")
+	s.RecoveryKey = ""
+	if err := e.Install(s); err == nil || !strings.Contains(err.Error(), "recovery key") {
+		t.Errorf("no recovery key: %v", err)
 	}
 }
 

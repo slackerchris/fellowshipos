@@ -78,6 +78,10 @@ type Server struct {
 	// the page tells the person at the screen so they can pass it on
 	RemoteURLs []string
 
+	// The recovery key for a separated NAS, made once per run of the installer
+	// and shown only to the page that installs
+	recoveryKey string
+
 	mu       sync.Mutex
 	code     string
 	attempts int
@@ -102,8 +106,50 @@ func randomToken() (string, error) {
 }
 
 func New(machine Machine, static fs.FS, which edition.Edition) *Server {
-	return &Server{machine: machine, static: static, edition: which, code: randomCode(), paired: map[string]bool{},
+	s := &Server{machine: machine, static: static, edition: which, code: randomCode(), paired: map[string]bool{},
 		state: progress{Phase: "choose", Steps: engine.Steps, Step: -1}}
+	if which.Separated() {
+		s.recoveryKey = NewRecoveryKey()
+	}
+	return s
+}
+
+// The recovery key's letters: 30 that can't be mistaken for each other when
+// written down (no I, L, O, U, 0 or 1), as fellowship-recovery-key reads them
+const recoveryAlphabet = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
+
+// NewRecoveryKey makes a key: eight groups of five, about 196 bits
+func NewRecoveryKey() string {
+	var groups []string
+	for range 8 {
+		group := make([]byte, 5)
+		for i := range group {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(recoveryAlphabet))))
+			if err != nil {
+				panic(err)
+			}
+			group[i] = recoveryAlphabet[n.Int64()]
+		}
+		groups = append(groups, string(group))
+	}
+	return strings.Join(groups, "-")
+}
+
+// keyEnding is what the page has someone type back: the key's last two groups,
+// read however they were typed
+func keyEnding(key string) string {
+	groups := strings.Split(key, "-")
+	return strings.Join(groups[len(groups)-2:], "")
+}
+
+func typedEnding(typed string) string {
+	var kept []rune
+	for _, r := range strings.ToUpper(typed) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			kept = append(kept, r)
+		}
+	}
+	return string(kept)
 }
 
 // Code is the current pairing code, for the console
@@ -207,6 +253,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/hello", s.hello)
 	mux.HandleFunc("POST /api/pair", s.pair)
 	mux.HandleFunc("GET /api/machine", s.guard(s.machineInfo))
+	mux.HandleFunc("GET /api/recovery-key", s.guard(s.recoveryKeyInfo))
 	mux.HandleFunc("POST /api/layout", s.guard(s.layout))
 	mux.HandleFunc("POST /api/install", s.guard(s.install))
 	mux.HandleFunc("GET /api/progress", s.guard(s.progress))
@@ -287,6 +334,17 @@ type diskChoice struct {
 	Layout *layout.Layout `json:"layout,omitempty"`
 }
 
+// recoveryKeyInfo hands the recovery key to the page that installs, which shows
+// it once to be saved; only a separated NAS has one
+func (s *Server) recoveryKeyInfo(w http.ResponseWriter, r *http.Request) {
+	if s.recoveryKey == "" {
+		fail(w, http.StatusNotFound, "This image has no recovery key.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{"key": s.recoveryKey})
+}
+
 func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 	found, err := s.machine.Disks()
 	if err != nil {
@@ -314,7 +372,7 @@ func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 		"subtitle": s.edition.Subtitle(), "whole_disk": s.edition.WholeDisk(),
 		"disks": choices, "timezones": zones, "installed": s.machine.Installed,
 		"memory": s.machine.Memory, "min_system": layout.MinSystem(s.machine.Installed),
-		"split_from": layout.SplitFrom, "blocked": s.blocked(),
+		"split_from": layout.SplitFrom, "blocked": s.blocked(), "separated": s.edition.Separated(),
 	})
 }
 
@@ -352,6 +410,8 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		engine.Settings
 		Confirm string `json:"confirm"`
+		// The recovery key's last two groups, typed back to show it was saved
+		RecoveryConfirm string `json:"recovery_confirm"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -383,6 +443,18 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Role = s.edition.Role()
+	if s.edition.Separated() {
+		if err := body.Settings.CheckSeparated(); err != nil {
+			fail(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		if typedEnding(body.RecoveryConfirm) != keyEnding(s.recoveryKey) {
+			fail(w, http.StatusUnprocessableEntity,
+				"Type the last two groups of your recovery key, to show it is saved somewhere other than this machine.")
+			return
+		}
+		body.RecoveryKey = s.recoveryKey
+	}
 
 	s.mu.Lock()
 	if s.state.Phase == "installing" || s.state.Phase == "done" {

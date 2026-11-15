@@ -109,7 +109,15 @@ Silverwater and plum in Highwatch?
 **Seen:** in the noVNC console during the install, black blocks appeared on
 the wallpaper where the pointer had been, on hover and click.
 
-**Status:** not reproduced here, through noVNC, with the same CPU type, machine
+**Status:** reproduced locally on 2026-11-15, during a phase 4 install test.
+- Black bars and blocks showed in QEMU's own screen captures (`screendump`):
+  over the recovery key while typing, and on the wallpaper while the install
+  copied files.
+- So the black is in what the guest draws (cage and cog on standard VGA), not
+  something noVNC adds.
+- It shows under load, which matches Chris's screenshot, taken mid-install.
+
+Earlier it hadn't reproduced, through noVNC, with the same CPU type, machine
 type and standard VGA. Redraws in this setup are slow: the page repaints
 about 5 times a second while the pointer moves, all in software. Hover
 highlights lag behind the pointer, but no black blocks were seen. The

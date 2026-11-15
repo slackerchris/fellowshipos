@@ -30,6 +30,10 @@ type Settings struct {
 	FullName string `json:"full_name"`
 	Password string `json:"password"`
 	Role     string `json:"role"`
+	// On a separated NAS (the NAS image): root's own password, and the recovery
+	// key the installer made and showed, which the page never sends back
+	RootPassword string `json:"root_password"`
+	RecoveryKey  string `json:"-"`
 }
 
 var (
@@ -57,6 +61,20 @@ func (s Settings) Check() error {
 		return errors.New("unknown time zone")
 	case !strings.HasPrefix(s.Disk, "/dev/") || strings.ContainsFunc(s.Disk, unicode.IsSpace):
 		return errors.New("choose a disk")
+	}
+	return nil
+}
+
+// CheckSeparated refuses a separated NAS's own settings: root's password, which
+// must be the NAS admin's no more than the other way round
+func (s Settings) CheckSeparated() error {
+	switch {
+	case len(s.RootPassword) < 8:
+		return errors.New("root's password needs at least 8 characters")
+	case strings.ContainsAny(s.RootPassword, "\n"):
+		return errors.New("root's password can't contain a line break")
+	case s.RootPassword == s.Password:
+		return errors.New("root's password must be different from your NAS password")
 	}
 	return nil
 }
@@ -152,6 +170,14 @@ func (e *Engine) volumeGroup() string {
 func (e *Engine) Install(s Settings) error {
 	if err := s.Check(); err != nil {
 		return err
+	}
+	if s.Role == "nas" {
+		if err := s.CheckSeparated(); err != nil {
+			return err
+		}
+		if s.RecoveryKey == "" {
+			return errors.New("no recovery key was made for this install")
+		}
 	}
 	if !e.EFI {
 		return errors.New("this machine started in legacy BIOS mode; the graphical installer needs UEFI. Switch the firmware to UEFI, or use the text installer from the boot menu")
@@ -419,7 +445,32 @@ func (e *Engine) installedOf(names []string) []string {
 // The groups Debian's installer gives its first user, where they exist
 var userGroups = []string{"sudo", "adm", "cdrom", "dip", "plugdev", "users", "audio", "video", "netdev"}
 
+// separatedAccount sets up a separated NAS (docs/fellowship-nas-account-separation.md):
+// root gets its own password; the NAS's people are kept in the NAS's store, and
+// the account asked for is its first NAS admin, with a password for the desktop
+// and shares and no Linux login; and the recovery key locks GRUB and opens
+// recovery. fnas does the NAS's part inside the new system, as it would there.
+func (e *Engine) separatedAccount(s Settings) error {
+	if err := e.chroot("root:"+s.RootPassword+"\n", "chpasswd"); err != nil {
+		return err
+	}
+	if err := e.chroot("", "fnas", "accounts", "init"); err != nil {
+		return err
+	}
+	args := []string{"fnas", "user", "create", s.User, "--admin", "--password-stdin"}
+	if s.FullName != "" {
+		args = append(args, "--full-name", s.FullName)
+	}
+	if err := e.chroot(s.Password+"\n", args...); err != nil {
+		return err
+	}
+	return e.chroot(s.RecoveryKey+"\n", "fellowship-recovery-key", "set")
+}
+
 func (e *Engine) account(s Settings) error {
+	if s.Role == "nas" {
+		return e.separatedAccount(s)
+	}
 	var groups []string
 	content, _ := os.ReadFile(filepath.Join(e.Target, "etc/group"))
 	for _, line := range strings.Split(string(content), "\n") {

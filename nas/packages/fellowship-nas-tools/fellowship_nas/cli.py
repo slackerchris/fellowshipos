@@ -637,6 +637,7 @@ def build_parser():
     accounts_ = area.add_parser("accounts", help="where people's accounts are kept").add_subparsers(
         dest="action", required=True)
     accounts_.add_parser("status", help="whether this NAS keeps people in its own store")
+    accounts_.add_parser("init", help="make the empty store that separates this NAS (the installer's)")
 
     auth = area.add_parser("auth", help="check a NAS person's password (root only)").add_subparsers(
         dest="action", required=True)
@@ -693,6 +694,9 @@ def dispatch(args):
             started(jobs.start("update", "Installing updates"))
         else:
             show(updates.check() if args.action == "check" else updates.status(), print_updates)
+    elif args.area == "accounts" and args.action == "init":
+        accounts.create_store()
+        print("This NAS now keeps its people in its own store.")
     elif args.area == "accounts":
         separated = accounts.is_separated()
         show({"separated": separated}, lambda found: print(

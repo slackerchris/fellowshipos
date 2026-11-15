@@ -33,6 +33,9 @@ export interface Machine {
     whole_disk: boolean;
     // Why nothing can be installed on this machine, such as Secure Boot being on
     blocked?: string;
+    // The NAS image keeps its people apart from the system: root gets its own
+    // password, and a recovery key is shown to be saved
+    separated?: boolean;
 }
 
 export interface Hello {
@@ -62,6 +65,7 @@ export interface Settings {
     user: string;
     full_name: string;
     password: string;
+    root_password?: string;
 }
 
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
@@ -87,7 +91,9 @@ export const hello = () => call<Hello>("GET", "/api/hello");
 export const pair = (code: string) => call<Hello>("POST", "/api/pair", { code });
 export const machine = () => call<Machine>("GET", "/api/machine");
 export const layoutFor = (size: number, system: number) => call<Layout>("POST", "/api/layout", { size, system });
-export const install = (settings: Settings, confirm: string) => call<unknown>("POST", "/api/install", { ...settings, confirm });
+export const install = (settings: Settings, confirm: string, recoveryConfirm = "") =>
+    call<unknown>("POST", "/api/install", { ...settings, confirm, recovery_confirm: recoveryConfirm });
+export const recoveryKey = () => call<{ key: string }>("GET", "/api/recovery-key");
 export const progress = () => call<Progress>("GET", "/api/progress");
 export const reboot = () => call<unknown>("POST", "/api/reboot");
 

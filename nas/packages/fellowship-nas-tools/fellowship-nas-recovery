@@ -1,0 +1,12 @@
+#!/usr/bin/python3
+"""The console program fellowship-recovery.target runs: asks for the recovery
+key, then offers to set passwords. The work is in fellowship_nas.recovery."""
+import sys
+
+from fellowship_nas.recovery import announce_used, console
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--announce"]:
+        announce_used()
+        sys.exit(0)
+    sys.exit(console())

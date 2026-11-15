@@ -6,6 +6,7 @@ import io
 import json
 import os
 import pkgutil
+import re
 import sys
 import tempfile
 import unittest
@@ -2817,6 +2818,163 @@ class Setup(unittest.TestCase):
             status = fnas.setup_status()
             self.assertTrue(status["done"])
             self.assertTrue(status["skipped"])
+
+
+class RecoveryKey(unittest.TestCase):
+    """The recovery key: saved offline at install, opening FellowshipOS recovery
+    with both admin passwords lost, and GRUB's password, so physical access
+    alone can't edit a boot entry (docs/fellowship-nas-account-separation.md)."""
+
+    DEBIAN_10_LINUX = """\
+function gfxmode {
+	set gfxpayload="${1}"
+}
+menuentry 'Debian GNU/Linux' --class debian --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-simple-abc' {
+	load_video
+	echo	'Loading Linux 6.12.117+deb13-amd64 ...'
+	linux	/vmlinuz-6.12.117+deb13-amd64 root=/dev/mapper/fellowship-root ro  quiet
+	initrd	/initrd.img-6.12.117+deb13-amd64
+}
+submenu 'Advanced options for Debian GNU/Linux' $menuentry_id_option 'gnulinux-advanced-abc' {
+	menuentry 'Debian GNU/Linux, with Linux 6.12.117+deb13-amd64' --class debian $menuentry_id_option 'gnulinux-6.12-advanced-abc' {
+		linux	/vmlinuz-6.12.117+deb13-amd64 root=/dev/mapper/fellowship-root ro  quiet
+	}
+	menuentry 'Debian GNU/Linux, with Linux 6.12.117+deb13-amd64 (recovery mode)' --class debian $menuentry_id_option 'gnulinux-6.12-recovery-abc' {
+		linux	/vmlinuz-6.12.117+deb13-amd64 root=/dev/mapper/fellowship-root ro single
+	}
+}
+"""
+
+    def setUp(self):
+        self.recovery = {m.__name__: m for m in MODULES}["fellowship_nas.recovery"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.calls = []
+
+        def run(*command, check=True, stdin=None, **kw):
+            self.calls.append((command, stdin))
+            out = ""
+            if command[0] == "grub-mkpasswd-pbkdf2":
+                out = "Enter password:\nReenter password:\nPBKDF2 hash of your password is grub.pbkdf2.sha512.10000.AB.CD\n"
+            if command[0] == "grub-probe":
+                return SimpleNamespace(stdout="", stderr="", returncode=1)
+            return SimpleNamespace(stdout=out, stderr="", returncode=0)
+        paths = {"RECOVERY_HASH": "recovery-key.hash", "GRUB_USERS": "01_fellowship_recovery",
+                 "GRUB_LINUX": "10_linux", "GRUB_LINUX_DEBIAN": "debian/10_linux.debian",
+                 "USED": "recovery-used.json", "USED_LOG": "recovery-log.json"}
+        for name, path in paths.items():
+            setattr(self, name.lower(), os.path.join(self.dir, path))
+        for patcher in [mock.patch.object(self.recovery, "run", run)] + \
+                [mock.patch.object(self.recovery, name, os.path.join(self.dir, path)) for name, path in paths.items()]:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_new_key_is_eight_groups_of_five_that_cant_be_misread(self):
+        key = self.recovery.generate()
+        self.assertRegex(key, r"^[A-Z2-9]{5}(-[A-Z2-9]{5}){7}$")
+        self.assertFalse(set(key) & set("ILOU01"))
+        self.assertNotEqual(key, self.recovery.generate())
+
+    def test_a_key_is_read_however_it_was_typed(self):
+        key = self.recovery.generate()
+        for typed in (key, key.lower(), key.replace("-", ""), key.replace("-", " "), f"  {key}\n"):
+            self.assertEqual(self.recovery.normalise(typed), key)
+        for wrong in ("", key[:-1], key + "A", key.replace(key[0], "0", 1)):
+            self.assertIsNone(self.recovery.normalise(wrong))
+
+    def test_setting_a_key_keeps_only_its_hash_and_locks_grub_with_it(self):
+        key = self.recovery.generate()
+        self.recovery.set_key(key)
+        with open(self.recovery_hash) as file:
+            stored = file.read().strip()
+        self.assertNotIn(key, stored)
+        self.assertEqual(os.stat(self.recovery_hash).st_mode & 0o777, 0o600)
+        self.assertTrue(self.recovery.check(key))
+        self.assertTrue(self.recovery.check(key.lower().replace("-", " ")))
+        self.assertFalse(self.recovery.check(self.recovery.generate()))
+        # GRUB's password is the key, in GRUB's own PBKDF2 form
+        self.assertIn(((("grub-mkpasswd-pbkdf2",), f"{key}\n{key}\n")), self.calls)
+        with open(self.grub_users) as file:
+            users = file.read()
+        self.assertIn('set superusers="recovery"', users)
+        self.assertIn("password_pbkdf2 recovery grub.pbkdf2.sha512.10000.AB.CD", users)
+        self.assertNotIn(key, users)
+        # Debian's 10_linux is moved aside, so an upgrade of grub keeps the wrapper
+        self.assertIn(("dpkg-divert", "--local", "--rename", "--divert", self.grub_linux_debian, "--add",
+                       self.grub_linux), [c for c, _ in self.calls])
+
+    def wrapped(self):
+        """What the wrapper makes of Debian's own entries, run for real."""
+        os.makedirs(os.path.dirname(self.grub_linux_debian), exist_ok=True)
+        with open(self.grub_linux_debian, "w") as file:
+            file.write("#!/bin/sh\ncat << 'EOF'\n" + self.DEBIAN_10_LINUX + "EOF\n")
+        os.chmod(self.grub_linux_debian, 0o755)
+        self.recovery.divert_linux()
+        import subprocess
+        return subprocess.run(["sh", self.grub_linux], capture_output=True, text=True, check=True).stdout
+
+    def test_every_normal_entry_starts_without_the_key(self):
+        out = self.wrapped()
+        normal = [line for line in out.splitlines() if re.match(r"\s*(menuentry|submenu) ", line)
+                  and "FellowshipOS recovery" not in line]
+        self.assertEqual(len(normal), 4)
+        for line in normal:
+            self.assertTrue(line.endswith(" --unrestricted {"), line)
+
+    def test_recovery_is_an_entry_of_its_own_that_only_the_key_opens(self):
+        out = self.wrapped()
+        start = out.index("menuentry 'FellowshipOS recovery'")
+        entry = out[start:out.index("\n}", start) + 2]
+        first = entry.splitlines()[0]
+        self.assertTrue(first.endswith(" --users recovery {"), first)
+        self.assertNotIn("--unrestricted", first)
+        self.assertIn("'fellowship-recovery-abc'", first)
+        self.assertIn("ro  quiet systemd.unit=fellowship-recovery.target", entry)
+        # Only one, and the normal entry is still there as it was
+        self.assertEqual(out.count("FellowshipOS recovery"), 1)
+        self.assertIn("menuentry 'Debian GNU/Linux' --class debian", out)
+
+    def test_the_console_asks_for_the_key_and_waits_longer_after_each_wrong_one(self):
+        key = self.recovery.generate()
+        self.recovery.set_key(key)
+        typed = iter(["WRONG", self.recovery.generate(), key])
+        said, slept = [], []
+        result = self.recovery.console_main(ask=lambda prompt: "5", secret=lambda prompt: next(typed),
+                                            say=said.append, sleep=slept.append)
+        self.assertEqual(result, "restart")
+        self.assertEqual(slept, [2, 4])
+        with open(self.used) as file:
+            self.assertEqual([u["what"] for u in json.load(file)], ["opened recovery with the key"])
+
+    def test_the_console_sets_roots_password_with_the_key(self):
+        key = self.recovery.generate()
+        self.recovery.set_key(key)
+        answers = iter(["1", "5"])
+        secrets = iter([key, "new root pw", "new root pw"])
+        self.recovery.console_main(ask=lambda prompt: next(answers), secret=lambda prompt: next(secrets),
+                                   say=lambda text: None, sleep=lambda seconds: None)
+        self.assertIn((("chpasswd",), "root:new root pw\n"), self.calls)
+        with open(self.used) as file:
+            self.assertIn("set root's password", [u["what"] for u in json.load(file)])
+
+    def test_without_a_key_recovery_opens_nothing(self):
+        said = []
+        result = self.recovery.console_main(ask=lambda prompt: self.fail("asked"),
+                                            secret=lambda prompt: self.fail("asked for a key"),
+                                            say=said.append, sleep=lambda seconds: None)
+        self.assertEqual(result, "restart")
+        self.assertIn("no recovery key", " ".join(said))
+
+    def test_using_recovery_is_announced_at_the_next_start(self):
+        alerted = []
+        self.recovery.note_recovery("set root's password", now=1000)
+        with mock.patch.object(fnas.alerts, "send_alert", lambda s, t, b: alerted.append((s, t))):
+            self.recovery.announce_used()
+        self.assertEqual(alerted, [("high", "Recovery was used at the console")])
+        self.assertFalse(os.path.exists(self.used))
+        with open(self.used_log) as file:
+            self.assertEqual(len(json.load(file)), 1)
 
 
 class MaintenanceInterface(unittest.TestCase):

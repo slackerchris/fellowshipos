@@ -8,3 +8,8 @@ systemd/fellowship-nas-scrub@.service usr/lib/systemd/system
 systemd/fellowship-nas-scrub@.timer usr/lib/systemd/system
 systemd/fellowship-nas-sync@.service usr/lib/systemd/system
 systemd/fellowship-nas-sync@.timer usr/lib/systemd/system
+fellowship-recovery-key usr/sbin
+fellowship-nas-recovery usr/lib/fellowship-nas
+systemd/fellowship-recovery.target usr/lib/systemd/system
+systemd/fellowship-recovery.service usr/lib/systemd/system
+systemd/fellowship-recovery-notice.service usr/lib/systemd/system

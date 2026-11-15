@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+"""fellowship-recovery-key: root's tool for the recovery key that opens
+FellowshipOS recovery. The work is in fellowship_nas.recovery."""
+import sys
+
+from fellowship_nas.recovery import key_main
+
+if __name__ == "__main__":
+    sys.exit(key_main())

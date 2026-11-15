@@ -4,7 +4,8 @@
 Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
 container on 2026-11-15. Phases 1 (SFTP read-only shares), 2 (the NAS store
-and login) and 3 (the maintenance interface and updates) are done.
+and login), 3 (the maintenance interface and updates) and 4 (install, the
+recovery key and recovery) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -625,9 +626,65 @@ Run in VMs, from the image, against a real system:
 
    `ssh set` still turns the whole of sshd on and off, as before. It becomes
    the SFTP service switch in phase 7.
-4. **Install.** Root password, the recovery key step, the NAS admin through
-   `fnas`, no `sudo` account, GRUB locked with the key, and the recovery boot
-   entry with its program.
+4. **Install.** Done.
+   - **The installer**, on the NAS image only:
+     - The You step asks for root's own password (twice), and refuses one
+       that matches the NAS admin's.
+     - The engine sets root's password and runs `fnas accounts init` and
+       `fnas user create <name> --admin` inside the new system, so the NAS
+       admin gets their NAS and SMB password and no Linux login. No `sudo`
+       account is made.
+   - **The recovery key:**
+     - The installer makes the key, once per run.
+     - It's shown on the Install step, not a step of its own. That's simpler,
+       and it's still before anything is erased: **Erase and install** stays
+       off until its last two groups are typed back.
+     - On the machine's own screen it says to write it down or photograph it.
+       From another computer it can also be saved as a text file.
+     - The page never sends the key back: the installer's server adds the one
+       it made.
+   - **`fellowship-recovery-key`** (root's tool, `fellowship_nas/recovery.py`):
+     - `set`, `new`, `check`, `status` and `remove`
+     - it keeps only a yescrypt hash
+     - it makes the key GRUB's superuser password (`01_fellowship_recovery`)
+     - it moves Debian's `10_linux` aside with `dpkg-divert` behind a wrapper
+       that marks normal entries `--unrestricted` and adds **FellowshipOS
+       recovery** (`--users recovery`, `systemd.unit=fellowship-recovery.target`)
+   - **The recovery program** (`fellowship-recovery.target`) runs on tty1.
+     - It asks for the key again, waiting 2, 4, 8 … up to 120 s after wrong
+       ones.
+     - It sets root's password, a NAS person's password, or makes someone a
+       NAS admin.
+     - Undoing separation comes in phase 5.
+     - At the next normal start, `fellowship-recovery-notice` sends a
+       high-severity alert that recovery was used.
+   - **The console status screen** says that root logs in there.
+
+   **Tested** by installing the built ISO with the mouse in a VM, then on the
+   installed system:
+   - **The installer:** the root fields work; a wrong key ending doesn't
+     start the install, and the right one, typed in lower case without the
+     dash, does.
+   - **First boot**, ready in 36 s:
+     - the NAS admin logs in to the desktop as a NAS admin
+     - root logs in at the console
+     - the NAS admin's Linux password is locked, with no shell and no home
+     - `sudo` has no members
+     - Samba has the NAS admin
+     - the key hash is root-only, `10_linux` is diverted, and no unit failed
+   - **GRUB:**
+     - editing an entry asks for a username, and a wrong password returns to
+       the menu
+     - the four normal entries are unrestricted
+     - **FellowshipOS recovery** asks for the key, and boots into the
+       recovery program with it
+   - **Recovery:**
+     - a wrong key waits 2 s
+     - with the right key, root's password and the NAS admin's were set
+     - afterwards the old ones were refused and the new ones worked, at the
+       console and on the desktop
+     - the next normal start alerted "Recovery was used at the console", and
+       `recovery-log.json` lists each step
 5. **Migration and undo.** `fnas accounts separate`: dry run, checks before
    `sudo` goes, `--undo`, and undo from recovery. Then both rollback tests.
 6. **Network changes with rollback.**

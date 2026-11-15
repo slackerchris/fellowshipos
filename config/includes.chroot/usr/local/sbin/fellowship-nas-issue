@@ -17,6 +17,7 @@ ROLE_FILE = "/etc/fellowshipos/install-role"
 DONE_FLAG = "/etc/fellowshipos/.nas-role-complete"
 STATUS_FILE = "/var/lib/fellowshipos/nas-role-status"
 CERT = "/etc/fellowship-nas/web/cert.pem"
+STORE = "/var/lib/fellowship-nas/accounts.json"
 
 # agetty colour escapes
 BOLD, DIM, RESET = "\\e{bold}", "\\e{halfbright}", "\\e{reset}"
@@ -98,6 +99,9 @@ def main():
         text += [f"  {'Certificate:':<13}SHA-256 {found[:47]}",
                  f"  {'':<13}        {found[48:]}",
                  f"  {'':<13}{DIM}The browser warns about it once; check it matches before you accept.{RESET}"]
+    if os.path.exists(STORE):
+        # A separated NAS: root is the system administrator, apart from the NAS's people
+        text += ["", f"  {'Root:':<13}logs in here, at the console, for system administration"]
     text += [""] + status_lines() + ["", ""]
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(OUT + ".new", "w") as f:

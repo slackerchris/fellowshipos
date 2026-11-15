@@ -142,3 +142,7 @@ th { width: 120px; }
 @media (max-width: 600px) {
     .installer-card { padding: 18px; }
 }
+
+/* Shown once, to be written down: large, spaced and easy to copy by hand */
+.recovery-key { border: 1px solid var(--gold); border-radius: 9px; padding: 14px; background: var(--surface-sunk); }
+.recovery-key-text { font-size: 1.35rem; letter-spacing: 0.08em; word-spacing: 0.2em; user-select: all; }
