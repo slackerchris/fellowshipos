@@ -46,6 +46,7 @@ PACKAGES='
         apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev
         nas/packages/build.sh
         installer/build.sh
+        installer/cog/build.sh
     '
 DESKTOP_MOUNT=()
 case " $EDITIONS " in
