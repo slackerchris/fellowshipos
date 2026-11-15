@@ -24,9 +24,23 @@ REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
 def main():
     out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/fellowship-desktop-sound")
-    deb = sorted((REPO / "config" / "packages.chroot").glob("fellowship-desktop_*.deb"))
+    # The freshest desktop package, wherever an image build left it: a
+    # running NAS build parks it in .build/desktop-package while it runs,
+    # and earlier seat runs keep the copies that were shared into the VM.
+    deb = [d for d in ([p for r in (REPO / "config" / "packages.chroot", REPO / ".build" / "desktop-package")
+                        for p in r.glob("fellowship-desktop_*.deb")] +
+                       [p for t in pathlib.Path("/tmp").glob("fellowship-*/share/pkg")
+                        for p in t.glob("fellowship-desktop_*.deb")])
+           if d.resolve() != (out / "share" / "pkg" / d.name).resolve()]
     if not deb:
         sys.exit("no fellowship-desktop .deb built; run desktop/build.sh first")
+    deb = max(deb, key=lambda p: p.stat().st_mtime)
+
+    # vm-interact.sh only shares what it finds in packages.chroot; put the
+    # chosen package where the dpkg swap below reads it, whatever the
+    # image build is doing with the original.
+    (out / "share" / "pkg").mkdir(parents=True, exist_ok=True)
+    subprocess.run(["cp", "-f", str(deb), str(out / "share" / "pkg" / deb.name)], check=True)
 
     boot = subprocess.run([str(REPO / "desktop" / "tests" / "vm-interact.sh"), str(out)])
     if boot.returncode != 0:
@@ -39,11 +53,25 @@ def main():
             "MOUNTED", timeout=60)
 
     print("=== swapping in the fresh package and restarting the session ===")
-    ser.run(f"sudo dpkg -i /mnt/pkg/{deb[-1].name} >/tmp/dpkg.log 2>&1; tail -1 /tmp/dpkg.log",
+    ser.run(f"sudo dpkg -i /mnt/pkg/{deb.name} >/tmp/dpkg.log 2>&1; tail -1 /tmp/dpkg.log",
             "DPKG_DONE", timeout=240)
-    ser.run("pkill -x fellowship-comp; sleep 2; sudo systemctl restart getty@tty1.service",
+    # The parented bus wrapper must go with the compositor: a leftover
+    # dbus-run-session holds the session lock, and the restarted session
+    # then half-starts behind it (seen 2026-11-15: the shell never reached
+    # the bus, so notifyd was never activated).
+    ser.run("pkill -x fellowship-comp; pkill -f dbus-run-session; sleep 2; "
+            "sudo systemctl restart getty@tty1.service",
             "SWAPPED", timeout=60)
     ser.wait_session(300)
+
+    # When a check below fails, these lines say whether the swapped-in
+    # session was ever the healthy one the same image produces by hand
+    # (seen 2026-11-15: gate runs failed with a healthy-by-hand twin;
+    # without this evidence the cause stays a guess).
+    print("=== the session as the swap left it ===")
+    ser.run("date; pgrep -af 'fellowship-comp|fellowship-shell$|fellowship-notifyd' | head -6; "
+            "grep -ac 'notifications claimed' /tmp/fellowship-session.log; "
+            "ls -l /run/user/1000/fellowship-wayland-*.sock", "SEEN", timeout=90)
 
     checks = []
 
@@ -58,6 +86,23 @@ def main():
             "timeout 10 wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>&1",
             "WPCTL_DONE", timeout=60)
 
+    def drain():
+        # Throw away whatever the console has already typed but not shown:
+        # bytes from a previous check's output, and — after a hanging
+        # command — a queued next line the busy shell never ran. Ctrl-C
+        # first clears the tty input queue itself, so a stale line cannot
+        # execute in front of the check being typed now.
+        ser.send("\x03")
+        ser.s.settimeout(0.5)
+        while True:
+            try:
+                if not ser.s.recv(65536):
+                    break
+            except (TimeoutError, OSError):
+                break
+        ser.s.settimeout(2)
+        ser.buf = b""
+
     def check(name, cmd, marker, timeout=90):
         # The marker is split so the echo of the typed line never contains
         # it, and printed only when the check itself passed: an early match
@@ -65,11 +110,37 @@ def main():
         # (Serial.run appends its echo unconditionally, so this drives the
         # console directly instead.)
         head, tail = marker[: len(marker) // 2], marker[len(marker) // 2:]
+        drain()
         ser.transcript = ""
         ser.send(f"{cmd} && echo '{head}'{tail}")
         ok = ser.read_until(marker, timeout)
         checks.append((name, ok))
         print(f"{name}: {'PASS' if ok else 'FAIL'}")
+
+    # A check whose command contains a hanging tool (wpctl in this guest)
+    # leaves the console's tty input queue carrying the NEXT typed line
+    # unread while the shell is still busy: queued lines never run in
+    # order, and their markers time out as false FAILs. Seen 2026-11-15:
+    # notifyd was provably running (pgrep'd right after the swap) yet the
+    # notify checks below the sound ones failed. Two defences: notification
+    # checks run BEFORE the hanging sound ones, and every call below is
+    # wrapped in `timeout`, with any stale bytes drained before typing.
+    check(
+        "notify-send through the bus file starts the notification service",
+        "SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
+        "timeout 15 fellowship-msg --socket $SOCK spawn 'notify-send -t 0 From-the-VM sound-check'; "
+        "rm -f /tmp/nd; for i in $(seq 240); do pgrep -f fellowship-notifyd >/dev/null && touch /tmp/nd && break; sleep 0.5; done; "
+        "test -e /tmp/nd",
+        "NOTIFYD_OK", timeout=180,
+    )
+    check(
+        "a real notify-send reaches the shell as a pop-up",
+        "rm -f /tmp/popup; SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
+        "for i in $(seq 240); do timeout 5 fellowship-msg --socket $SOCK layers "
+        "| grep -q 'fellowship-notify-' && touch /tmp/popup && break; sleep 0.5; done; "
+        "test -e /tmp/popup",
+        "POPUP_OK", timeout=180,
+    )
 
     check(
         "pipewire and wireplumber run with the session",
@@ -85,7 +156,7 @@ def main():
         "the volume key moves the real sink",
         "before=$(timeout 10 wpctl get-volume @DEFAULT_AUDIO_SINK@); "
         "SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
-        "fellowship-msg --socket $SOCK key volumeup; sleep 1; "
+        "timeout 10 fellowship-msg --socket $SOCK key volumeup; sleep 1; "
         "after=$(timeout 10 wpctl get-volume @DEFAULT_AUDIO_SINK@); "
         'echo "sink before=$before after=$after"; [ "$before" != "$after" ]',
         "KEY_OK",
@@ -93,35 +164,14 @@ def main():
     check(
         "the on-screen display appears with the key",
         "rm -f /tmp/osd; SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
-        "fellowship-msg --socket $SOCK key volumedown; "
-        "for i in $(seq 40); do fellowship-msg --socket $SOCK layers "
+        "timeout 10 fellowship-msg --socket $SOCK key volumedown; "
+        "for i in $(seq 40); do timeout 5 fellowship-msg --socket $SOCK layers "
         "| grep -q fellowship-osd && touch /tmp/osd && break; sleep 0.05; done; test -e /tmp/osd",
-        "OSD_OK",
-    )
-    # The trigger runs INSIDE the session (fellowship-msg spawn): the
-    # compositor lives on a private dbus-run-session bus that the serial
-    # console cannot reach, and that is the bus notifyd is activated on.
-    # notifyd is already up by now — the shell's own first list() call
-    # activated it through its installed bus file — so this confirms the
-    # process is running and sends the notification the pop-up check reads.
-    check(
-        "the notification service is running (activated through its bus file)",
-        "rm -f /tmp/nd; SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
-        "for i in $(seq 60); do pgrep -f fellowship-notifyd >/dev/null && touch /tmp/nd && break; sleep 0.2; done; "
-        "test -e /tmp/nd && fellowship-msg --socket $SOCK spawn 'notify-send -t 60000 From-the-VM sound-check'",
-        "NOTIFYD_OK",
-    )
-    check(
-        "a real notify-send reaches the shell as a pop-up",
-        "rm -f /tmp/popup; SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
-        "for i in $(seq 60); do fellowship-msg --socket $SOCK layers "
-        "| grep -q 'fellowship-notify-' && touch /tmp/popup && break; sleep 0.2; done; "
-        "test -e /tmp/popup",
-        "POPUP_OK",
+        "OSD_OK", timeout=120,
     )
     ser.run("SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
-            "fellowship-msg --socket $SOCK screenshot /mnt/out/sound.png",
-            "SHOT_DONE", timeout=60)
+            "timeout 60 fellowship-msg --socket $SOCK screenshot /mnt/out/sound.png",
+            "SHOT_DONE", timeout=180)
 
     failed = [name for name, ok in checks if not ok]
     print(f"\nscreenshot: {out / 'share/out/sound.png'}")
