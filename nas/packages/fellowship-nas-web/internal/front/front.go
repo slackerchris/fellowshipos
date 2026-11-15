@@ -256,14 +256,15 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, session *protoco
 
 func (s *Server) fnas(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
 	var body struct {
-		Args  []string `json:"args"`
-		Input string   `json:"input"`
+		Args    []string `json:"args"`
+		Input   string   `json:"input"`
+		Current string   `json:"current"`
 	}
 	if !readJSON(w, r, 2<<20, &body) {
 		return
 	}
 	response, ok := s.call(w, protocol.Request{Op: protocol.OpFnas, Session: token, Args: body.Args, Input: body.Input,
-		Touch: r.Header.Get(BackgroundHeader) == ""})
+		Current: body.Current, Touch: r.Header.Get(BackgroundHeader) == ""})
 	if ok {
 		writeJSON(w, http.StatusOK, map[string]string{"output": response.Output})
 	}

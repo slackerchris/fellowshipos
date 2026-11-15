@@ -81,6 +81,12 @@ export async function fnas(args: string[], input?: string): Promise<string> {
     return output;
 }
 
+/** A person's own new password, which the NAS only takes with the one they use now. */
+export async function changeOwnPassword(user: string, current: string, password: string): Promise<string> {
+    return (await request<{ output: string }>("POST", "/api/fnas",
+        { args: ["user", "password", user, "--password-stdin"], input: password, current })).output;
+}
+
 /** fnas tells the command line how to follow a long job; the desktop shows its progress itself. */
 export function jobStarted(output: string, where = "at the top of Storage") {
     return output.replace(/: follow it with fnas job show \S+/g,

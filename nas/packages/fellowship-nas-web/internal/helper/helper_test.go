@@ -268,7 +268,7 @@ func TestFnas(t *testing.T) {
 		t.Fatal("a non-admin ran an admin command")
 	}
 	own := h.Handle(protocol.Request{Op: protocol.OpFnas, Session: person,
-		Args: []string{"user", "smb-password", "kim", "--password-stdin"}, Input: "pw"})
+		Args: []string{"user", "smb-password", "kim", "--password-stdin"}, Input: "pw", Current: "right"})
 	if own.Code != "" {
 		t.Fatalf("own SMB password: %+v", own)
 	}
@@ -282,6 +282,49 @@ func TestFnas(t *testing.T) {
 	}
 	if h.Handle(protocol.Request{Op: protocol.OpFnas, Session: "made-up", Args: []string{"pool", "list"}}).Code != protocol.CodeUnauthenticated {
 		t.Fatal("ran fnas without a session")
+	}
+}
+
+// Changing one's own password needs the current one, admins included, so a
+// browser left signed in can't be used to take the account over; guessing it
+// is limited like guessing at the login page
+func TestOwnPasswordNeedsTheCurrentOne(t *testing.T) {
+	f, h := newFake()
+	person := login(t, h, "kim").Token
+	admin := login(t, h, "sam").Token
+	change := func(session, user, current string) protocol.Response {
+		return h.Handle(protocol.Request{Op: protocol.OpFnas, Session: session,
+			Args: []string{"user", "password", user, "--password-stdin"}, Input: "new one!", Current: current})
+	}
+	for _, c := range []struct {
+		session, user, current string
+		want                   string
+	}{
+		{person, "kim", "", protocol.CodeForbidden},
+		{person, "kim", "wrong", protocol.CodeForbidden},
+		{admin, "sam", "", protocol.CodeForbidden},
+		{person, "kim", "right", ""},
+		// A password that must be changed is still the right one to change it with
+		{person, "kim", "old", ""},
+		{admin, "sam", "right", ""},
+		// An admin setting somebody else's password isn't changing their own
+		{admin, "kim", "", ""},
+	} {
+		if got := change(c.session, c.user, c.current); got.Code != c.want {
+			t.Errorf("%s with %q: %+v", c.user, c.current, got)
+		}
+	}
+	if got := change(person, "kim", "wrong"); got.Error != wrongCurrent {
+		t.Errorf("wrong current password said %q", got.Error)
+	}
+	ran := len(f.ran)
+	// Guessing runs into the same limit as the login page, and nothing runs meanwhile
+	var last protocol.Response
+	for range 8 {
+		last = change(person, "kim", "wrong")
+	}
+	if last.Code != protocol.CodeThrottled || len(f.ran) != ran {
+		t.Fatalf("guessing wasn't limited: %+v, ran %d", last, len(f.ran)-ran)
 	}
 }
 

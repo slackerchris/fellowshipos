@@ -65,6 +65,8 @@ type Request struct {
 	Remote   string   `json:"remote,omitempty"`
 	Args     []string `json:"args,omitempty"`
 	Input    string   `json:"input,omitempty"`
+	// The password a person has now, which changing their own needs
+	Current string `json:"current,omitempty"`
 	// The public ID of a session to end
 	Target string `json:"target,omitempty"`
 	// A file request: the share as the desktop names it, a path inside it, and

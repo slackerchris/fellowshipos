@@ -2819,6 +2819,191 @@ class Setup(unittest.TestCase):
             self.assertTrue(status["skipped"])
 
 
+class ZfsSecureBoot(unittest.TestCase):
+    """Whether ZFS is usable mustn't depend on mokutil, which nothing installs."""
+
+    def setUp(self):
+        self.zfs = {m.__name__: m for m in MODULES}["fellowship_nas.engines.zfs"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.var = os.path.join(directory.name, "SecureBoot")
+        for patcher in (mock.patch.object(self.zfs, "SECURE_BOOT_VAR", self.var),
+                        mock.patch.object(self.zfs, "MODULE_DIR", os.path.join(directory.name, "no-module")),
+                        mock.patch.object(self.zfs, "run",
+                                          lambda *c, check=True, stdin=None: SimpleNamespace(stdout="", returncode=1))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_secure_boot_is_read_from_the_firmware(self):
+        for data, want in ((b"\x06\x00\x00\x00\x01", "Secure Boot is on"),
+                           (b"\x06\x00\x00\x00\x00", "isn't installed")):
+            with self.subTest(data), open(self.var, "wb") as file:
+                file.write(data)
+            self.assertIn(want, self.zfs.unavailable())
+
+    def test_a_machine_without_uefi_just_has_no_module(self):
+        self.assertIn("isn't installed", self.zfs.unavailable())
+
+
+class SeparatedUsers(unittest.TestCase):
+    """A separated NAS (docs/fellowship-nas-account-separation.md): people keep a
+    UID for owning files, but their password lives in the NAS's store and Samba,
+    never in Linux, and nobody gets a shell. Hashing goes through the real
+    libcrypt, so these also check the ctypes route."""
+
+    def setUp(self):
+        Users.setUp(self)
+        self.accounts_module = {m.__name__: m for m in MODULES}["fellowship_nas.accounts"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.store = os.path.join(directory.name, "accounts.json")
+        tester_hash = self.accounts_module.hash_password("tester password")
+        with open(self.store, "w") as file:
+            json.dump({"version": 1, "people": {
+                "tester": {"uid": 1000, "full_name": "Tester", "admin": True, "enabled": True, "sftp": False,
+                           "hash": tester_hash, "password_set": 1, "must_change": False, "keys": []},
+                "kim": {"uid": 1001, "full_name": "Kim", "admin": False, "enabled": True, "sftp": False,
+                        "hash": "", "password_set": None, "must_change": False, "keys": []}}}, file)
+
+        def by_name(name):
+            for found in self.accounts:
+                if found.pw_name == name:
+                    return found
+            raise KeyError(name)
+        base_run = fnas.run
+
+        def run(*command, check=True, stdin=None):
+            # useradd here names the shell after --shell, not at a fixed place
+            if command[0] == "useradd":
+                self.calls.append((command, stdin))
+                shell = command[command.index("--shell") + 1]
+                self.accounts.append(SimpleNamespace(pw_name=command[-1], pw_uid=1003, pw_gid=1003,
+                                                     pw_gecos="", pw_shell=shell))
+                self.groups.append(SimpleNamespace(gr_name=command[-1], gr_gid=1003, gr_mem=[]))
+                return SimpleNamespace(stdout="", stderr="", returncode=0)
+            return base_run(*command, check=check, stdin=stdin)
+        for patcher in (mock.patch.object(self.accounts_module, "STORE", self.store),
+                        mock.patch.object(self.accounts_module, "STORE_LOCK", self.store + ".lock"),
+                        mock.patch.object(fnas.pwd, "getpwnam", by_name),
+                        patch("run", run)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def commands(self):
+        return [command for command, _ in self.calls]
+
+    def stored(self, name):
+        with open(self.store) as file:
+            return json.load(file)["people"][name]
+
+    def test_a_store_is_what_makes_the_nas_separated(self):
+        self.assertTrue(self.accounts_module.is_separated())
+        os.remove(self.store)
+        self.assertFalse(self.accounts_module.is_separated())
+
+    def test_people_come_from_the_store_with_their_unix_side_from_the_system(self):
+        found = {u["name"]: u for u in fnas.list_users()}
+        self.assertEqual(list(found), ["kim", "tester"])
+        self.assertEqual((found["tester"]["kind"], found["tester"]["admin"], found["tester"]["password"]),
+                         ("shares", True, True))
+        self.assertEqual((found["kim"]["groups"], found["kim"]["password"]), (["family", "video"], False))
+
+    def test_create_makes_a_uid_with_no_login_and_a_password_in_the_store_and_samba(self):
+        with mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.create_user("sam", "Sam", "shares", False, ["family"], "long enough")
+        commands = self.commands()
+        self.assertIn(("useradd", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin",
+                       "--comment", "Sam", "sam"), commands)
+        # Nothing gives sam a Linux password
+        self.assertFalse([c for c in commands if c[0] == "chpasswd"])
+        self.assertIn((("smbpasswd", "-s", "-a", "sam"), "long enough\nlong enough\n"), self.calls)
+        entry = self.stored("sam")
+        self.assertEqual((entry["uid"], entry["admin"], entry["sftp"]), (1003, False, False))
+        self.assertTrue(self.accounts_module.verify_password("long enough", entry["hash"]))
+        self.assertTrue(entry["hash"].startswith("$y$"))
+
+    def test_nobody_gets_a_shell(self):
+        with self.assertRaisesRegex(fnas.FnasError, "shell access is root's"):
+            fnas.create_user("sam", "", "ssh", False, [], "long enough")
+        with self.assertRaisesRegex(fnas.FnasError, "shell access is root's"):
+            fnas.change_user("kim", kind="ssh")
+
+    def test_sftp_is_a_permission_kept_in_the_store(self):
+        fnas.change_user("kim", kind="sftp")
+        self.assertIn(("usermod", "--shell", fnas.users.SFTP_SHELL, "kim"), self.commands())
+        self.assertTrue(self.stored("kim")["sftp"])
+        self.assertEqual({u["name"]: u["kind"] for u in fnas.list_users()}["kim"], "sftp")
+
+    def test_a_new_password_goes_to_the_store_and_samba_together_and_ends_sessions(self):
+        with mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.set_password("kim", "kims new one")
+        self.assertFalse([c for c in self.commands() if c[0] == "chpasswd"])
+        self.assertIn((("smbpasswd", "-s", "-a", "kim"), "kims new one\nkims new one\n"), self.calls)
+        self.assertTrue(self.accounts_module.verify_password("kims new one", self.stored("kim")["hash"]))
+        with open(self.signed_out) as file:
+            self.assertIn("kim", json.load(file))
+
+    def test_setting_a_password_clears_must_change(self):
+        with self.accounts_module.changing_store() as store:
+            store["people"]["kim"]["must_change"] = True
+        fnas.set_password("kim", "kims new one")
+        self.assertFalse(self.stored("kim")["must_change"])
+
+    def test_admins_come_from_the_store_and_the_last_one_stays(self):
+        self.assertEqual(fnas.admins(), {"tester"})
+        with self.assertRaisesRegex(fnas.FnasError, "only administrator"):
+            fnas.change_user("tester", admin=False)
+        fnas.change_user("kim", admin=True)
+        self.assertTrue(self.stored("kim")["admin"])
+        fnas.change_user("tester", admin=False)
+        self.assertEqual(fnas.admins(), {"kim"})
+        # Admin rights never come from a Unix group on a separated NAS
+        self.assertFalse([c for c in self.commands() if c[0] == "gpasswd" and "nas-admins" in c])
+
+    def test_turning_someone_off_uses_expiry_and_never_touches_their_locked_password(self):
+        fnas.change_user("kim", enabled=False)
+        commands = self.commands()
+        self.assertIn(("usermod", "--expiredate", "1", "kim"), commands)
+        self.assertFalse([c for c in commands if "--lock" in c or "--unlock" in c])
+        self.assertFalse(self.stored("kim")["enabled"])
+        fnas.change_user("kim", enabled=True)
+        self.assertIn(("usermod", "--expiredate", "", "kim"), self.commands())
+        self.assertFalse([c for c in self.commands() if "--unlock" in c])
+        self.assertTrue(self.stored("kim")["enabled"])
+
+    def test_login_check_says_no_the_same_way_for_a_stranger_and_a_wrong_password(self):
+        check = self.accounts_module.check_login
+        self.assertIsNone(check("tester", "tester password"))
+        self.assertEqual(check("tester", "nope"), "wrong")
+        self.assertEqual(check("nobody", "tester password"), "wrong")
+        # kim has no password yet, so nothing matches
+        self.assertEqual(check("kim", ""), "wrong")
+        with self.accounts_module.changing_store() as store:
+            store["people"]["tester"]["enabled"] = False
+        self.assertEqual(check("tester", "tester password"), "off")
+        with self.accounts_module.changing_store() as store:
+            store["people"]["tester"].update(enabled=True, must_change=True)
+        self.assertEqual(check("tester", "tester password"), "expired")
+
+    def test_a_copied_shadow_hash_works_as_it_is(self):
+        # What migration copies across: the yescrypt and SHA-512 hashes chpasswd wrote
+        lib = self.accounts_module.libcrypt()
+        for prefix in (b"$y$", b"$6$"):
+            with self.subTest(prefix):
+                hashed = lib.crypt(b"old password", lib.crypt_gensalt(prefix, 0, None, 0)).decode()
+                self.assertTrue(self.accounts_module.verify_password("old password", hashed))
+                self.assertFalse(self.accounts_module.verify_password("old password", "!" + hashed))
+
+    def test_removing_someone_takes_them_out_of_the_store(self):
+        fnas.remove_user("kim", False, "remove kim", [])
+        with open(self.store) as file:
+            self.assertNotIn("kim", json.load(file)["people"])
+
+    def test_the_store_is_readable_by_root_alone(self):
+        fnas.set_password("kim", "kims new one")
+        self.assertEqual(os.stat(self.store).st_mode & 0o777, 0o600)
+
+
 class Users(unittest.TestCase):
     def setUp(self):
         account = lambda name, uid, shell="/bin/bash": SimpleNamespace(

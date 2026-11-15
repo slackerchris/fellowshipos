@@ -37,6 +37,7 @@ const (
 	wrongPassword = "The user name or password is wrong."
 	signedOut     = "You have been signed out. Log in again."
 	notAdmin      = "Your account can't change the NAS. Ask an administrator to add it to the nas-admins group, then log in again."
+	wrongCurrent  = "Your current password is wrong."
 )
 
 // ErrExpired means the password was right but has to be changed first
@@ -63,10 +64,12 @@ var commands = map[string][]string{
 	"config":   {"show", "restore", "adopt"},
 	"system":   {"show", "timezones", "hostname", "timezone", "certificate", "storage", "grow", "restart", "shutdown"},
 	// Only fnas itself runs a job; people follow them
-	"job":    {"list", "show"},
-	"setup":  {"status", "done", "reset"},
-	"health": nil,
-	"check":  nil,
+	"job":   {"list", "show"},
+	"setup": {"status", "done", "reset"},
+	// Whether people are kept in the NAS's store, which decides what Users offers
+	"accounts": {"status"},
+	"health":   nil,
+	"check":    nil,
 }
 
 type Account struct {
@@ -424,6 +427,13 @@ func (h *Helper) fnas(request protocol.Request) protocol.Response {
 		log.Printf("refused fnas %q for %s", request.Args, found.user)
 		return failure(protocol.CodeForbidden, notAdmin)
 	}
+	// Changing one's own password needs the one in use now, admins included, so
+	// a browser left signed in can't be used to take the account over
+	if OwnPassword(request.Args, found.user) {
+		if response, ok := h.checkCurrent(found.user, request.Current); !ok {
+			return response
+		}
+	}
 	log.Printf("%s ran fnas %s", found.user, strings.Join(request.Args, " "))
 	stdout, stderr, err := h.config.Fnas(request.Args, request.Input)
 	if err != nil {
@@ -438,6 +448,39 @@ func (h *Helper) fnas(request protocol.Request) protocol.Response {
 		return protocol.Response{Code: protocol.CodeFailed, Error: strings.Join(lines, "\n"), Output: stdout}
 	}
 	return protocol.Response{Output: stdout}
+}
+
+// OwnPassword is whether args set user's own password
+func OwnPassword(args []string, user string) bool {
+	if len(args) > 0 && args[0] == "--json" {
+		args = args[1:]
+	}
+	return slices.Equal(args, []string{"user", "password", user, "--password-stdin"}) ||
+		slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"})
+}
+
+// checkCurrent checks a person's current password with the same limits as
+// logging in, since it is another way to guess one
+func (h *Helper) checkCurrent(user, current string) (protocol.Response, bool) {
+	now := h.config.Now()
+	keys := []string{"user:" + user}
+	if wait := h.limiter.wait(keys, now); wait > 0 {
+		seconds := max(1, int(wait.Round(time.Second)/time.Second))
+		return protocol.Response{Code: protocol.CodeThrottled, RetryAfter: seconds,
+			Error: fmt.Sprintf("Too many wrong passwords. Try again in %d seconds.", seconds)}, false
+	}
+	err := errors.New("no current password")
+	if current != "" && len(current) <= 1024 {
+		err = h.config.Authenticate(user, current)
+	}
+	// A password that has to be changed is still the right one
+	if err != nil && !errors.Is(err, ErrExpired) {
+		log.Printf("wrong current password for %q", user)
+		h.limiter.fail(keys, now)
+		return failure(protocol.CodeForbidden, wrongCurrent), false
+	}
+	h.limiter.succeed(keys)
+	return protocol.Response{}, true
 }
 
 func (h *Helper) list(request protocol.Request) protocol.Response {

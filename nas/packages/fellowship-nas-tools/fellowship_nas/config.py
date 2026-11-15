@@ -141,7 +141,7 @@ def restore_memberships(user):
         if isinstance(group, str) and group in known and ACCOUNT_NAME.match(group):
             run("gpasswd", "-a", user["name"], group, check=False)
     if user.get("admin") is True:
-        run("gpasswd", "-a", user["name"], users.ADMIN_GROUP, check=False)
+        users.set_admin(user["name"], True)
 
 
 def restore_config(pool):

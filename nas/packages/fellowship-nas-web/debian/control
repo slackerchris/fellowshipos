@@ -2,7 +2,7 @@ Source: fellowship-nas-web
 Section: admin
 Priority: optional
 Maintainer: slackerchris <slackerchris@gmail.com>
-Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~), libpam0g-dev
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.24~), libpam0g-dev, libcrypt-dev
 Standards-Version: 4.7.0
 
 Package: fellowship-nas-web

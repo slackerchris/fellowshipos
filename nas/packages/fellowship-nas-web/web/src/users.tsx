@@ -80,10 +80,14 @@ function KindChoice({ kind, setKind, admin, setAdmin }: {
     admin: boolean;
     setAdmin: (admin: boolean) => void;
 }) {
+    // A separated NAS gives nobody a shell: that is root's
+    const status = useLoad(() => fnasJson<{ separated: boolean }>(["accounts", "status"]));
+    const kinds = (Object.keys(KINDS) as User["kind"][])
+        .filter(option => option !== "ssh" || !status.data?.separated || kind === "ssh");
     return (
         <div class="field">
             <span class="field-label">What they can do</span>
-            {(Object.keys(KINDS) as User["kind"][]).map(option => (
+            {kinds.map(option => (
                 <label class="choice" key={option}>
                     <input type="radio" name="kind" checked={kind === option} onChange={() => setKind(option)} />
                     <span><strong>{KINDS[option].title}</strong><br /><span class="muted small">{KINDS[option].text}</span></span>
@@ -154,6 +158,7 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
     const [again, setAgain] = useState("");
     const save = useAction(onDone);
     const setPasswordAction = useAction();
+    const { user: me } = useContext(SessionContext);
     return (
         <div class="stack">
             <Field label="Full name">
@@ -171,7 +176,10 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
                 <Button onClick={onDone}>Close</Button>
             </div>
             <Result outcome={save.outcome} />
-            <form class="stack" onSubmit={event => {
+            {user.name === me ? (
+                <p class="muted small">Change your own password in Settings, under Your account: it asks for the
+                    one you use now.</p>
+            ) : <form class="stack" onSubmit={event => {
                 event.preventDefault();
                 setPasswordAction.run(async () => {
                     const output = await fnas(["user", "password", user.name, "--password-stdin"], password);
@@ -184,7 +192,7 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
                 <div class="row"><Button type="submit" busy={setPasswordAction.busy}
                                          disabled={!!passwordProblem(password, again)}>Set password</Button></div>
                 <Result outcome={setPasswordAction.outcome} />
-            </form>
+            </form>}
             <SshKeys user={user} />
             <div class="field">
                 <span class="field-label">Shares {user.name} can use</span>

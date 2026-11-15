@@ -59,6 +59,21 @@ LEGACY_SMB = "org.fellowshipos:smb"
 LEGACY_POLICY = "org.fellowshipos:snapshots"
 
 
+# The firmware's Secure Boot state: four bytes of attributes, then 1 when it is on
+SECURE_BOOT_VAR = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+
+def secure_boot_on():
+    """Read from the firmware itself rather than mokutil, which nothing installs:
+    a missing tool must not turn "is ZFS usable?" into an error."""
+    try:
+        with open(SECURE_BOOT_VAR, "rb") as file:
+            data = file.read()
+    except OSError:
+        return False
+    return len(data) >= 5 and data[4] == 1
+
+
 def unavailable():
     """Why ZFS can't be used on this machine, or "" when it can."""
     if os.path.isdir(MODULE_DIR):
@@ -66,7 +81,7 @@ def unavailable():
     run("modprobe", "zfs", check=False)
     if os.path.isdir(MODULE_DIR):
         return ""
-    if "enabled" in run("mokutil", "--sb-state", check=False).stdout:
+    if secure_boot_on():
         return "Secure Boot is on, and the ZFS module isn't signed for it"
     return "the ZFS kernel module isn't installed for this kernel"
 

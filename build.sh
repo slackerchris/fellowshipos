@@ -43,7 +43,7 @@ rm -f "${TEMPLATE_NAME}_lxc.tar.gz"
 PACKAGES='
         set -e
         apt-get update -qq
-        apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev
+        apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
         nas/packages/build.sh
         installer/build.sh
         installer/cog/build.sh
@@ -79,7 +79,7 @@ for edition in $EDITIONS; do
         bash -c "
             set -e
             apt-get update -qq
-            apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev
+            apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
 
             # The NAS packages are in the NAS image only: the multi-purpose
             # image leaves the role to first boot and offers no NAS choice.

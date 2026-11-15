@@ -1,7 +1,8 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
 import {
-    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, endSession, fnas, fnasJson, humanSize, jobStarted,
+    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, changeOwnPassword, endSession, fnas, fnasJson,
+    humanSize, jobStarted,
     onOff, sessions, when,
 } from "./api";
 import { MODES, PALETTES, useAppearance } from "./appearance";
@@ -12,6 +13,7 @@ export const SessionContext = createContext<Session>({ id: "", user: "", admin: 
 
 function OwnPassword() {
     const { user } = useContext(SessionContext);
+    const [current, setCurrent] = useState("");
     const [password, setPassword] = useState("");
     const [again, setAgain] = useState("");
     const action = useAction();
@@ -22,12 +24,17 @@ function OwnPassword() {
             <form class="stack" onSubmit={event => {
                 event.preventDefault();
                 action.run(async () => {
-                    const output = await fnas(["user", "password", user, "--password-stdin"], password);
+                    const output = await changeOwnPassword(user, current, password);
+                    setCurrent("");
                     setPassword("");
                     setAgain("");
                     return output;
                 });
             }}>
+                <Field label="Current password">
+                    <input type="password" autoComplete="current-password" value={current}
+                           onInput={event => setCurrent(event.currentTarget.value)} />
+                </Field>
                 <div class="grid-2">
                     <Field label="New password" hint="At least 8 characters">
                         <input type="password" autoComplete="new-password" value={password}
@@ -40,7 +47,8 @@ function OwnPassword() {
                 </div>
                 {again && password !== again && <p class="muted small">The passwords don't match.</p>}
                 <div class="row">
-                    <Button type="submit" busy={action.busy} disabled={password.length < 8 || password !== again}>
+                    <Button type="submit" busy={action.busy}
+                            disabled={!current || password.length < 8 || password !== again}>
                         Change password</Button>
                 </div>
                 <Result outcome={action.outcome} />

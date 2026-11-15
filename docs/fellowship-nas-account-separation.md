@@ -3,7 +3,8 @@
 **Status:** being built, in the phases at the end. The direction was agreed by
 Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
-container on 2026-11-15. Phase 1 (SFTP read-only shares) is done.
+container on 2026-11-15. Phases 1 (SFTP read-only shares) and 2 (the NAS
+store and login) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -555,15 +556,35 @@ Run in VMs, from the image, against a real system:
 ## Phases
 
 1. **SFTP read-only shares.** Done.
-2. **The NAS store and login.**
-   - the store
-   - libcrypt hashing in `fnas`
-   - `fnas auth check`
-   - the helper logging in against the store, with the two roles
-   - own-password changes needing the current password
-   - "Allow SFTP" replacing the kinds
+2. **The NAS store and login.** Done.
+   - `fellowship_nas/accounts.py`: the store, plus hashing and checking through
+     libcrypt via ctypes
+   - `users.py` keeps people in the store whenever it exists: no Linux
+     password, no shell, no home
+   - `fnas auth check` and `fnas accounts status`
+   - the helper's `internal/store` package: login and the NAS admin role from
+     the store, through libcrypt via cgo
+   - changing your own password needs the current one, admins included, with
+     the login page's throttle
+   - Users only offers shares and Files over SFTP on a separated NAS
 
-   Old-model machines keep using PAM until they're migrated.
+   A NAS without the store keeps PAM and the `nas-admins` group, as before.
+
+   **Tested** with `nas/tests/integration/separated-login.sh`: the real
+   packages, Samba, sshd, helper and web server, all 34 checks passing.
+   - a person's Linux password is locked, with no shell and no home
+   - the desktop and SMB take the NAS password; SSH doesn't
+   - the admin role comes from the store
+   - your own password can't be changed without the current one
+   - after a change, the new password works for the desktop and SMB, the old
+     one for neither, and you're signed out everywhere
+   - turning someone off refuses the desktop and SMB without unlocking their
+     Linux password
+
+   While building it, a latent bug turned up and was fixed: with no ZFS module
+   loaded, `fnas` checked Secure Boot with `mokutil`, which nothing installs,
+   so the check itself crashed share listing and every user change. It now
+   reads the firmware's Secure Boot variable.
 3. **The maintenance interface.**
    - `--caller` and root-only marks in `fnas`
    - per-operation checks in the helper

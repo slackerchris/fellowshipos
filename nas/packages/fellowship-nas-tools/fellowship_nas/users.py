@@ -1,11 +1,19 @@
-"""People's accounts and groups. Every account has one password, set for Linux
-and Samba together, so the desktop and every way to share take the same one."""
+"""People's accounts and groups. Every account has one password for the desktop
+and every way to share.
+
+Two models, chosen by whether the NAS has an account store (accounts.py):
+- separated: people's passwords live in the store and Samba, and their Linux
+  side is a UID with a locked password and no shell;
+- not yet separated: people are Linux logins, their password set for Linux and
+  Samba together, as before.
+"""
 import grp
 import os
 import pwd
 import re
 import time
 
+from . import accounts
 from .common import ACCOUNT_NAME, STATE_DIR, FnasError, locked, read_json, run, write_json
 
 
@@ -18,6 +26,8 @@ FIRST_ID, LAST_ID = 1000, 60000
 SFTP_SHELL = "/usr/local/lib/fellowship-nas/sftp-only"
 # What an account may do besides using shares
 KINDS = {"shares": "/usr/sbin/nologin", "sftp": SFTP_SHELL, "ssh": "/bin/bash"}
+# On a separated NAS shell access is root's alone
+SEPARATED_KINDS = ("shares", "sftp")
 FULL_NAME = re.compile(r"^[^:,\n\x00]{0,64}$")
 # Accounts in the people range that belong to the NAS itself
 SERVICE_ACCOUNTS = {"nas-share"}
@@ -125,6 +135,8 @@ def list_groups(include_system=False):
 
 
 def list_users():
+    if accounts.is_separated():
+        return list_separated()
     smb = smb_accounts()
     passwords = shadow()
     mine = managed_group_names() | system_group_names()
@@ -140,6 +152,26 @@ def list_users():
                       "groups": sorted(g.gr_name for g in grp.getgrall() if name in g.gr_mem and g.gr_name in mine),
                       "password": passwords.get(name, {}).get("password", False),
                       "smb_password": name in smb, "enabled": not passwords.get(name, {}).get("off", False)})
+    return found
+
+
+def list_separated():
+    """People from the store, with their Unix side read from the system, which is
+    where their UID and groups really are."""
+    smb = smb_accounts()
+    mine = managed_group_names() | system_group_names()
+    found = []
+    for name, entry in sorted(accounts.store_people().items()):
+        try:
+            account = pwd.getpwnam(name)
+        except KeyError:
+            continue
+        found.append({"name": name, "uid": account.pw_uid, "full_name": entry.get("full_name", ""),
+                      "kind": "sftp" if entry.get("sftp") else "shares",
+                      "admin": bool(entry.get("admin")),
+                      "groups": sorted(g.gr_name for g in grp.getgrall() if name in g.gr_mem and g.gr_name in mine),
+                      "password": bool(entry.get("hash")), "smb_password": name in smb,
+                      "enabled": entry.get("enabled", True), "must_change": bool(entry.get("must_change"))})
     return found
 
 
@@ -198,16 +230,25 @@ def end_sessions(name):
 
 
 def set_password(name, password):
-    """One password for Linux and Samba."""
+    """One password for the desktop and Samba: in the store on a separated NAS,
+    and for Linux otherwise. Setting it is also what brings a desktop and an SMB
+    password that drifted apart back together."""
     find_user(name)
     check_password(password)
-    run("chpasswd", stdin=f"{name}:{password}\n")
+    if accounts.is_separated():
+        hashed = accounts.hash_password(password)
+        with accounts.changing_store() as store:
+            accounts.set_password_hash(store["people"][name], hashed)
+    else:
+        run("chpasswd", stdin=f"{name}:{password}\n")
     if os.path.isdir("/etc/samba"):
         run("smbpasswd", "-s", "-a", name, stdin=f"{password}\n{password}\n")
     end_sessions(name)
 
 
 def admins():
+    if accounts.is_separated():
+        return {name for name, entry in accounts.store_people().items() if entry.get("admin")}
     try:
         return set(grp.getgrnam(ADMIN_GROUP).gr_mem)
     except KeyError:
@@ -220,6 +261,12 @@ def check_not_last_admin(name):
 
 
 def set_admin(name, admin):
+    if accounts.is_separated():
+        if not admin and name in admins():
+            check_not_last_admin(name)
+        with accounts.changing_store() as store:
+            store["people"][name]["admin"] = bool(admin)
+        return
     if admin:
         run("gpasswd", "-a", name, ADMIN_GROUP)
     elif name in admins():
@@ -239,13 +286,29 @@ def set_groups(name, wanted):
         run("gpasswd", "-d", name, group)
 
 
+def check_kind(kind):
+    if accounts.is_separated() and kind not in SEPARATED_KINDS:
+        raise FnasError("on this NAS people can't have a shell: shell access is root's. "
+                        "Use shares, or allow SFTP for file access")
+
+
 def create_user(name, full_name, kind, admin, groups, password):
     check_new_name(name, "user")
     check_full_name(full_name)
     check_password(password)
+    check_kind(kind)
     for group in groups:
         find_group(group)
-    run("useradd", "--create-home", "--shell", KINDS[kind], "--comment", full_name or "", name)
+    if accounts.is_separated():
+        # A UID and group for owning files, and nothing to log in with: useradd
+        # leaves the password locked, and no home is made in /home
+        run("useradd", "--no-create-home", "--home-dir", "/nonexistent", "--shell", KINDS[kind],
+            "--comment", full_name or "", name)
+        with accounts.changing_store() as store:
+            store["people"][name] = accounts.new_person(pwd.getpwnam(name).pw_uid, full_name or "",
+                                                    sftp=kind == "sftp")
+    else:
+        run("useradd", "--create-home", "--shell", KINDS[kind], "--comment", full_name or "", name)
     set_password(name, password)
     set_groups(name, groups)
     set_admin(name, admin)
@@ -253,6 +316,9 @@ def create_user(name, full_name, kind, admin, groups, password):
 
 def change_user(name, full_name=None, kind=None, admin=None, groups=None, enabled=None):
     user = find_user(name)
+    if accounts.is_separated():
+        change_separated(user, full_name, kind, admin, groups, enabled)
+        return
     if full_name is not None:
         check_full_name(full_name)
         run("usermod", "--comment", full_name, name)
@@ -275,6 +341,43 @@ def change_user(name, full_name=None, kind=None, admin=None, groups=None, enable
             run("smbpasswd", "-e", name)
 
 
+def change_separated(user, full_name, kind, admin, groups, enabled):
+    """change_user on a separated NAS. Turning someone off never touches their
+    Linux password, which stays locked either way: `usermod --unlock` on it would
+    try to make a passwordless account. The account's expiry is what makes SMB
+    and SFTP refuse them, through PAM's account check."""
+    name = user["name"]
+    if full_name is not None:
+        check_full_name(full_name)
+        run("usermod", "--comment", full_name, name)
+    if kind is not None:
+        check_kind(kind)
+        run("usermod", "--shell", KINDS[kind], name)
+    if groups is not None:
+        set_groups(name, groups)
+    if admin is not None:
+        set_admin(name, admin)
+    if enabled is False and user["admin"]:
+        check_not_last_admin(name)
+    with accounts.changing_store() as store:
+        entry = store["people"][name]
+        if full_name is not None:
+            entry["full_name"] = full_name
+        if kind is not None:
+            entry["sftp"] = kind == "sftp"
+        if enabled is not None:
+            entry["enabled"] = enabled
+    if enabled is False:
+        run("usermod", "--expiredate", OFF_EXPIRY, name)
+        if user["smb_password"]:
+            run("smbpasswd", "-d", name)
+        end_sessions(name)
+    elif enabled is True:
+        run("usermod", "--expiredate", "", name)
+        if user["smb_password"]:
+            run("smbpasswd", "-e", name)
+
+
 def remove_user(name, keep_home, confirm, shares_lost):
     user = find_user(name)
     expected = f"remove {name}"
@@ -288,6 +391,9 @@ def remove_user(name, keep_home, confirm, shares_lost):
     if user["smb_password"]:
         run("smbpasswd", "-x", name, check=False)
     run("userdel", *([] if keep_home else ["--remove"]), name)
+    if accounts.is_separated():
+        with accounts.changing_store() as store:
+            store["people"].pop(name, None)
     end_sessions(name)
 
 

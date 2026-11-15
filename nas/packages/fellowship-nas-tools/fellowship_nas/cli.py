@@ -9,7 +9,7 @@ import time
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, sftp, snapshots, \
     ssh, system, usage, users
-from . import storage_checks
+from . import accounts, storage_checks
 from .engines import mdadm
 
 
@@ -625,6 +625,15 @@ def build_parser():
     setup_done.add_argument("--skipped", action="store_true", help="it was skipped rather than finished")
     setup.add_parser("reset", help="open Setup again at the next admin login")
 
+    accounts_ = area.add_parser("accounts", help="where people's accounts are kept").add_subparsers(
+        dest="action", required=True)
+    accounts_.add_parser("status", help="whether this NAS keeps people in its own store")
+
+    auth = area.add_parser("auth", help="check a NAS person's password (root only)").add_subparsers(
+        dest="action", required=True)
+    auth_check = auth.add_parser("check", help="exit 0 if the password on stdin is right and the person may log in")
+    auth_check.add_argument("name")
+
     area.add_parser("check", help="look for problems and send alerts")
     area.add_parser("health", help="show every check, service, pool and disk, sending nothing")
     return parser
@@ -670,6 +679,18 @@ def dispatch(args):
         dispatch_config(args, show)
     elif args.area == "system":
         dispatch_system(args, show)
+    elif args.area == "accounts":
+        separated = accounts.is_separated()
+        show({"separated": separated}, lambda found: print(
+            "People are kept in the NAS's own store: they have no Linux login." if separated else
+            "People are Linux accounts, checked through PAM. This NAS hasn't been separated yet."))
+    elif args.area == "auth":
+        # Says nothing on stdout: whoever calls it learns yes or no from the exit
+        # code, and a reason only on stderr for root reading it
+        why = accounts.check_login(args.name, sys.stdin.read().rstrip("\n"))
+        if why:
+            print(f"fnas: {why}", file=sys.stderr)
+            sys.exit(1)
     elif args.area == "check":
         show(health.run_checks(), print_findings)
     elif args.area == "health":

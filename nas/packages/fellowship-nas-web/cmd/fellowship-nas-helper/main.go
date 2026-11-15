@@ -25,6 +25,7 @@ import (
 	"fellowship-nas-web/internal/helper"
 	"fellowship-nas-web/internal/pam"
 	"fellowship-nas-web/internal/protocol"
+	"fellowship-nas-web/internal/store"
 )
 
 const outputLimit = 4 << 20
@@ -58,6 +59,7 @@ var (
 	service    = flag.String("pam-service", "fellowship-nas-web", "the PAM service that checks passwords")
 	frontUser  = flag.String("front-user", "fnas-web", "the account the web front runs as")
 	adminGroup = flag.String("admin-group", "nas-admins", "the group that may manage the NAS")
+	storePath  = flag.String("store", store.Path, "the NAS's account store; while it exists, people log in against it rather than PAM")
 )
 
 // limited keeps the first outputLimit bytes, so a runaway command can't fill memory
@@ -102,6 +104,10 @@ func lookup(name string) (helper.Account, error) {
 			continue
 		}
 		groups = append(groups, uint32(number))
+	}
+	// On a separated NAS a NAS admin is whoever the store says, never a Unix group
+	if store.Separated(*storePath) {
+		return helper.Account{UID: uid, GID: gid, Groups: groups, Admin: store.Admin(*storePath, name)}, nil
 	}
 	admins, err := user.LookupGroup(*adminGroup)
 	return helper.Account{UID: uid, GID: gid, Groups: groups,
@@ -167,6 +173,15 @@ func (c *childOut) Close() error {
 }
 
 func authenticate(name, password string) error {
+	// A separated NAS's people have no Linux password: the store is the only
+	// place theirs is
+	if store.Separated(*storePath) {
+		err := store.Check(*storePath, name, password)
+		if errors.Is(err, store.ErrExpired) {
+			return helper.ErrExpired
+		}
+		return err
+	}
 	err := pam.Authenticate(*service, name, password)
 	if errors.Is(err, pam.ErrExpired) {
 		return helper.ErrExpired
