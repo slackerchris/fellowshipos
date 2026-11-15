@@ -126,6 +126,8 @@ r=$(login "$(mktemp)" ann 'ann password 22')
 [ "$(code "$r")" != 200 ] && pass "the old password doesn't" || fail "the old password doesn't"
 expect "SMB takes the new password" smbclient //127.0.0.1/t -U 'ann%ann new pass 3' -c ls
 refuse "SMB refuses the old one" smbclient //127.0.0.1/t -U 'ann%ann password 22' -c ls
+# The helper rereads who was signed out at most once a second
+sleep 1.2
 r=$(api "$A" GET /api/session)
 [ "$(code "$r")" != 200 ] && pass "the change signed ann out everywhere" || fail "the change signed ann out everywhere: $r"
 

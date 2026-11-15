@@ -2819,6 +2819,177 @@ class Setup(unittest.TestCase):
             self.assertTrue(status["skipped"])
 
 
+class MaintenanceInterface(unittest.TestCase):
+    """With --caller (a NAS person, through the helper) fnas refuses root's
+    commands itself and writes maintenance to the journal: the second lock
+    behind the helper's list (docs/fellowship-nas-account-separation.md)."""
+
+    HELPER = os.path.join(os.path.dirname(__file__), "..", "..", "packages", "fellowship-nas-web",
+                          "internal", "helper", "helper.go")
+
+    def setUp(self):
+        self.maintenance = {m.__name__: m for m in MODULES}["fellowship_nas.maintenance"]
+        self.cli = {m.__name__: m for m in MODULES}["fellowship_nas.cli"]
+        self.calls, self.alerts = [], []
+
+        def run(*command, check=True, stdin=None, **kw):
+            self.calls.append(command)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+        for patcher in (mock.patch.object(self.maintenance, "run", run),
+                        mock.patch.object(fnas.alerts, "send_alert",
+                                          lambda severity, title, body: self.alerts.append(title))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def every_command(self):
+        """Every area and action the parser knows."""
+        found = []
+        parser = self.cli.build_parser()
+        areas = next(a for a in parser._actions if a.dest == "area")
+        for area, sub in areas.choices.items():
+            actions = [a for a in sub._actions if getattr(a, "dest", None) == "action"]
+            if not actions:
+                found.append((area, ""))
+            for action in (actions[0].choices if actions else []):
+                found.append((area, action))
+        return found
+
+    def helper_list(self):
+        """The helper's own list of what NAS admins may run, read from its source."""
+        import re
+        with open(self.HELPER) as file:
+            text = file.read()
+        block = text[text.index("var commands = map[string][]string{"):]
+        block = block[:block.index("\n}\n")]
+        found = set()
+        for area, actions in re.findall(r'"([a-z-]+)":\s*(nil|\{[^}]*\})', block):
+            if actions == "nil":
+                found.add((area, ""))
+            else:
+                found.update((area, a) for a in re.findall(r'"([a-z-]+)"', actions))
+        return found
+
+    def test_what_the_helper_lets_through_is_never_root_only_here(self):
+        for area, action in sorted(self.helper_list()):
+            with self.subTest(f"{area} {action}"):
+                self.assertNotEqual(self.maintenance.kind(area, action), "root")
+
+    def test_what_fnas_lets_a_caller_reach_the_helper_also_lists(self):
+        # The other way round: nothing here is open to a caller that the helper
+        # wouldn't send, so the two lists can't drift apart unnoticed
+        listed = self.helper_list()
+        for area, action in self.every_command():
+            if self.maintenance.kind(area, action) != "root":
+                with self.subTest(f"{area} {action}"):
+                    self.assertIn((area, action), listed)
+
+    def test_root_only_commands_are_refused_to_a_caller(self):
+        for argv in (["--caller", "kim", "auth", "check", "kim"], ["--caller", "kim", "job", "run", "0123456789ab"],
+                     ["--caller", "kim", "alert", "send", "x", "y"]):
+            with self.subTest(argv), mock.patch.object(fnas.os, "geteuid", return_value=0), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, \
+                    mock.patch.object(self.cli, "dispatch") as dispatched:
+                self.assertEqual(self.cli.main(argv), 1)
+                self.assertIn("for root alone", err.getvalue())
+                dispatched.assert_not_called()
+
+    def test_root_itself_is_not_held_back(self):
+        with mock.patch.object(fnas.os, "geteuid", return_value=0), \
+                mock.patch.object(self.cli, "dispatch") as dispatched, \
+                mock.patch.object(self.cli.config, "after_change"):
+            self.assertEqual(self.cli.main(["auth", "check", "kim"]), 0)
+        dispatched.assert_called_once()
+
+    def test_maintenance_is_written_down_under_the_callers_name(self):
+        with mock.patch.object(fnas.os, "geteuid", return_value=0), \
+                mock.patch.object(self.cli, "dispatch"), mock.patch.object(self.cli.config, "after_change"):
+            self.assertEqual(self.cli.main(["--caller", "kim", "system", "hostname", "nas2"]), 0)
+            self.assertEqual(self.cli.main(["--caller", "kim", "system", "restart", "--confirm",
+                                            "restart the NAS"]), 0)
+            self.assertEqual(self.cli.main(["--caller", "kim", "--json", "pool", "list"]), 0)
+        logged = [c for c in self.calls if c[0] == "logger"]
+        self.assertEqual([c[-1] for c in logged],
+                         ["kim asked for: system hostname nas2",
+                          "kim asked for: system restart --confirm restart the NAS"])
+        # A restart is one every admin hears about; a new name is in the journal only
+        self.assertEqual(self.alerts, ["Maintenance by kim: system restart"])
+
+
+class Updates(unittest.TestCase):
+    """Updates are looked for every day and announced, and install only when asked."""
+
+    SIMULATION = (
+        "Reading package lists...\n"
+        "Inst libc6 [2.41-12] (2.41-12+deb13u1 Debian-Security:13/stable-security [amd64])\n"
+        "Inst zfs-dkms [2.3.9-0+deb13u1] (2.3.9-0+deb13u2 Debian:13.4/stable [all])\n"
+        "Inst linux-image-6.12.120 (6.12.120-1 Debian-Security:13/stable-security [amd64])\n"
+        "Conf libc6 (2.41-12+deb13u1 Debian-Security:13/stable-security [amd64])\n")
+
+    def setUp(self):
+        self.updates = {m.__name__: m for m in MODULES}["fellowship_nas.updates"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.calls, self.alerts = [], []
+        self.simulation = self.SIMULATION
+
+        def run(*command, check=True, stdin=None, **kw):
+            self.calls.append(command)
+            out = self.simulation if command[:2] == ("apt-get", "-s") else ""
+            return SimpleNamespace(stdout=out, stderr="", returncode=0)
+        for patcher in (mock.patch.object(self.updates, "run", run),
+                        mock.patch.object(self.updates, "STATE", os.path.join(self.dir, "updates.json")),
+                        mock.patch.object(self.updates, "REBOOT_FLAG", os.path.join(self.dir, "reboot-required")),
+                        mock.patch.object(self.updates, "REBOOT_PACKAGES", os.path.join(self.dir, "reboot.pkgs")),
+                        mock.patch.object(self.updates.alerts, "send_alert",
+                                          lambda severity, title, body: self.alerts.append((severity, title)))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_what_apt_would_install_is_read_from_its_simulation(self):
+        found = self.updates.waiting(self.SIMULATION)
+        self.assertEqual([(p["name"], p["from"], p["to"], p["security"]) for p in found],
+                         [("libc6", "2.41-12", "2.41-12+deb13u1", True),
+                          ("zfs-dkms", "2.3.9-0+deb13u1", "2.3.9-0+deb13u2", False),
+                          ("linux-image-6.12.120", None, "6.12.120-1", True)])
+
+    def test_checking_installs_nothing(self):
+        self.updates.check(now=1000)
+        self.assertFalse([c for c in self.calls if c[0] == "apt-get" and "-s" not in c and "update" not in c])
+
+    def test_a_new_set_of_updates_is_announced_once(self):
+        self.updates.check(now=1000)
+        self.assertEqual(self.alerts, [("medium", "3 updates waiting, 2 for security")])
+        self.updates.check(now=2000)
+        self.assertEqual(len(self.alerts), 1)
+        self.simulation = self.SIMULATION.replace("deb13u2", "deb13u3")
+        self.updates.check(now=3000)
+        self.assertEqual(len(self.alerts), 2)
+
+    def test_nothing_waiting_is_not_announced(self):
+        self.simulation = ""
+        found = self.updates.check(now=1000)
+        self.assertEqual((found["packages"], self.alerts), ([], []))
+
+    def test_installing_upgrades_without_removing_anything(self):
+        self.updates.install()
+        installs = [c for c in self.calls if "upgrade" in c and "-s" not in c]
+        self.assertEqual(len(installs), 1)
+        self.assertIn("--with-new-pkgs", installs[0])
+        self.assertNotIn("dist-upgrade", installs[0])
+        self.assertEqual(self.alerts[-1], ("info", "Updates installed"))
+
+    def test_a_needed_restart_is_said_and_never_done(self):
+        with open(os.path.join(self.dir, "reboot-required"), "w"):
+            pass
+        with open(os.path.join(self.dir, "reboot.pkgs"), "w") as file:
+            file.write("linux-image-6.12.120\nlibc6\n")
+        found = self.updates.status()
+        self.assertEqual(found["restart"], {"needed": True, "packages": ["libc6", "linux-image-6.12.120"]})
+        self.updates.install()
+        self.assertFalse([c for c in self.calls if c[0] in ("reboot", "shutdown", "systemctl")])
+
+
 class ZfsSecureBoot(unittest.TestCase):
     """Whether ZFS is usable mustn't depend on mokutil, which nothing installs."""
 

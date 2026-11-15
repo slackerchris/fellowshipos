@@ -22,10 +22,12 @@ class FnasError(Exception):
     pass
 
 
-def run(*command, check=True, stdin=None, timeout=TIMEOUT):
+def run(*command, check=True, stdin=None, timeout=TIMEOUT, env=None):
+    """env adds to the few variables every command gets."""
     try:
         result = subprocess.run(command, input=stdin, capture_output=True, text=True, timeout=timeout,
-                                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "HOME": "/root"})
+                                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "HOME": "/root",
+                                     **(env or {})})
     except FileNotFoundError:
         raise FnasError(f"{command[0]} is not installed") from None
     except subprocess.TimeoutExpired:

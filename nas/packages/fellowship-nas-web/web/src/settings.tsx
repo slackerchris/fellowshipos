@@ -1,7 +1,8 @@
 import { createContext } from "preact";
 import { useContext, useState } from "preact/hooks";
 import {
-    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, changeOwnPassword, endSession, fnas, fnasJson,
+    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus, changeOwnPassword, endSession,
+    fnas, fnasJson,
     humanSize, jobStarted,
     onOff, sessions, when,
 } from "./api";
@@ -244,6 +245,84 @@ function Power() {
                 </Confirm>
             )}
         </Card>
+    );
+}
+
+/** Updates are looked for every day and announced; they install, and the NAS
+    restarts, only when somebody asks here. */
+function Updates() {
+    const status = useLoad(() => fnasJson<UpdatesStatus>(["updates", "show"]));
+    const check = useAction(status.reload);
+    const install = useAction(status.reload);
+    const restart = useAction();
+    const [asking, setAsking] = useState<"install" | "restart" | null>(null);
+    return (
+        <Loading loaded={status}>{() => {
+            const found = status.data!;
+            const security = found.packages.filter(p => p.security).length;
+            return (
+                <div class="stack">
+                    <Card title="Updates" actions={<Button busy={check.busy}
+                        onClick={() => check.run(() => fnas(["updates", "check"]))}>Check now</Button>}>
+                        <p class="muted small">The NAS looks for updates every day and tells you when new ones are
+                            waiting. Nothing installs, and the NAS never restarts, until you ask here.</p>
+                        <p class="small">Last checked: <strong>{found.checked ? when(found.checked) : "never"}</strong>
+                            {found.installed ? <> · last installed {when(found.installed)}</> : null}</p>
+                        {found.error && <Notice kind="warning">The last check couldn't reach every source: {found.error}</Notice>}
+                        <Result outcome={check.outcome} />
+                        {found.packages.length === 0 ? <p>Everything is up to date.</p> : (
+                            <>
+                                <p><strong>{found.packages.length} waiting</strong>
+                                    {security ? <>, <Badge kind="warning">{security} for security</Badge></> : null}</p>
+                                <table class="small">
+                                    <thead><tr><th>Package</th><th>Now</th><th>New</th><th /></tr></thead>
+                                    <tbody>{found.packages.map(p => (
+                                        <tr key={p.name}><td class="mono">{p.name}</td><td class="mono">{p.from ?? "new"}</td>
+                                            <td class="mono">{p.to}</td>
+                                            <td>{p.security && <Badge kind="warning">security</Badge>}</td></tr>))}</tbody>
+                                </table>
+                                <div class="row"><Button kind="primary" onClick={() => setAsking("install")}>Install updates</Button></div>
+                            </>
+                        )}
+                        {asking === "install" && (
+                            <Confirm title="Install updates" phrase="install updates" busy={install.busy}
+                                     outcome={install.outcome}
+                                     onCancel={() => { setAsking(null); install.clear(); }}
+                                     onConfirm={() => install.run(async () => {
+                                         const output = jobStarted(await fnas(["updates", "install"]), "in the taskbar");
+                                         setAsking(null);
+                                         return output;
+                                     })}>
+                                <p>Installs the {found.packages.length} update{found.packages.length === 1 ? "" : "s"} listed,
+                                    from the sources this NAS already uses. Shares keep working meanwhile. If a restart is
+                                    needed afterwards, this page says so and waits for you.</p>
+                            </Confirm>
+                        )}
+                        {asking !== "install" && <Result outcome={install.outcome} />}
+                    </Card>
+                    {found.restart.needed && (
+                        <Card title="Restart needed">
+                            <p class="small">Installed updates finish when the NAS restarts
+                                {found.restart.packages.length ? <>: {found.restart.packages.join(", ")}</> : null}.
+                                It won't restart by itself.</p>
+                            <div class="row"><Button onClick={() => setAsking("restart")}>Restart now</Button></div>
+                            {asking === "restart" ? (
+                                <Confirm title={POWER.restart.label} phrase={POWER.restart.phrase} busy={restart.busy}
+                                         outcome={restart.outcome}
+                                         onCancel={() => { setAsking(null); restart.clear(); }}
+                                         onConfirm={typed => restart.run(async () => {
+                                             const output = await fnas(["system", "restart", "--confirm", typed]);
+                                             setAsking(null);
+                                             return output;
+                                         })}>
+                                    <p>{POWER.restart.text}</p>
+                                </Confirm>
+                            ) : <Result outcome={restart.outcome} />}
+                        </Card>
+                    )}
+                </div>
+            );
+        }}</Loading>
     );
 }
 
@@ -521,9 +600,7 @@ export function Settings() {
                 {section === "network" && <NotBuilt title="Network" phase={15}>Choosing between an automatic address (DHCP)
                     and a fixed one, and setting DNS and the gateway, comes here. Until then the NAS takes its address
                     automatically; to keep it from changing, reserve it in your router.</NotBuilt>}
-                {section === "updates" && <NotBuilt title="Updates" phase={15}>Seeing and installing updates comes here.
-                    Debian security updates already install by themselves every day, without restarting; Health shows
-                    how many updates are waiting and whether a restart is needed.</NotBuilt>}
+                {section === "updates" && <Updates />}
                 {section === "checks" && <StorageChecks />}
                 {section === "ssh" && <Ssh />}
                 {section === "power" && <Power />}

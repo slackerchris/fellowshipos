@@ -9,7 +9,7 @@ import time
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, sftp, snapshots, \
     ssh, system, usage, users
-from . import accounts, storage_checks
+from . import accounts, maintenance, storage_checks, updates
 from .engines import mdadm
 
 
@@ -319,6 +319,9 @@ def names(value):
 def build_parser():
     parser = argparse.ArgumentParser(prog="fnas", description="FellowshipNAS storage and protection helper")
     parser.add_argument("--json", action="store_true", help="print lists as JSON")
+    # The helper names the NAS person it runs fnas for; with a caller, root-only
+    # commands are refused and maintenance is written to the journal
+    parser.add_argument("--caller", help=argparse.SUPPRESS)
     area = parser.add_subparsers(dest="area", required=True)
 
     disk = area.add_parser("disk", help="show disks").add_subparsers(dest="action", required=True)
@@ -625,6 +628,12 @@ def build_parser():
     setup_done.add_argument("--skipped", action="store_true", help="it was skipped rather than finished")
     setup.add_parser("reset", help="open Setup again at the next admin login")
 
+    updates_ = area.add_parser("updates", help="updates: checked by themselves, installed when asked").add_subparsers(
+        dest="action", required=True)
+    updates_.add_parser("show", help="what is waiting, when it was checked, and whether a restart is needed")
+    updates_.add_parser("check", help="fetch the package lists and say what is waiting; installs nothing")
+    updates_.add_parser("install", help="install what is waiting, as a job")
+
     accounts_ = area.add_parser("accounts", help="where people's accounts are kept").add_subparsers(
         dest="action", required=True)
     accounts_.add_parser("status", help="whether this NAS keeps people in its own store")
@@ -679,6 +688,11 @@ def dispatch(args):
         dispatch_config(args, show)
     elif args.area == "system":
         dispatch_system(args, show)
+    elif args.area == "updates":
+        if args.action == "install":
+            started(jobs.start("update", "Installing updates"))
+        else:
+            show(updates.check() if args.action == "check" else updates.status(), print_updates)
     elif args.area == "accounts":
         separated = accounts.is_separated()
         show({"separated": separated}, lambda found: print(
@@ -1037,13 +1051,40 @@ def dispatch_config(args, show):
         print(f"{args.pool} now holds this install's settings")
 
 
-def main():
-    args = build_parser().parse_args()
+def print_updates(found):
+    when_checked = when(found["checked"]) if found.get("checked") else "never"
+    print(f"Checked: {when_checked}")
+    if found.get("error"):
+        print(f"The last check had a problem: {found['error']}")
+    packages = found.get("packages") or []
+    print(f"{len(packages)} update{'s' if len(packages) != 1 else ''} waiting" + (":" if packages else ""))
+    for package in packages:
+        print(f"  {package['name']} {package['from'] or 'new'} -> {package['to']}"
+              + ("  (security)" if package["security"] else ""))
+    if found["restart"]["needed"]:
+        print("A restart is needed to finish installing: " + (", ".join(found["restart"]["packages"]) or "see /run/reboot-required"))
+
+
+def check_caller(args, argv):
+    """Refuse root-only commands to a NAS person, and record maintenance."""
+    action = getattr(args, "action", None) or ""
+    found = maintenance.kind(args.area, action)
+    if found == "root":
+        raise FnasError(f"{args.area} {action}".strip() + " is for root alone, not the NAS desktop")
+    if found == "maintenance":
+        maintenance.audit(args.caller, args.area, action, argv)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    args = build_parser().parse_args(argv)
     try:
         if os.geteuid() != 0:
             raise FnasError("run as root: sudo fnas ...")
+        if args.caller is not None:
+            check_caller(args, [a for a in argv[argv.index(args.area) + 1:] if a != getattr(args, "action", None)])
         dispatch(args)
-        if args.area not in ("check", "health", "system", "job", "setup", "look") and \
+        if args.area not in ("check", "health", "system", "job", "setup", "look", "updates", "auth", "accounts") and \
                 args.action not in READ_ONLY_ACTIONS:
             config.after_change()
     except FnasError as error:

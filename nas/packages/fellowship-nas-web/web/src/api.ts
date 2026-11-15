@@ -81,6 +81,15 @@ export async function fnas(args: string[], input?: string): Promise<string> {
     return output;
 }
 
+/** What `fnas updates show` answers: what is waiting, and whether a restart is needed. */
+export interface UpdatesStatus {
+    checked: number | null;
+    packages: { name: string; from: string | null; to: string; security: boolean }[];
+    error: string | null;
+    installed: number | null;
+    restart: { needed: boolean; packages: string[] };
+}
+
 /** A person's own new password, which the NAS only takes with the one they use now. */
 export async function changeOwnPassword(user: string, current: string, password: string): Promise<string> {
     return (await request<{ output: string }>("POST", "/api/fnas",

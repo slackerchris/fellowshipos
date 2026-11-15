@@ -8,13 +8,13 @@ import time
 import uuid
 
 from .common import DAY, FnasError, STATE_DIR, read_json, run, write_json
-from . import alerts, backup, pools
+from . import alerts, backup, pools, updates
 
 
 JOBS_DIR = os.path.join(STATE_DIR, "jobs")
 JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 UNIT_PREFIX = "fellowship-job-"
-KINDS = ("resilver", "scrub", "expand", "sync", "backup")
+KINDS = ("resilver", "scrub", "expand", "sync", "backup", "update")
 RUNNING = "running"
 # How long finished jobs stay in the list
 KEEP = 7 * DAY
@@ -88,6 +88,12 @@ def work(job):
     if job["kind"] == "backup":
         try:
             backup.run_backup()
+        except FnasError as error:
+            return str(error), 1.0
+        return None, 1.0
+    if job["kind"] == "update":
+        try:
+            updates.install()
         except FnasError as error:
             return str(error), 1.0
         return None, 1.0

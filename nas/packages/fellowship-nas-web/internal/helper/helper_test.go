@@ -44,6 +44,10 @@ func newFake() (*fake, *Helper) {
 		},
 		Fnas: func(args []string, input string) (string, string, error) {
 			f.ran = append(f.ran, args)
+			// What follows the caller the helper names
+			if len(args) > 2 && args[0] == "--caller" {
+				args = args[2:]
+			}
 			if args[0] == "share" {
 				return "", "fnas: no such share\nfnas: second line", errors.New("exit status 1")
 			}
@@ -243,6 +247,30 @@ func TestAllowed(t *testing.T) {
 		{[]string{"job", "run", "0123456789ab"}, true, false},
 		{[]string{"pool", "replace", "tank", "old", "new", "--confirm", "erase 1 disk"}, true, true},
 		{[]string{"system", "grow", "all"}, false, false},
+		// The maintenance interface takes only the shapes it lists
+		{[]string{"system", "grow", "all"}, true, true},
+		{[]string{"system", "grow", "20G"}, true, true},
+		{[]string{"system", "grow", "-1"}, true, false},
+		{[]string{"system", "grow", "all", "--force"}, true, false},
+		{[]string{"system", "hostname", "nas-1"}, true, true},
+		{[]string{"system", "hostname", "NAS;reboot"}, true, false},
+		{[]string{"system", "timezone", "America/New_York"}, true, true},
+		{[]string{"system", "timezone", "../../etc/shadow"}, true, false},
+		{[]string{"system", "certificate", "--self-signed"}, true, true},
+		{[]string{"system", "certificate", "--if-missing"}, true, false},
+		{[]string{"system", "restart", "--confirm", "restart the NAS"}, true, true},
+		{[]string{"system", "restart"}, true, false},
+		{[]string{"ssh", "set", "--enabled", "on"}, true, true},
+		{[]string{"ssh", "set", "--enabled", "on", "--passwords", "off"}, true, true},
+		{[]string{"ssh", "set", "--root", "on"}, true, false},
+		{[]string{"ssh", "set"}, true, false},
+		{[]string{"updates", "show"}, true, true},
+		{[]string{"updates", "install"}, true, true},
+		{[]string{"updates", "install", "--yes"}, true, false},
+		{[]string{"updates", "install"}, false, false},
+		// Root's alone, never the desktop's
+		{[]string{"auth", "check", "kim"}, true, false},
+		{[]string{"accounts", "separate"}, true, false},
 	}
 	for _, c := range cases {
 		if got := Allowed(c.args, "kim", c.admin); got != c.want {
@@ -279,6 +307,12 @@ func TestFnas(t *testing.T) {
 	}
 	if len(f.ran) != 3 {
 		t.Fatalf("ran %q", f.ran)
+	}
+	// Every fnas the helper runs names the person it runs it for, first
+	for _, args := range f.ran {
+		if len(args) < 2 || args[0] != "--caller" || (args[1] != "sam" && args[1] != "kim") {
+			t.Fatalf("ran without its caller: %q", args)
+		}
 	}
 	if h.Handle(protocol.Request{Op: protocol.OpFnas, Session: "made-up", Args: []string{"pool", "list"}}).Code != protocol.CodeUnauthenticated {
 		t.Fatal("ran fnas without a session")

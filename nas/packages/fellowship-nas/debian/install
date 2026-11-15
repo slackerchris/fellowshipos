@@ -9,3 +9,5 @@ fellowship-nas-check.timer usr/lib/systemd/system
 fellowship-nas-backup.service usr/lib/systemd/system
 fellowship-nas-backup.timer usr/lib/systemd/system
 fellowship-nas-refresh.service usr/lib/systemd/system
+fellowship-nas-updates.service usr/lib/systemd/system
+fellowship-nas-updates.timer usr/lib/systemd/system

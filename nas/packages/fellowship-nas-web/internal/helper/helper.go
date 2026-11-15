@@ -66,6 +66,8 @@ var commands = map[string][]string{
 	// Only fnas itself runs a job; people follow them
 	"job":   {"list", "show"},
 	"setup": {"status", "done", "reset"},
+	// Updates are looked for and installed only when a NAS admin asks
+	"updates": {"show", "check", "install"},
 	// Whether people are kept in the NAS's store, which decides what Users offers
 	"accounts": {"status"},
 	"health":   nil,
@@ -411,7 +413,46 @@ func Allowed(args []string, user string, admin bool) bool {
 	if actions == nil {
 		return len(rest) == 1
 	}
-	return len(rest) >= 2 && slices.Contains(actions, rest[1])
+	return len(rest) >= 2 && slices.Contains(actions, rest[1]) && maintenanceArgs(rest)
+}
+
+var (
+	hostName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	zoneName = regexp.MustCompile(`^[A-Za-z0-9_+-]{1,32}(/[A-Za-z0-9_+-]{1,32}){0,3}$`)
+	amount   = regexp.MustCompile(`^(all|[0-9]{1,6}[KMGT]?)$`)
+)
+
+// maintenanceArgs checks the arguments of the maintenance interface's
+// operations one by one (docs/fellowship-nas-account-separation.md), so a NAS
+// admin's request reaches the system only in the shapes listed there. fnas
+// checks them again; this is the first of the two locks. Anything that isn't
+// a maintenance operation passes here and is judged by the list above.
+func maintenanceArgs(rest []string) bool {
+	switch rest[0] + " " + rest[1] {
+	case "system hostname":
+		return len(rest) == 3 && hostName.MatchString(rest[2])
+	case "system timezone":
+		return len(rest) == 3 && zoneName.MatchString(rest[2])
+	case "system certificate":
+		return len(rest) == 3 && (rest[2] == "--self-signed" || rest[2] == "--stdin")
+	case "system grow":
+		return len(rest) == 3 && amount.MatchString(rest[2])
+	case "system restart", "system shutdown":
+		return len(rest) == 4 && rest[2] == "--confirm" && len(rest[3]) <= 64
+	case "ssh set":
+		if len(rest) < 4 || len(rest)%2 != 0 {
+			return false
+		}
+		for i := 2; i < len(rest); i += 2 {
+			if (rest[i] != "--enabled" && rest[i] != "--passwords") || (rest[i+1] != "on" && rest[i+1] != "off") {
+				return false
+			}
+		}
+		return true
+	case "updates check", "updates install", "updates show":
+		return len(rest) == 2
+	}
+	return true
 }
 
 func (h *Helper) fnas(request protocol.Request) protocol.Response {
@@ -435,7 +476,10 @@ func (h *Helper) fnas(request protocol.Request) protocol.Response {
 		}
 	}
 	log.Printf("%s ran fnas %s", found.user, strings.Join(request.Args, " "))
-	stdout, stderr, err := h.config.Fnas(request.Args, request.Input)
+	// fnas hears who is asking: it refuses root's commands to anybody it is
+	// told about, and writes maintenance to the journal under their name
+	args := append([]string{"--caller", found.user}, request.Args...)
+	stdout, stderr, err := h.config.Fnas(args, request.Input)
 	if err != nil {
 		text := strings.TrimSpace(stderr)
 		if text == "" {

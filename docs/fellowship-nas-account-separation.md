@@ -3,8 +3,8 @@
 **Status:** being built, in the phases at the end. The direction was agreed by
 Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
-container on 2026-11-15. Phases 1 (SFTP read-only shares) and 2 (the NAS
-store and login) are done.
+container on 2026-11-15. Phases 1 (SFTP read-only shares), 2 (the NAS store
+and login) and 3 (the maintenance interface and updates) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -585,11 +585,46 @@ Run in VMs, from the image, against a real system:
    loaded, `fnas` checked Secure Boot with `mokutil`, which nothing installs,
    so the check itself crashed share listing and every user change. It now
    reads the firmware's Secure Boot variable.
-3. **The maintenance interface.**
-   - `--caller` and root-only marks in `fnas`
-   - per-operation checks in the helper
-   - the audit log
-   - `fnas updates` (check, notify, apply on request)
+3. **The maintenance interface.** Done.
+   - **`fellowship_nas/maintenance.py`** sorts every `fnas` command into NAS
+     work, read, maintenance or root, action by action. Anything unlisted is
+     root.
+   - **`--caller`:** the helper passes `--caller <name>` on everything it runs
+     for the desktop, and `fnas` refuses root's commands to any caller.
+   - **Audit:** maintenance is written to the journal
+     (`fellowship-nas-maintenance`, `auth.notice`) under the caller's name.
+     Restart, shut down, certificate and installing updates also send an
+     alert.
+   - **The helper checks argument shapes** for the maintenance operations: a
+     hostname, a zone name, a size or `all`, `--confirm` with its phrase, on
+     or off, and nothing extra.
+   - **`fnas updates`:**
+     - `show`, `check` and `install`
+     - a daily `fellowship-nas-updates.timer` that checks and alerts once per
+       new set of updates
+     - installing is a job running `apt-get upgrade --with-new-pkgs`, which
+       never removes a package
+     - a needed restart is said, never done
+   - **Settings → Updates** replaces the placeholder. Its old text claimed
+     security updates install by themselves, which was never true:
+     `unattended-upgrades` isn't in the image.
+   - **A unit test reads the helper's list from `helper.go`** and fails if
+     the two locks disagree in either direction. On its first run it caught
+     six timer-only commands (`pool sync`, `pool sync-all`, `share roots` and
+     others) that a whole-area rule would have opened to the desktop.
+
+   **Tested** with `nas/tests/integration/maintenance.sh`: the real packages,
+   helper and web server, all 26 checks passing.
+   - Both locks refuse bad argument shapes, root-only commands and
+     timer-only commands.
+   - A person who isn't an admin reaches no maintenance at all.
+   - The journal and alerts record what was asked for, and nothing that was
+     refused.
+   - Checking changes no package.
+   - Installing upgrades what was waiting, removes nothing, and says so.
+
+   `ssh set` still turns the whole of sshd on and off, as before. It becomes
+   the SFTP service switch in phase 7.
 4. **Install.** Root password, the recovery key step, the NAS admin through
    `fnas`, no `sudo` account, GRUB locked with the key, and the recovery boot
    entry with its program.
