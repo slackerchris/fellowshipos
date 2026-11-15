@@ -117,7 +117,8 @@ def main():
     ask(ser, "3. a dialog full of non-ASCII text",
         "SOCK=$(ls /run/user/1000/fellowship-wayland-*.sock | head -1); "
         "fellowship-msg --socket $SOCK spawn "
-        "'zenity --info --text=emoji😀_devanagariहिन्दी_thaiไทย_tamilதமிழ_cjk日本語_arabicالعربية_done'",
+        "'zenity --info --text=emoji😀_chinese中文_japanese日本語_korean한국어_"
+        "devanagariहिन्दी_thaiไทย_tamilதமிழ_arabicالعربية_done'",
         "SPAWNDONE", timeout=60)
     subprocess.run(["sleep", "6"], check=False)
     ask(ser, "3b. and its picture",

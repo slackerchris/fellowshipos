@@ -40,6 +40,11 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
+# The bar's height in logical pixels, as `fellowship-comp` draws it, and the
+# cached colour of its fill. The seat runs at scale 1, so logical is physical.
+BAR_H = 34
+_RAISED = None
+
 APPS = [
     # name            spawn command                                        matchers                pkill      budget
     ("foot",          "foot",                                              ["foot"],               "foot", 40),
@@ -129,12 +134,19 @@ def main():
             low = (win["app_id"] + " " + win["title"]).lower()
             matched = next((m for m in matchers if m in low), "?")
             wrong = expect != "?" and win["decorated"] != expect
-            ok = not wrong
+            # The flag says who drew the frame; the picture says how many
+            # bars are on screen. Both must agree, and both must match the
+            # promise: a window whose frame is ours shows our bar above its
+            # content, and one that decorates itself shows none.
+            bar = bar_above(shot, win)
+            pixel_wrong = bar is not None and bar != win["decorated"]
+            ok = not wrong and not pixel_wrong
             who = "ours" if win["decorated"] else "its own"
+            seen = "no picture" if bar is None else ("bar above" if bar else "no bar above")
             said = "" if expect == "?" else f" (expected {'ours' if expect else 'its own'})"
             print(f"{name}: {'PASS' if ok else 'FAIL'} app_id={win['app_id']!r} "
                   f"title={win['title']!r} {win['width']}x{win['height']} "
-                  f"decorated={win['decorated']} [{who}]{said} matched={matched}")
+                  f"decorated={win['decorated']} [{who}] {said} {seen} matched={matched}")
             if name == "chromium":
                 crop_titlebar(shot, win, shots / "app-chromium-titlebar.png")
         else:
@@ -223,7 +235,15 @@ def shot_screen(mon, path):
     pathlib.Path(path).unlink(missing_ok=True)
     for _ in range(20):
         mon.cmd(f"screendump {path}")
+        # The file appearing is not the picture being finished: a screendump
+        # still flushing reads as a truncated image and raises in PIL. Wait
+        # for the size to stop moving before handing it back.
         if pathlib.Path(path).exists():
+            size = pathlib.Path(path).stat().st_size
+            for _ in range(6):
+                time.sleep(0.3)
+                if pathlib.Path(path).stat().st_size == size:
+                    return path
             return path
         time.sleep(0.5)
     print(f"[no screendump for {path.name}]")
@@ -240,6 +260,61 @@ def crop_titlebar(shot, win, path):
                    min(im.height, win["y"] + min(140, win["height"]))))
     top.save(path)
     print(f"chromium title-bar crop: {path}")
+
+
+def theme_raised():
+    """The bar's fill colour, as the shipped dark theme states it. Read once.
+
+    Built without an f-string: a quantifier's braces would be read as a
+    replacement field, which is how an earlier check of mine reported "no
+    raised colour" against a file that plainly had one.
+    """
+    global _RAISED
+    if _RAISED is None:
+        _RAISED = ()
+        pat = re.compile(r'^\s*raised\s*=\s*"#([0-9A-Fa-f]{6})"')
+        toml = REPO / "themes" / "fellowship.toml"
+        try:
+            for line in toml.read_text().splitlines():
+                m = pat.match(line)
+                if m:
+                    h = m.group(1)
+                    _RAISED = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+                    break
+        except OSError:
+            pass
+    return _RAISED
+
+
+def bar_above(shot, win):
+    """Is our title bar drawn where the picture says it should be?
+
+    `decorated` is the compositor's word for who drew the frame. This is the
+    screen's: the strip of BAR_H pixels above the window's reported top edge,
+    sampled for the theme's bar colour. A window we frame shows the bar there;
+    one that decorates itself shows whatever is behind it. Returning None
+    means there is no picture to read, which is never a verdict.
+    """
+    raised = theme_raised()
+    if not shot or not pathlib.Path(str(shot)).exists() or not raised:
+        return None
+    from PIL import Image
+    try:
+        im = Image.open(shot).convert("RGB")
+    except OSError as err:
+        # A picture that will not decode is no evidence either way.
+        print(f"  [{pathlib.Path(str(shot)).name}: unreadable screenshot, {err}]")
+        return None
+    x0 = max(0, win["x"])
+    y0 = max(0, win["y"] - BAR_H)
+    x1 = min(im.width, x0 + min(200, max(1, win["width"])))
+    y1 = min(im.height, win["y"])
+    if x1 <= x0 or y1 <= y0:
+        return None
+    strip = im.crop((x0, y0, x1, y1))
+    hits = sum(1 for px in strip.getdata()
+               if all(abs(a - b) <= 12 for a, b in zip(px, raised)))
+    return hits > strip.width * strip.height * 0.5
 
 
 class Serial:
