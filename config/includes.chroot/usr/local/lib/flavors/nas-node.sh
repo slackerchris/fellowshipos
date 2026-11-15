@@ -19,15 +19,31 @@ if [ -r "$SECURE_BOOT_VAR" ] && [ "$(od -An -tu1 -j4 -N1 "$SECURE_BOOT_VAR" | tr
     exit 1
 fi
 
-if ! curl -fsI --max-time 15 http://deb.debian.org/debian/dists/trixie/Release > /dev/null; then
-    echo "[flavor] can't reach the Debian mirror: check the network and retry"
-    exit 1
+# The NAS image installs the packages and builds ZFS while the image is made
+# (hooks/normal/0750-nas-role); only a role added later needs the network
+installed() {
+    local package
+    for package in fellowship-nas fellowship-nas-smb fellowship-nas-web; do
+        dpkg-query -W -f '${Status}' "$package" 2> /dev/null | grep -qx 'install ok installed' || return 1
+    done
+}
+if installed; then
+    # Not a [flavor] line: those say why the role stopped
+    echo "NAS packages: already in the image"
+    # Their setup ran while the image was built, before this machine had its
+    # account, disk and boot loader: run it again here (SSH access for the
+    # account, shares, schedules, GRUB)
+    dpkg-reconfigure -f noninteractive fellowship-nas fellowship-nas-smb fellowship-nas-web
+else
+    if ! curl -fsI --max-time 15 http://deb.debian.org/debian/dists/trixie/Release > /dev/null; then
+        echo "[flavor] can't reach the Debian mirror: check the network and retry"
+        exit 1
+    fi
+    echo "deb [trusted=yes] file:/usr/share/fellowshipos/nas-repo ./" > /etc/apt/sources.list.d/fellowship-nas.list
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y fellowship-nas fellowship-nas-smb fellowship-nas-web
 fi
-
-echo "deb [trusted=yes] file:/usr/share/fellowshipos/nas-repo ./" > /etc/apt/sources.list.d/fellowship-nas.list
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y fellowship-nas fellowship-nas-smb fellowship-nas-web
 
 # Debian enables hd-idle on install with START_HD_IDLE=false, so the unit exits,
 # restarts until it hits the start limit and leaves the system degraded. fnas
@@ -45,14 +61,21 @@ fi
 # The role can pull in a newer kernel than the one running
 NEWEST_KERNEL=$(ls -v /lib/modules | tail -1)
 if modprobe zfs; then
-    # zfsutils starts its services before zfs-dkms has built the module
-    systemctl reset-failed zfs-load-module.service
+    # zfsutils starts its services before zfs-dkms has built the module. In the
+    # NAS image they haven't run at all, so there may be nothing to reset
+    systemctl reset-failed zfs-load-module.service 2> /dev/null || true
     systemctl start zfs-import.target zfs.target
 elif [ "$NEWEST_KERNEL" != "$(uname -r)" ] && modinfo -k "$NEWEST_KERNEL" zfs > /dev/null; then
     echo "[flavor] ZFS built for kernel $NEWEST_KERNEL: reboot to load it"
 else
     echo "[flavor] the ZFS module didn't build: see /var/lib/dkms/zfs/*/build/make.log"
     exit 1
+fi
+
+# The image keeps the NAS's services off so its live installer isn't a NAS;
+# this machine is one now
+if [ -s /etc/fellowshipos/nas-units ]; then
+    xargs systemctl enable --now < /etc/fellowshipos/nas-units
 fi
 
 mkdir -p /etc/fellowshipos

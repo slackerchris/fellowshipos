@@ -147,8 +147,11 @@ nas_unattended() {
         fi
     fi
 
-    echo -ne "  Installing the NAS role (a few minutes)... "
-    user=$(getent passwd 1000 | cut -d: -f1)
+    echo -ne "  Starting the NAS... "
+    # The installer's account: the first that can log in. Not UID 1000: the
+    # NAS's own nas-share account (UID 3000) is already in the image, so the
+    # installer's account comes after it
+    user=$(awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ {print $1; exit}' /etc/passwd)
     if SUDO_USER="$user" bash /usr/local/lib/flavors/nas-node.sh >> "$LOG_FILE" 2>&1; then
         echo "ready" > "$NAS_STATUS"
         touch "$DONE_FLAG"

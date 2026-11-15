@@ -2,10 +2,12 @@
 // in the middle, and whatever is picked on the right: one file's preview, or what
 // can be done with several at once.
 import { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { EarlierVersion, FileEntry, FileHit, FileShare, copyFile, deleteFile, earlierVersions, fileShares,
     fileUrl, folderIn, folderTree, humanSize, makeFolder, renameFile, restoreVersion, searchShare,
     uploadFile, zipUrl } from "./api";
+import { DesktopContext } from "./desktop/context";
+import { SessionContext } from "./settings";
 import { Button, Confirm, Field, Loading, Notice, Page, Result, useAction, useLoad } from "./ui";
 
 const IMAGE = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".svg"];
@@ -136,6 +138,26 @@ function parentOf(path: string): string {
 /** What Copy or Cut put aside, to paste in another folder of the same share. */
 type Clip = { share: string; folder: string; names: string[]; cut: boolean };
 
+/** Nothing to show: what an administrator does about it, or who to ask */
+function NoShares() {
+    const { admin } = useContext(SessionContext);
+    const desktop = useContext(DesktopContext);
+    if (!admin) {
+        return <Notice>Your account can't use any shares yet. An administrator gives a share to you, or
+            to a group you're in, in Shares.</Notice>;
+    }
+    return (
+        <div class="stack">
+            <Notice>Files shows the shares your account can use, and none are yours yet. Shares live on a pool:
+                make a pool in Storage, then a share in Shares that you, or nas-admins, may use.</Notice>
+            <div class="row">
+                <Button onClick={() => desktop.open("storage")}>Open Storage</Button>
+                <Button onClick={() => desktop.open("shares")}>Open Shares</Button>
+            </div>
+        </div>
+    );
+}
+
 export function Files() {
     const shares = useLoad(fileShares);
     const [share, setShare] = useState<FileShare | null>(null);
@@ -153,10 +175,7 @@ export function Files() {
         <Loading loaded={shares}>
             {() => (
                 <Page fill>
-                    {shares.data!.shares.length === 0 ? (
-                        <Notice>Your account can't use any shares yet. An administrator gives a share to you, or
-                            to a group you're in, in Shares.</Notice>
-                    ) : (
+                    {shares.data!.shares.length === 0 ? <NoShares /> : (
                         <div class={`files view-${view}`}>
                             <nav class="files-side" aria-label="Shares">
                                 <p class="files-side-title">Shares</p>

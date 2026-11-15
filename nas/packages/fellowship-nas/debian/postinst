@@ -2,7 +2,11 @@
 set -e
 
 if [ "$1" = "configure" ]; then
-    [ ! -x /usr/sbin/update-grub ] || update-grub
+    # Not while an image is being built: there is no boot disk to probe yet,
+    # and the installer writes GRUB's settings on the disk it installs to
+    if [ -x /usr/sbin/update-grub ] && grub-probe / > /dev/null 2>&1; then
+        update-grub
+    fi
 
     # Shared folders are owned by this account on every protocol. The ID is
     # fixed so files on a moved pool keep their owner.

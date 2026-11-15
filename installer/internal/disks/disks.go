@@ -100,6 +100,22 @@ func mounted(d device) bool {
 	return false
 }
 
+// installerStick is whether a disk holds a FellowshipOS installer image. The
+// boot entries copy the live system into memory (toram), after which the stick
+// it came from is no longer mounted and LiveDisk can't name it; the image's
+// label still says what it is.
+func installerStick(d device) bool {
+	if text(d.FSType) == "iso9660" && strings.HasPrefix(strings.ToUpper(text(d.Label)), "FELLOWSHIPOS") {
+		return true
+	}
+	for _, child := range d.Children {
+		if installerStick(child) {
+			return true
+		}
+	}
+	return false
+}
+
 // Parse reads lsblk's JSON. The disk holding the running live system is
 // refused, as are read-only and mounted disks.
 func Parse(output []byte, liveDisk string, minimum int64) ([]Disk, error) {
@@ -120,6 +136,8 @@ func Parse(output []byte, liveDisk string, minimum int64) ([]Disk, error) {
 		switch {
 		case d.Path == liveDisk:
 			disk.Refused = "This is the USB stick or disc FellowshipOS is running from."
+		case installerStick(d):
+			disk.Refused = "This is a FellowshipOS installer USB stick."
 		case d.ReadOnly:
 			disk.Refused = "The disk is read-only."
 		case mounted(d):

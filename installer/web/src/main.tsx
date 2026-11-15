@@ -291,8 +291,8 @@ function Confirm({ disk, layout, settings, edition, onInstall }: { disk: Disk; l
                     <tr><th>Time zone</th><td>{settings.timezone}</td></tr>
                 </tbody>
             </table>
-            {edition === "nas" && <p class="muted small">The NAS role finishes on the first start: it needs the network,
-                and Secure Boot must be off for the ZFS module to load.</p>}
+            {edition === "nas" && <p class="muted small">Everything the NAS needs is on this disk once it's installed:
+                the first start needs no network and asks nothing.</p>}
             {error && <Notice kind="error">{error}</Notice>}
             <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
@@ -323,9 +323,8 @@ function Installing({ state, edition, hostname, addresses, onRetry }: {
             )}
             {state.phase === "done" && (
                 <>
-                    <Notice kind="done">FellowshipOS is installed. Remove the USB stick or disc, then restart. {edition === "nas"
-                        ? <>On the first start the NAS finishes setting itself up, with nothing to answer, in a few minutes
-                            (it needs the network). Then the NAS desktop opens from a browser on another computer
+                    <Notice kind="done">FellowshipOS is installed. Restart now; the USB stick or disc can come out once the screen goes dark. {edition === "nas"
+                        ? <>On the first start the NAS starts its services, with nothing to answer, in under a minute. Then the NAS desktop opens from a browser on another computer
                             at <span class="mono">https://{hostname}</span>
                             {addresses?.length ? <> or <span class="mono">https://{addresses[0]}</span></> : null}, and
                             this machine's screen shows that address and how the NAS is doing.</>

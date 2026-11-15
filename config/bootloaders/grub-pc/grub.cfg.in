@@ -5,8 +5,11 @@ source /boot/grub/config.cfg
 # the same value goes on the kernel command line for the installer to read. The
 # text installer stays in the advanced menu for machines that start in legacy
 # BIOS mode, which the graphical one doesn't do yet.
+# toram copies the live system into memory first, so the USB stick or disc can
+# come out at any time and taking it out before restarting can't hang the
+# restart. Without enough memory, live-boot says so and runs from the stick.
 menuentry "@ENTRY@" --hotkey=@HOTKEY@ {
-        linux   @KERNEL_LIVE@ @APPEND_LIVE@ fellowship.installer=@EDITION@
+        linux   @KERNEL_LIVE@ @APPEND_LIVE@ toram fellowship.installer=@EDITION@
         initrd  @INITRD_LIVE@
 }
 

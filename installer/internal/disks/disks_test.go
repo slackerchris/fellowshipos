@@ -47,3 +47,24 @@ func TestParse(t *testing.T) {
 		t.Errorf("small disk: %+v", byPath["/dev/vda"])
 	}
 }
+
+// Booted with toram, the live system runs from memory: the stick isn't mounted
+// and LiveDisk names no disk, but the stick must still not be offered
+func TestAnInstallerStickIsRefusedAfterTheSystemMovedToMemory(t *testing.T) {
+	stick := `{"blockdevices": [
+ {"name":"sda","path":"/dev/sda","size":64023257088,"model":"SanDisk","serial":"S","type":"disk","tran":"usb","ro":false,"fstype":"iso9660","label":"FELLOWSHIPOS_NAS","mountpoints":[null],"children":[
+   {"name":"sda1","path":"/dev/sda1","size":1029476352,"model":null,"serial":null,"type":"part","tran":null,"ro":false,"fstype":"iso9660","label":"FELLOWSHIPOS_NAS","mountpoints":[null]}]},
+ {"name":"sdb","path":"/dev/sdb","size":64023257088,"model":"Other stick","serial":"O","type":"disk","tran":"usb","ro":false,"fstype":"iso9660","label":"DEBIAN","mountpoints":[null],"children":[]}
+]}`
+	found, err := Parse([]byte(stick), "tmpfs", 16<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 2 || !strings.Contains(found[0].Refused, "installer USB stick") {
+		t.Fatalf("installer stick: %+v", found)
+	}
+	// Any other ISO stick is an ordinary disk to install on
+	if found[1].Refused != "" {
+		t.Fatalf("other stick: %+v", found[1])
+	}
+}
