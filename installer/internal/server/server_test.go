@@ -269,3 +269,32 @@ func TestLayoutFollowsTheSlider(t *testing.T) {
 		t.Fatalf("%d %+v", response.Code, chosen)
 	}
 }
+
+func TestTheNASWontInstallWithSecureBootOn(t *testing.T) {
+	for _, c := range []struct {
+		which   edition.Edition
+		on      bool
+		blocked bool
+	}{
+		{edition.NAS, true, true},
+		{edition.NAS, false, false},
+		// Only the NAS needs the ZFS module
+		{edition.Multi, true, false},
+	} {
+		s, _ := setupEdition(c.which)
+		s.machine.SecureBoot = func() bool { return c.on }
+		var info struct{ Blocked string }
+		json.Unmarshal(send(s, req{method: "GET", path: "/api/machine", remote: screen}).Body.Bytes(), &info)
+		if (info.Blocked != "") != c.blocked {
+			t.Errorf("%s, Secure Boot %v: blocked %q", c.which, c.on, info.Blocked)
+		}
+		response := send(s, req{method: "POST", path: "/api/install", remote: screen,
+			body: `{"disk":"/dev/sda",` + good + `,"confirm":"erase sda"}`})
+		if c.blocked && (response.Code != 409 || !strings.Contains(response.Body.String(), "Secure Boot")) {
+			t.Errorf("%s: install answered %d %s", c.which, response.Code, response.Body)
+		}
+		if !c.blocked && response.Code != 202 {
+			t.Errorf("%s: install answered %d %s", c.which, response.Code, response.Body)
+		}
+	}
+}

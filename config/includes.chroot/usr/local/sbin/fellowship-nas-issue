@@ -1,0 +1,111 @@
+#!/usr/bin/python3
+"""What a NAS shows on its own screen above the login prompt.
+
+The NAS desktop is used from a browser on another computer, so the NAS's own
+console says where it is, which certificate it should show, and how the NAS is
+doing, instead of a bare login prompt. agetty reads /run/issue.d; \\4 and \\n are
+its escapes for this machine's IPv4 address and name, so they stay current
+without this script running again.
+"""
+import json
+import os
+import subprocess
+
+OUT_DIR = "/run/issue.d"
+OUT = os.path.join(OUT_DIR, "50-fellowship-nas.issue")
+ROLE_FILE = "/etc/fellowshipos/install-role"
+DONE_FLAG = "/etc/fellowshipos/.nas-role-complete"
+STATUS_FILE = "/var/lib/fellowshipos/nas-role-status"
+CERT = "/etc/fellowship-nas/web/cert.pem"
+
+# agetty colour escapes
+BOLD, DIM, RESET = "\\e{bold}", "\\e{halfbright}", "\\e{reset}"
+COLOURS = {"good": "\\e{green}", "warning": "\\e{yellow}", "bad": "\\e{red}"}
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def run(*command, timeout=60):
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def fingerprint():
+    out = run("openssl", "x509", "-noout", "-fingerprint", "-sha256", "-in", CERT)
+    return out.strip().split("=", 1)[1] if out and "=" in out else ""
+
+
+def line(kind, label, text):
+    return f"  {label:<13}{COLOURS[kind]}{text}{RESET}"
+
+
+def status_lines():
+    """The NAS role, the desktop's web server and the health checks, worst news first."""
+    if not os.path.exists(DONE_FLAG):
+        reason = read(STATUS_FILE) or "still being set up"
+        lines = [line("bad", "NAS role:", "not finished: " + reason),
+                 f"  {'':<13}It tries again every time this machine starts."]
+        if "Secure Boot" in reason:
+            lines.append(f"  {'':<13}Turn Secure Boot off in the firmware settings, then restart.")
+        lines.append(f"  {'':<13}{DIM}Details: /var/log/fellowshipos/setup.log{RESET}")
+        return lines
+    lines = []
+    if run("systemctl", "is-active", "--quiet", "fellowship-nas-web") is None:
+        lines.append(line("bad", "Desktop:", "not running (sudo systemctl status fellowship-nas-web)"))
+    else:
+        lines.append(line("good", "Desktop:", "running"))
+    if not os.path.isdir("/sys/module/zfs"):
+        lines.append(line("warning", "ZFS:", "restart once to load it"))
+    report = run("fnas", "--json", "health")
+    if report is None:
+        lines.append(line("warning", "Health:", "couldn't be checked (sudo fnas health)"))
+        return lines
+    report = json.loads(report)
+    pools = report.get("pools") or []
+    problems = report.get("problems") or []
+    lines.append(line("good", "Pools:", f"{len(pools)}" if pools else "none yet: create one in the desktop's Storage app"))
+    if problems:
+        worst = problems[0]
+        # fnas's levels are info, low, medium, high and critical
+        kind = "bad" if worst.get("severity") in ("critical", "high") else "warning"
+        more = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+        lines.append(line(kind, "Health:", worst.get("title", "a problem") + more))
+    else:
+        lines.append(line("good", "Health:", "no problems found"))
+    return lines
+
+
+def main():
+    if read(ROLE_FILE) != "nas" and not os.path.exists(DONE_FLAG):
+        # Not a NAS: leave the login screen as it is
+        if os.path.exists(OUT):
+            os.remove(OUT)
+        return
+    text = ["", f"  {BOLD}FellowshipOS NAS{RESET}  \\n", "",
+            f"  {'Open:':<13}{BOLD}https://\\4{RESET}  or  {BOLD}https://\\n{RESET}",
+            f"  {'':<13}from a browser on another computer"]
+    found = fingerprint()
+    if found:
+        text += [f"  {'Certificate:':<13}SHA-256 {found[:47]}",
+                 f"  {'':<13}        {found[48:]}",
+                 f"  {'':<13}{DIM}The browser warns about it once; check it matches before you accept.{RESET}"]
+    text += [""] + status_lines() + ["", ""]
+    os.makedirs(OUT_DIR, exist_ok=True)
+    with open(OUT + ".new", "w") as f:
+        f.write("\n".join(text))
+    os.replace(OUT + ".new", OUT)
+    # Redraws a login prompt that is already showing
+    run("agetty", "--reload")
+
+
+if __name__ == "__main__":
+    main()

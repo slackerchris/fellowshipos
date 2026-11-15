@@ -1,0 +1,13 @@
+[Unit]
+Description=Show the NAS's address and status on its own screen
+After=fellowshipos-setup.service fellowship-nas-web.service network-online.target
+Before=getty@tty1.service
+ConditionKernelCommandLine=!boot=live
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fellowship-nas-issue
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

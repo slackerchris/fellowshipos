@@ -323,11 +323,13 @@ function Installing({ state, edition, hostname, addresses, onRetry }: {
             )}
             {state.phase === "done" && (
                 <>
-                    <Notice kind="done">FellowshipOS is installed. Remove the USB stick or disc, then restart. After the first start,
-                        the setup on screen finishes the machine{edition === "nas"
-                            ? <>, and the NAS desktop opens from any browser at <span class="mono">https://{hostname}</span>
-                                {addresses?.length ? <> or <span class="mono">https://{addresses[0]}</span></> : null}</>
-                            : " and asks what it will do"}.</Notice>
+                    <Notice kind="done">FellowshipOS is installed. Remove the USB stick or disc, then restart. {edition === "nas"
+                        ? <>On the first start the NAS finishes setting itself up, with nothing to answer, in a few minutes
+                            (it needs the network). Then the NAS desktop opens from a browser on another computer
+                            at <span class="mono">https://{hostname}</span>
+                            {addresses?.length ? <> or <span class="mono">https://{addresses[0]}</span></> : null}, and
+                            this machine's screen shows that address and how the NAS is doing.</>
+                        : "After the first start, the setup on screen finishes the machine and asks what it will do."}</Notice>
                     <div class="row">
                         <button class="button button-primary" type="button" disabled={restarting}
                                 onClick={() => { setRestarting(true); reboot().catch(() => {}); }}>
@@ -410,7 +412,7 @@ function Installer({ greeting }: { greeting: Hello }) {
         return <Frame><p class="muted">Looking at this machine…</p></Frame>;
     }
 
-    const canInstall = !!disk && !!layout && aboutReady(settings, again);
+    const canInstall = !info.blocked && !!disk && !!layout && aboutReady(settings, again);
     // One way on from each step, named after where it goes. The rail above is the
     // rest of the navigation: any step, in any order, and back without a button.
     const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again);
@@ -421,6 +423,9 @@ function Installer({ greeting }: { greeting: Hello }) {
     return (
         <Frame step={step} onStep={setStep} answered={answered}
                title={info.title} subtitle={info.subtitle}>
+            {/* Said on every step, before anything is chosen, so nobody gets as far as
+                erasing a disk on a machine the image can't run on */}
+            {info.blocked && <Notice kind="error"><strong>This machine can't be installed on yet.</strong> {info.blocked}</Notice>}
             {step === 0 && greeting.local && (greeting.remote_urls?.length ? (
                 <p class="small muted">Installing from another computer? Open <span class="mono">{greeting.remote_urls[0]}</span> there,
                     check the certificate it shows, and enter the pairing code <strong class="mono">{greeting.code}</strong>.</p>
@@ -445,7 +450,7 @@ function Installer({ greeting }: { greeting: Hello }) {
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />
             )}
-            {step === 3 && !canInstall && (
+            {step === 3 && !canInstall && !info.blocked && (
                 <div class="stack">
                     <Notice kind="warning">Not everything is settled yet.</Notice>
                     <div class="row">

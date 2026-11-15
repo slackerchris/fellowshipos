@@ -3,3 +3,5 @@ set -e
 
 chmod +x /usr/local/bin/fellowshipos-setup
 systemctl enable fellowshipos-setup.service
+chmod +x /usr/local/sbin/fellowship-nas-issue
+systemctl enable fellowship-nas-issue.service fellowship-nas-issue.timer

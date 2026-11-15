@@ -99,5 +99,12 @@ func (e Edition) WholeDisk() bool {
 	return e != NAS
 }
 
+// NeedsSecureBootOff is whether the image can only work with Secure Boot off.
+// The NAS keeps its pools on ZFS, whose kernel module is built on the machine
+// itself on first boot, and Secure Boot refuses to load a module built there.
+func (e Edition) NeedsSecureBootOff() bool {
+	return e == NAS
+}
+
 // String is the name the command line and the page use.
 func (e Edition) String() string { return string(e) }

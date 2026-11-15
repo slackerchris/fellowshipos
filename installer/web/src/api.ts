@@ -31,6 +31,8 @@ export interface Machine {
     subtitle: string;
     // True when the system takes the whole disk and no data part is offered
     whole_disk: boolean;
+    // Why nothing can be installed on this machine, such as Secure Boot being on
+    blocked?: string;
 }
 
 export interface Hello {

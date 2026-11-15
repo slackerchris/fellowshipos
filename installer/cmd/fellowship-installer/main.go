@@ -178,6 +178,7 @@ func main() {
 			syscall.Sync()
 			return exec.Command("systemctl", "reboot").Run()
 		},
+		SecureBoot: secureBoot,
 	}
 	installer := server.New(machine, os.DirFS(*static), chosen)
 	serve(installer, chosen)
@@ -240,4 +241,15 @@ func remoteURLs(address string) []string {
 		return []string{"https://" + address}
 	}
 	return found
+}
+
+// secureBootVar is the firmware's Secure Boot state: four bytes of attributes,
+// then one byte that is 1 when Secure Boot is on
+const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+// secureBoot reads it on every call, so the page always says what the firmware
+// says; a machine started without UEFI has none and reads as off
+func secureBoot() bool {
+	data, err := os.ReadFile(secureBootVar)
+	return err == nil && len(data) >= 5 && data[4] == 1
 }

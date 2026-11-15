@@ -39,6 +39,23 @@ type Machine struct {
 	// Starts an install; reports through the callbacks
 	Install func(engine.Settings, func(string), func(string)) error
 	Reboot  func() error
+	// Whether the firmware has Secure Boot on; nil reads as off
+	SecureBoot func() bool
+}
+
+// SecureBootOn is why the NAS image won't install with Secure Boot on: the
+// install would finish and the NAS role would then fail on first boot.
+const SecureBootOn = "Secure Boot is on, so this machine can't run the NAS. Its storage uses ZFS, " +
+	"whose kernel module FellowshipOS builds on the machine itself, and Secure Boot won't load it. " +
+	"Turn Secure Boot off in this machine's firmware settings, then start the installer again. " +
+	"In a Proxmox VM: press Esc at the boot logo, then Device Manager, Secure Boot Configuration."
+
+// blocked is why nothing can be installed on this machine, or "" when it can
+func (s *Server) blocked() string {
+	if s.edition.NeedsSecureBootOff() && s.machine.SecureBoot != nil && s.machine.SecureBoot() {
+		return SecureBootOn
+	}
+	return ""
 }
 
 type progress struct {
@@ -297,7 +314,7 @@ func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 		"subtitle": s.edition.Subtitle(), "whole_disk": s.edition.WholeDisk(),
 		"disks": choices, "timezones": zones, "installed": s.machine.Installed,
 		"memory": s.machine.Memory, "min_system": layout.MinSystem(s.machine.Installed),
-		"split_from": layout.SplitFrom,
+		"split_from": layout.SplitFrom, "blocked": s.blocked(),
 	})
 }
 
@@ -337,6 +354,10 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		Confirm string `json:"confirm"`
 	}
 	if !readJSON(w, r, &body) {
+		return
+	}
+	if reason := s.blocked(); reason != "" {
+		fail(w, http.StatusConflict, reason)
 		return
 	}
 	if err := body.Settings.Check(); err != nil {
