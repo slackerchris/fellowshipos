@@ -1,5 +1,22 @@
 # Desktop VM session — November 14, 2026
 
+> **Superseded the same day and the next.** This handoff records the state
+> at the time it was written; several things it lists as open defects have
+> since been closed and verified, so do not use it as current status. The
+> flush fix shipped into a rebuilt ISO and the pointer and display size
+> checked out in the VM (in the desktop repository:
+> `docs/session-2026-11-14-vm-responsiveness.md`,
+> `docs/session-2026-11-14-iso-and-apps.md`, and
+> `docs/session-2026-11-14-day-summary.md`);
+> the notification and sound blockers were closed on November 15
+> (`session-2026-11-15-notifyd-probe.md`), the decoration question was
+> measured, reverted and then solved with an explicit rules file
+> (`session-2026-11-15-csd-measured-and-reverted.md`,
+> `session-2026-11-15-decoration-signal.md`), and the everyday gaps were
+> costed and shipped (`session-2026-11-15-everyday-gaps-measured.md`,
+> `session-2026-11-15-clean-image.md`). What is still genuinely open is
+> sound on real hardware — the Dell — and the blank-VM install test.
+
 ## Current status
 
 The user wants to test the Fellowship desktop in a usable VM before moving to the Dell. The live desktop boots and has rendered at 1920 × 1080. Interactive testing remains incomplete. The user repeatedly reported a missing mouse pointer, inconsistent launcher response, and lag. Treat these as open defects.

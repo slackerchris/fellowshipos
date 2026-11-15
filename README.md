@@ -44,6 +44,18 @@ The session draws through Mesa's software renderer, so a VM with no 3D accelerat
 
 `desktop/tests/vm.sh` boots the image in QEMU, waits for the session and writes a picture of the screen (`desktop.png`), failing if the picture is not the desktop. It needs OVMF and `python3` with Pillow.
 
+The rest of `desktop/tests/` answers questions a picture cannot. They all drive the machine `vm-interact.sh` boots — the ISO's own kernel, a serial console socket, a QEMU monitor socket and a 9p share — and log in over serial as `user` / `live`:
+
+| Script | What it settles |
+| --- | --- |
+| `vm-measure.py` | Responsiveness as numbers: blind `sendkey` taps diffed against `screendump`, before and after the fresh package is hot-swapped |
+| `vm-appcheck.py` | Every bundled app opened through the compositor, recording size and decoration mode. `--as-shipped` tests the image exactly as built; otherwise the freshest package is swapped in, which makes a fix committed after the image testable on the seat. A wrong decoration mode is a FAIL, and the strip above each window is checked for the theme's bar colour, so the picture has to agree with the flag |
+| `vm-soundcheck.py` | Sound and notifications on a clean seat, including whether `notify-send` activates the service through its installed bus file |
+| `vm-notifyd-probe.py` | Why a notification service is not running: cannot activate, starts and crashes, or cannot reach the bus |
+| `vm-everyday.py` | The everyday layer measured before paying for it — user directories, the fonts the session actually has, text photographed in eight scripts, and whether Nemo thumbnails without the Xfce thumbnailer |
+
+`desktop/build-only.sh` builds just the desktop package in the trixie container, the same way the full packages step does it, with the toolchain, registry and release target cached on the host: about 2m19s. To test a committed revision without disturbing a working tree, add detached worktrees **side by side** (`build.sh` mounts the desktop checkout at `../fellowship-desktop`) and run `FELLOWSHIP_EDITIONS=desktop ./build.sh` inside the OS one. [The desktop VM records](docs/fellowship-desktop-vm-session-2026-11-14.md) and the desktop repository's `docs/vm-testing.md` carry the results and the harness gotchas.
+
 ## Install FellowshipNAS
 
 1. Boot the image and choose its **Install FellowshipOS … (graphical)** entry on a UEFI system. The installer runs on this machine's own screen. To drive it from another computer, add `fellowship.installer.remote=:8443` to the boot entry (press `e` at the menu): the page is then served over HTTPS and the console prints the certificate's SHA-256 and a pairing code. The browser must show that same certificate before the code is typed. Legacy BIOS machines use the text installer under **Advanced install options** until the graphical one supports them.
