@@ -9,7 +9,7 @@ import time
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, sftp, snapshots, \
     ssh, system, usage, users
-from . import accounts, maintenance, storage_checks, updates
+from . import accounts, maintenance, separate, storage_checks, updates
 from .engines import mdadm
 
 
@@ -638,6 +638,14 @@ def build_parser():
         dest="action", required=True)
     accounts_.add_parser("status", help="whether this NAS keeps people in its own store")
     accounts_.add_parser("init", help="make the empty store that separates this NAS (the installer's)")
+    separate_ = accounts_.add_parser(
+        "separate", help="move people from Linux logins to the NAS's store; shows what it would do unless --yes")
+    separate_.add_argument("--yes", action="store_true", help="separate, after the same report")
+    separate_.add_argument("--later", action="append", default=[], metavar="NAME",
+                           help="someone whose missing password is set later, in the desktop")
+    separate_.add_argument("--undo", nargs="?", const="", metavar="WHEN",
+                           help="put back the accounts as they were before separating (the newest save, or WHEN)")
+    separate_.add_argument("--login-url", help=argparse.SUPPRESS)
 
     auth = area.add_parser("auth", help="check a NAS person's password (root only)").add_subparsers(
         dest="action", required=True)
@@ -694,6 +702,14 @@ def dispatch(args):
             started(jobs.start("update", "Installing updates"))
         else:
             show(updates.check() if args.action == "check" else updates.status(), print_updates)
+    elif args.area == "accounts" and args.action == "separate":
+        if args.undo is not None:
+            separate.undo(args.undo or None)
+        else:
+            found = separate.separation_plan()
+            separate.print_plan(found, going_ahead=args.yes)
+            if args.yes:
+                separate.separate(found, later=args.later, url=args.login_url)
     elif args.area == "accounts" and args.action == "init":
         accounts.create_store()
         print("This NAS now keeps its people in its own store.")

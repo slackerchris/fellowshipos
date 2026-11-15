@@ -5,7 +5,7 @@ Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
 container on 2026-11-15. Phases 1 (SFTP read-only shares), 2 (the NAS store
 and login), 3 (the maintenance interface and updates) and 4 (install, the
-recovery key and recovery) are done.
+recovery key and recovery) and 5 (migration and undo) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -685,8 +685,54 @@ Run in VMs, from the image, against a real system:
        console and on the desktop
      - the next normal start alerted "Recovery was used at the console", and
        `recovery-log.json` lists each step
-5. **Migration and undo.** `fnas accounts separate`: dry run, checks before
-   `sudo` goes, `--undo`, and undo from recovery. Then both rollback tests.
+5. **Migration and undo.** Done.
+   - **`fellowship_nas/separate.py`:** `fnas accounts separate`. A dry run is
+     the default; then `--yes`, `--later NAME`, and `--undo [WHEN]`. It's
+     root's alone.
+   - **The order** is as designed: passwords asked for first, the backup
+     (with `tdbbackup` for Samba's database, and checksums), the store with
+     the copied hashes, the two proofs, and only then the lockdown.
+   - **Things decided while building it:**
+     - Shell accounts, including the old installer's admin, become Files over
+       SFTP.
+     - A run that stops after root was given a password leaves root's new
+       password in place, so there is always a way into the OS.
+     - Undo keeps root's current password and the recovery key, and moves the
+       store aside (`accounts.json.undone-<time>`) instead of deleting it.
+     - If a key already exists, migration keeps it and makes no new one.
+
+   **Tested:**
+   - **`nas/tests/integration/separate.sh`**: the real packages, Samba,
+     helper and web server, all 50 checks passing. It starts from an
+     old-model NAS: an installer-made `sudo` admin with no SMB password, an
+     ordinary person, a shell account whose two passwords really differ, and
+     a turned-off account.
+     - The dry run shows what needs setting and flags the possible
+       difference, saying dates can't prove a match.
+     - A run that can't prove the desktop login, and one with a wrong root
+       password, both stop with everything as it was.
+     - The real run proves both ways in before locking anything.
+     - UIDs and file owners don't change.
+     - Every credential that worked still works, the differing pair
+       included. Those two become one when that person's password is next set.
+     - Undo brings back `sudo`, the old passwords and Samba's database.
+   - **In a VM**, from an install made old-model the way the old installer
+     left one (a `bash` `sudo` admin in `nas-admins` with a Linux password
+     only, and root without one):
+     - `sudo fnas accounts separate --yes` as that admin at the console
+       proved both ways in, showed a key, and took away `sudo` (`sudo -l -U`
+       confirms it).
+     - **Rollback path 1:** root at the console ran
+       `fnas accounts separate --undo`. `sudo`, `bash` and `nas-admins` came
+       back, the old password logs in through PAM, and the file owner stayed.
+     - **Rollback path 2:** after migrating again, the store was emptied (no
+       desktop login) and root's password set to a random value.
+       **FellowshipOS recovery** opened with the migration's key (the
+       install's old key was refused with the 2 s wait), and **Undo account
+       separation** and a new root password were set there. After the
+       restart, the admin's old password logs in and `sudo` works with it,
+       root logs in with the recovery password, file owners are unchanged,
+       and "Recovery was used at the console" was alerted.
 6. **Network changes with rollback.**
 7. **SSH and Samba settings.** `AllowGroups`, root SSH through
    `fellowship-root-ssh`, the SFTP PAM stack and `AuthorizedKeysCommand`,

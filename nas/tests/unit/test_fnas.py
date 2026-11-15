@@ -2820,6 +2820,48 @@ class Setup(unittest.TestCase):
             self.assertTrue(status["skipped"])
 
 
+class Separation(unittest.TestCase):
+    """Pieces of the migration to a separated NAS; the whole of it runs against
+    real packages in nas/tests/integration/separate.sh."""
+
+    def setUp(self):
+        self.separate = {m.__name__: m for m in MODULES}["fellowship_nas.separate"]
+
+    def test_a_shadow_hash_is_copied_as_it_is_and_a_lock_comes_off(self):
+        usable = self.separate.usable_hash
+        self.assertEqual(usable("$y$j9T$salt$hash"), "$y$j9T$salt$hash")
+        self.assertEqual(usable("!$6$salt$hash"), "$6$salt$hash")
+        for nothing in ("", "!", "*", "!*", "x"):
+            self.assertEqual(usable(nothing), "")
+
+    def test_samba_stops_syncing_to_linux_in_global_only(self):
+        text = ("[global]\n   workgroup = WORKGROUP\n   unix password sync = yes\n"
+                "[homes]\n   unix password sync = yes\n")
+        out = self.separate.set_smb_option(text, "unix password sync", "no")
+        self.assertEqual(out, "[global]\n   workgroup = WORKGROUP\n   unix password sync = no\n"
+                              "[homes]\n   unix password sync = yes\n")
+        missing = self.separate.set_smb_option("[global]\n   workgroup = W\n[t]\n", "pam password change", "no")
+        self.assertIn("   pam password change = no\n[t]", missing)
+
+    def test_the_dry_run_says_what_needs_setting_and_that_dates_prove_nothing(self):
+        found = {"runner": "chris", "root_has_password": False, "people": [
+            {"name": "chris", "uid": 1000, "gid": 1000, "admin": True, "enabled": True, "groups": ["sudo"],
+             "desktop": "carries over", "hash_method": "y", "smb": "needs setting", "leaves": ["sudo", "nas-admins"],
+             "notes": []},
+            {"name": "anna", "uid": 1001, "gid": 1001, "admin": False, "enabled": True, "groups": [],
+             "desktop": "carries over", "hash_method": "y", "smb": "carries over", "leaves": [],
+             "notes": ["possibly different passwords: the Linux one was changed after the Samba one"]}]}
+        out = io.StringIO()
+        self.separate.print_plan(found, out)
+        text = out.getvalue()
+        self.assertIn("SMB password      NEEDS SETTING: no Samba password exists", text)
+        self.assertIn("(sudo ends for this account)", text)
+        self.assertIn("set a root password (asked next)", text)
+        self.assertIn("set a password for chris (you; asked next)", text)
+        self.assertIn("can't prove two passwords match", text)
+        self.assertIn("Nothing has changed", text)
+
+
 class RecoveryKey(unittest.TestCase):
     """The recovery key: saved offline at install, opening FellowshipOS recovery
     with both admin passwords lost, and GRUB's password, so physical access
