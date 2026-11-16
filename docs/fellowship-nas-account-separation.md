@@ -592,8 +592,10 @@ Run in VMs, from the image, against a real system:
   screen and over SSH from the host. Results, per-item verdicts and
   screendumps: `docs/fellowship-nas-iso-verify-session-2026-11-15.md`. The
   console lines, root SSH end to end, the DHCP change against an external
-  router and the rollback timer pass; the rollback's live-address restoration
-  on a DHCP-booted NAS is open (the leftover-address finding, phase 6).
+  router and the rollback timer pass. The rollback's live-address restoration
+  on a DHCP-booted NAS failed there (the leftover-address finding) and is
+  fixed and re-verified since: `network-lease.sh` (35 checks from an active
+  lease) and `docs/fellowship-nas-lease-fix-session-2026-11-16.md`.
 
 ## Phases
 
@@ -844,15 +846,29 @@ Run in VMs, from the image, against a real system:
      delivers it) is refused with "Confirm from the NAS's new address". The
      positive path, confirming from the new address, is proven by the
      container integration, not repeated here.
-   - **Found, open (phase 6):** on a NAS that booted with DHCP, changing the
-     method leaves the previous method's address on the interface: the
-     boot dhclient survives `ifdown` (which reads the rewritten stanza), and
-     `ifup`'s dhclient then skips its flush. So a static change keeps the old
-     lease as a secondary address, a DHCP change reports the leftover static
-     address as its "lease", and a rollback restores the file and state but
-     not the live address. The container tests start from static, with no
-     boot dhclient, which is why they pass. Evidence and a proposed fix are
-     in the handoff; Chris's call, not fixed in this pass.
+   - **Found and fixed (phase 6):** on a NAS that booted with DHCP, changing
+     the method used to leave the previous method's address on the interface:
+     the boot DHCP client survives `ifdown` (which reads the rewritten
+     stanza), and `ifup`'s client then skips its flush. A static change kept
+     the old lease as a secondary address, a DHCP change reported the
+     leftover static address as its "lease", and a rollback restored the file
+     and state but not the live address. The container tests start from
+     static, with no boot client, which is why they passed.
+     `network.retire_addresses` now releases whichever client the system
+     ships — dhcpcd in the image (`dhcpcd -k`), isc-dhcp-client elsewhere
+     (`dhclient -r` with ifupdown's pidfile) — and flushes the managed port's
+     IPv4 addresses before `ifup`, in both apply and rollback. Other ports
+     and IPv6 are untouched; a missing client is not an error; and the
+     rollback's bring-up is wrapped so a failed release can no longer skip
+     the state cleanup. Regression: `nas/tests/integration/network-lease.sh`,
+     35 checks from an active lease (retirement, rollback address removal,
+     the reported lease matching the live one and the router's lease file,
+     live reachability both ways, a second port's IPv4/IPv6 and the managed
+     port's IPv6 stanza and address preserved). `network-rollback.sh` (51)
+     and the real-systemd timer (14) pass unchanged. Re-verified on an
+     installed VM, including a desktop confirm from the new address over a
+     direct host forward: see
+     `docs/fellowship-nas-lease-fix-session-2026-11-16.md`.
 7. **SSH and Samba settings.** Done. The plan, with the audit of what already
    existed and Chris's three rulings, is `docs/fellowship-nas-ssh-samba-plan.md`;
    the session handoff is `docs/fellowship-nas-ssh-samba-session-2026-11-15.md`.
