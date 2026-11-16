@@ -189,50 +189,6 @@ the console screen says when the only admin is flagged.
 Inconclusive stays open. Nothing pushed; `nas-edition` is shared, so any push
 lists `origin/nas-edition..HEAD` and separates mine from theirs first.
 
-## Gate A — result, 2026-11-16
-
-Built and tested; paused for review before Gate B.
-
-| Item | Verdict | Evidence |
-| --- | --- | --- |
-| G1 writer | **pass** | `fnas user set NAME --must-change on\|off`; `change_separated` writes the flag. `kim marks ann's password temporary` over the real admin API |
-| Old model refused | **pass** | Points at `chage -d 0 NAME` and changes nothing; unit `test_must_change_on_the_old_model_points_at_chage` |
-| G4 visibility | **pass** | `print_users` says "must change password"; `api.ts` `User.must_change`; Users shows a **Must change** badge, a Notice, and the checkbox. Both the text and JSON lists proved in the container |
-| G5 SMB gated | **pass** | `smbpasswd -d` on flag, `-e` on clear. `SMB refuses the temporary password` with real smbd; `SMB takes the same password again` after clearing, with no new password |
-| Ruling 2 edge: off then on while flagged | **pass** | `SMB stays closed while the password is temporary` — `enabled on` no longer hands a temporary password its shares |
-| A new password opens SMB by itself | **pass** | `set_password` clears the flag and runs `smbpasswd -e` when the entry is enabled; `SMB takes the new password with no flag left to clear`. The explicit `-e` makes this independent of whether `-a` clears the D flag |
-| A turned-off account stays closed | **pass** | Unit: a new password for a disabled entry sets it but never enables SMB |
-| Sessions end when a password is made temporary | **pass** | `end_sessions` on flag; unit reads `signed-out.json` |
-| G6 migration carries `lastchg 0` | **pass** | Plan note, `write_store` flag, `lock_down` disables SMB. Three unit tests; `separate.sh` still 65/65, so a normal migration is unchanged |
-| G7 reuse, G2/G3 login flow | **open — Gate B** | Deliberately not built yet |
-| Linux side untouched | **pass** | `their Linux password stayed locked throughout`; no `chpasswd`, no `usermod` for a flag change |
-
-Totals, all against packages rebuilt into `nas-repo`:
-
-| Suite | Result |
-| --- | --- |
-| fnas unit (10 new) | **373/373** |
-| `separated-login.sh` (18 new) | **52/52** |
-| `ssh-samba.sh` (3 new) | **69/69** |
-| `separate.sh` | **65/65** |
-| `maintenance.sh` | **26/26** |
-| `tsc --noEmit` | clean |
-
-**G11 — new, measured, needs a ruling.** The flag gates *password* access only.
-A store SSH key still opens SFTP while the password is temporary:
-`ann, temporary password: the store key still works` in `ssh-samba.sh`. Key
-auth never reaches `pam_exec`, and the `pam_unix` account phase checks shadow
-expiry, which the flag doesn't set. So a person flagged as temporary keeps
-file access through SFTP with a key. Closing that would mean either answering
-no keys from `fnas auth keys` while flagged, or giving the account phase a
-store check. Not built: it is a third ruling, and it changes phase 7's
-"keys come from the store, read per connection" behavior.
-
-**One footgun to note.** Nothing stops an admin flagging the *only* admin.
-With Gate B built they recover at the login page; until then, only root at the
-console can clear it. The Users panel hides the flag control for yourself, as
-it already hides "Turn off", but `fnas` itself allows it.
-
 ## Out of scope
 
 The physical-LAN DHCP run; the installer LVM edits; password-age policy (G9)

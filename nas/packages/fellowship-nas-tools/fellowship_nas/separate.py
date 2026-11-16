@@ -119,11 +119,6 @@ def separation_plan():
                 f"possibly different passwords: the Linux one was changed after the Samba one "
                 f"({day_text(linux_day)} vs {day_text(smb_day)}). Both keep working as they do now. "
                 f"They become one again the next time {name}'s password is set.")
-        if hashed and linux_day == 0:
-            person["must_change"] = True
-            person["notes"].append(
-                "the Linux password is marked for change at next login. It carries over as a temporary NAS "
-                "password: they choose a new one at the login page, and until they do, SMB is closed to them.")
         people.append(person)
     root = shadow.get("root", {})
     return {"people": people,
@@ -304,7 +299,6 @@ def write_store(found):
             raw = shadow_entries().get(p["name"], {})
             entry = accounts.new_person(p["uid"], p["full_name"], admin=p["admin"], sftp=p["sftp"])
             entry["enabled"] = p["enabled"]
-            entry["must_change"] = bool(p.get("must_change"))
             hashed = usable_hash(raw.get("hash"))
             if hashed:
                 entry["hash"] = hashed
@@ -323,9 +317,6 @@ def lock_down(found):
         run("usermod", "--shell", users.KINDS["sftp" if p["sftp"] else "shares"], name)
         for group in p["leaves"]:
             run("gpasswd", "-d", name, group, check=False)
-        # A password carried over as temporary mustn't keep reading shares
-        if p.get("must_change") and p["smb"] == "carries over":
-            run("smbpasswd", "-d", name)
     shares.samba_password_policy()
     sftp.sync()
     ssh.refresh()
