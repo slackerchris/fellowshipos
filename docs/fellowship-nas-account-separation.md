@@ -805,4 +805,9 @@ Run in VMs, from the image, against a real system:
 7. **SSH and Samba settings.** `AllowGroups`, root SSH through
    `fellowship-root-ssh`, the SFTP PAM stack and `AuthorizedKeysCommand`,
    Samba's password sync turned off. These ship with phase 4 for new installs,
-   and with phase 5 for migrated ones.
+   and with phase 5 for migrated ones. The plan, with the audit of what
+   already exists and Chris's rulings of 2026-11-15, is
+   `docs/fellowship-nas-ssh-samba-plan.md`. Note: the "sync turned off"
+   wording above is superseded by ruling 1 in that plan — turning both
+   options off was verified to accept Windows password changes and drift
+   the SMB password; the agreed policy keeps them on with a PAM deny.
