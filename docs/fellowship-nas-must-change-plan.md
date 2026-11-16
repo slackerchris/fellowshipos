@@ -1,5 +1,16 @@
 # The must-change password flow — plan, November 16, 2026
 
+> **Stopped and backed out, 2026-11-16. Reference only, not approved work.**
+> Chris deferred forced password changes and reset links
+> (`docs/fellowship-nas-release.md`). Gate A was reverted whole in `23b048b`,
+> including the migration carry-over, so nothing can flag a person or close
+> their password access; ordinary admin resets and account disabling are
+> exactly as they were. The `nas/` tree is byte-identical to `4fc295f`, and the
+> packages were rebuilt so an installed image matches. The audit below still
+> describes the code truthfully — the flag is unreachable, and it never gated
+> SMB — but the plan and its two rulings are **not** a work order. The next
+> round is driven by the gaps Chris's household VM tour actually hits.
+
 Phase 2's residual, audited and ruled on. Branch `nas-edition` at `4fc295f`,
 twelve commits ahead of origin, nothing pushed. Chris's installer LVM edits
 (`installer/internal/engine/engine.go`, `engine_test.go`) stay uncommitted and
