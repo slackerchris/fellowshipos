@@ -3200,7 +3200,11 @@ class Network(unittest.TestCase):
                         mock.patch.object(self.shares, "write_config", lambda *a, **kw: self.configs.append(a)),
                         mock.patch.object(fnas.alerts, "send_alert",
                                           lambda severity, title, body: self.alerts.append(title)),
-                        mock.patch.object(self.network.time, "sleep", lambda seconds: None)):
+                        mock.patch.object(self.network.time, "sleep", lambda seconds: None),
+                        # The harness world uses isc-dhcp-client; the image's
+                        # dhcpcd has its own test below
+                        mock.patch.object(self.network.shutil, "which",
+                                          lambda name: "/sbin/dhclient" if name == "dhclient" else None)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -3365,6 +3369,22 @@ class Network(unittest.TestCase):
         self.assertLess(flush, ifup)
         self.network.confirm()
         self.assertIsNone(self.network.show()["pending"])
+
+    def test_retire_releases_dhcpcd_when_that_is_the_client(self):
+        with mock.patch.object(self.network.shutil, "which",
+                               lambda name: "/sbin/dhcpcd" if name == "dhcpcd" else None):
+            self.apply_static()
+        self.assertIn(("dhcpcd", "-k", "veth1"), self.calls)
+        self.assertFalse([c for c in self.calls if c[0] == "dhclient"])
+        self.assertIn(("ip", "-4", "addr", "flush", "dev", "veth1"), self.calls)
+
+    def test_no_dhcp_client_at_all_still_flushes_and_rolls_back(self):
+        with mock.patch.object(self.network.shutil, "which", lambda name: None):
+            self.apply_static()
+            self.calls.clear()
+            self.assertTrue(self.network.rollback())
+        self.assertIn(("ip", "-4", "addr", "flush", "dev", "veth1"), self.calls)
+        self.assertFalse(os.path.exists(self.network.PENDING))
 
     def test_the_locks_sort_the_network_commands(self):
         maintenance = {m.__name__: m for m in MODULES}["fellowship_nas.maintenance"]

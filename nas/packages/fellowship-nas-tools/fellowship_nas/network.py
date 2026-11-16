@@ -14,6 +14,7 @@ import contextlib
 import ipaddress
 import os
 import re
+import shutil
 import time
 
 from . import alerts, shares
@@ -164,14 +165,21 @@ def retire_addresses(name):
     the next method starts from a clean port. Scoped to this interface alone:
     other ports keep their addresses, and IPv6 is never touched.
 
-    Without this, the boot dhclient survives a method change (ifdown reads the
-    rewritten stanza, so it never releases the old method's client), and its
-    lease lingers beside the new address or blocks the new client's flush: a
-    static change kept the old lease reachable, a DHCP change reported the
+    Without this, the boot DHCP client survives a method change (ifdown reads
+    the rewritten stanza, so it never releases the old method's client), and
+    its lease lingers beside the new address or blocks the new client's flush:
+    a static change kept the old lease reachable, a DHCP change reported the
     leftover static address as its lease, and a rollback left the abandoned
-    address live. dhclient -r kills the client but keeps the address, so the
-    flush is what actually removes it."""
-    run("dhclient", "-r", "-pf", f"/run/dhclient.{name}.pid", name, check=False)
+    address live. Releasing the client is not enough by itself (dhclient -r
+    keeps the address), so the flush is what actually removes it.
+
+    The image ships dhcpcd; other installs and the test harness use
+    isc-dhcp-client. Release whichever is present; a missing client is not an
+    error, and neither release may stop the flush or the rollback's cleanup."""
+    if shutil.which("dhclient"):
+        run("dhclient", "-r", "-pf", f"/run/dhclient.{name}.pid", name, check=False)
+    if shutil.which("dhcpcd"):
+        run("dhcpcd", "-k", name, check=False)
     run("ip", "-4", "addr", "flush", "dev", name, check=False)
 
 
@@ -218,9 +226,10 @@ def put_back(backup, name):
         write_resolv(backup["resolv"])
     # Best effort: the saved files are back either way, and the state must be
     # cleared even if the interface won't come up on them
-    retire_addresses(name)
-    run("ifdown", name, check=False)
-    run("ifup", name, check=False)
+    with contextlib.suppress(FnasError):
+        retire_addresses(name)
+        run("ifdown", name, check=False)
+        run("ifup", name, check=False)
 
 
 def clear_state():
