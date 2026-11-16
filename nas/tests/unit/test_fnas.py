@@ -3340,6 +3340,29 @@ class Network(unittest.TestCase):
         self.assertEqual(shown["mode"], "static")
         self.assertEqual(shown["pending"]["address"], "10.99.0.50")
         self.assertEqual(shown["lan"], "10.99.0.0/24")
+
+    def test_retire_releases_the_lease_and_flushes_only_this_ports_ipv4(self):
+        self.apply_static()
+        self.assertIn(("dhclient", "-r", "-pf", "/run/dhclient.veth1.pid", "veth1"), self.calls)
+        self.assertIn(("ip", "-4", "addr", "flush", "dev", "veth1"), self.calls)
+        # Never IPv6, and never another port
+        self.assertFalse([c for c in self.calls if c[:2] == ("ip", "-6")])
+        self.assertFalse([c for c in self.calls if "flush" in c and c[-1] != "veth1"])
+        self.assertFalse([c for c in self.calls if c[0] == "dhclient" and c[-1] != "veth1"])
+
+    def test_rollback_retires_the_abandoned_method_too(self):
+        self.apply_static()
+        self.calls.clear()
+        self.assertTrue(self.network.rollback())
+        self.assertIn(("dhclient", "-r", "-pf", "/run/dhclient.veth1.pid", "veth1"), self.calls)
+        self.assertIn(("ip", "-4", "addr", "flush", "dev", "veth1"), self.calls)
+
+    def test_dhcp_apply_retires_before_bringing_the_port_up(self):
+        self.addr = self.addr.replace("10.99.0.2/24", "10.99.0.100/24")
+        self.network.apply("dhcp")
+        flush = self.calls.index(("ip", "-4", "addr", "flush", "dev", "veth1"))
+        ifup = self.calls.index(("ifup", "veth1"))
+        self.assertLess(flush, ifup)
         self.network.confirm()
         self.assertIsNone(self.network.show()["pending"])
 

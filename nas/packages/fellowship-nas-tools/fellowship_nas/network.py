@@ -159,7 +159,24 @@ def make_config(name, mode, address=None, gateway=None):
     return "\n".join(lines + kept) + "\n"
 
 
+def retire_addresses(name):
+    """Release this interface's DHCP lease and remove its IPv4 addresses, so
+    the next method starts from a clean port. Scoped to this interface alone:
+    other ports keep their addresses, and IPv6 is never touched.
+
+    Without this, the boot dhclient survives a method change (ifdown reads the
+    rewritten stanza, so it never releases the old method's client), and its
+    lease lingers beside the new address or blocks the new client's flush: a
+    static change kept the old lease reachable, a DHCP change reported the
+    leftover static address as its lease, and a rollback left the abandoned
+    address live. dhclient -r kills the client but keeps the address, so the
+    flush is what actually removes it."""
+    run("dhclient", "-r", "-pf", f"/run/dhclient.{name}.pid", name, check=False)
+    run("ip", "-4", "addr", "flush", "dev", name, check=False)
+
+
 def restart_interface(name):
+    retire_addresses(name)
     run("ifdown", name, check=False)
     run("ifup", name)
 
@@ -201,6 +218,7 @@ def put_back(backup, name):
         write_resolv(backup["resolv"])
     # Best effort: the saved files are back either way, and the state must be
     # cleared even if the interface won't come up on them
+    retire_addresses(name)
     run("ifdown", name, check=False)
     run("ifup", name, check=False)
 
