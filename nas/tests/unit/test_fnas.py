@@ -2874,6 +2874,63 @@ class Separation(unittest.TestCase):
         self.assertIn("can't prove two passwords match", text)
         self.assertIn("Nothing has changed", text)
 
+    def test_a_linux_password_marked_for_change_carries_over_as_temporary(self):
+        people = [{"name": name, "uid": uid, "full_name": name.title(), "admin": False, "enabled": True,
+                   "groups": [], "kind": "shares"} for name, uid in (("kim", 1001), ("ann", 1002))]
+        shadow = {"kim": {"hash": "$y$j9T$salt$hash", "changed_day": 0, "off": False},
+                  "ann": {"hash": "$y$j9T$salt$hash", "changed_day": 20000, "off": False},
+                  "root": {"hash": "$y$j9T$salt$hash", "changed_day": 20000, "off": False}}
+        with mock.patch.object(self.separate.accounts, "is_separated", lambda: False), \
+                mock.patch.object(self.separate, "shadow_entries", lambda: shadow), \
+                mock.patch.object(self.separate.users, "list_users", lambda: people), \
+                mock.patch.object(self.separate.users, "smb_accounts", lambda: {"kim": False, "ann": False}), \
+                mock.patch.object(self.separate, "samba_set_day", lambda name: 20000), \
+                mock.patch.object(self.separate.grp, "getgrall", lambda: []), \
+                mock.patch.object(self.separate.pwd, "getpwnam",
+                                  lambda name: SimpleNamespace(pw_uid=1001, pw_gid=1001)):
+            found = self.separate.separation_plan()
+        kim, ann = found["people"]
+        self.assertTrue(kim["must_change"])
+        self.assertNotIn("must_change", ann)
+        self.assertIn("temporary NAS password", " ".join(kim["notes"]))
+        out = io.StringIO()
+        self.separate.print_plan(found, out)
+        self.assertIn("temporary NAS password", out.getvalue())
+
+    def test_the_store_keeps_a_password_marked_for_change(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        store = os.path.join(directory.name, "accounts.json")
+        found = {"people": [{"name": "kim", "uid": 1001, "full_name": "Kim", "admin": False, "enabled": True,
+                             "sftp": False, "must_change": True, "smb": "carries over"}]}
+        shadow = {"kim": {"hash": "$y$j9T$salt$hash", "changed_day": 0, "off": False}}
+        with mock.patch.object(self.separate.accounts, "STORE", store), \
+                mock.patch.object(self.separate.accounts, "STORE_LOCK", store + ".lock"), \
+                mock.patch.object(self.separate, "shadow_entries", lambda: shadow), \
+                mock.patch.object(self.separate, "authorized_keys", lambda account: []), \
+                mock.patch.object(self.separate.pwd, "getpwnam", lambda name: SimpleNamespace(pw_dir="/nonexistent")):
+            self.separate.write_store(found)
+        with open(store) as file:
+            entry = json.load(file)["people"]["kim"]
+        self.assertTrue(entry["must_change"])
+        self.assertEqual(entry["hash"], "$y$j9T$salt$hash")
+
+    def test_migration_closes_smb_for_a_password_carried_over_as_temporary(self):
+        found = {"people": [
+            {"name": "kim", "sftp": False, "leaves": [], "must_change": True, "smb": "carries over"},
+            {"name": "ann", "sftp": False, "leaves": [], "smb": "carries over"},
+            {"name": "sam", "sftp": False, "leaves": [], "must_change": True, "smb": "needs setting"}]}
+        calls = []
+        with mock.patch.object(self.separate, "run", lambda *c, **kw: calls.append(c)), \
+                mock.patch.object(self.separate.shares, "samba_password_policy", lambda: None), \
+                mock.patch.object(self.separate.sftp, "sync", lambda: None), \
+                mock.patch.object(self.separate.ssh, "refresh", lambda: None):
+            self.separate.lock_down(found)
+        self.assertIn(("smbpasswd", "-d", "kim"), calls)
+        self.assertNotIn(("smbpasswd", "-d", "ann"), calls)
+        # Nothing to disable for someone whose SMB password doesn't exist yet
+        self.assertNotIn(("smbpasswd", "-d", "sam"), calls)
+
 
 class RecoveryKey(unittest.TestCase):
     """The recovery key: saved offline at install, opening FellowshipOS recovery
@@ -3602,6 +3659,63 @@ class SeparatedUsers(unittest.TestCase):
         fnas.set_password("kim", "kims new one")
         self.assertFalse(self.stored("kim")["must_change"])
 
+    def test_an_admin_marks_a_password_temporary_and_the_list_says_so(self):
+        fnas.change_user("kim", must_change=True)
+        self.assertTrue(self.stored("kim")["must_change"])
+        self.assertTrue({u["name"]: u for u in fnas.list_users()}["kim"]["must_change"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            fnas.print_users(fnas.list_users())
+        self.assertIn("must change password", out.getvalue())
+        # Nothing gives them a Linux password or touches their shell
+        self.assertFalse([c for c in self.commands() if c[0] in ("chpasswd", "usermod")])
+        fnas.change_user("kim", must_change=False)
+        self.assertFalse(self.stored("kim")["must_change"])
+
+    def test_marking_a_password_temporary_closes_smb_and_ends_sessions(self):
+        with mock.patch.object(fnas.users, "smb_accounts", lambda: {"kim": False}):
+            fnas.change_user("kim", must_change=True)
+            self.assertIn(("smbpasswd", "-d", "kim"), self.commands())
+            with open(self.signed_out) as file:
+                self.assertIn("kim", json.load(file))
+            fnas.change_user("kim", must_change=False)
+            self.assertIn(("smbpasswd", "-e", "kim"), self.commands())
+
+    def test_turning_an_account_back_on_keeps_smb_closed_while_its_password_is_temporary(self):
+        with mock.patch.object(fnas.users, "smb_accounts", lambda: {"kim": False}):
+            fnas.change_user("kim", must_change=True)
+            fnas.change_user("kim", enabled=False)
+            fnas.change_user("kim", enabled=True)
+            self.assertTrue(self.stored("kim")["enabled"])
+            self.assertTrue(self.stored("kim")["must_change"])
+            self.assertNotIn(("smbpasswd", "-e", "kim"), self.commands())
+            # Clearing the flag is what opens SMB again, with no new password
+            fnas.change_user("kim", must_change=False)
+            self.assertIn(("smbpasswd", "-e", "kim"), self.commands())
+
+    def test_a_new_password_opens_smb_again(self):
+        with mock.patch.object(fnas.users, "smb_accounts", lambda: {"kim": False}), \
+                mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.change_user("kim", must_change=True)
+            fnas.set_password("kim", "kims new one")
+            self.assertFalse(self.stored("kim")["must_change"])
+            self.assertIn(("smbpasswd", "-e", "kim"), self.commands())
+
+    def test_a_new_password_for_a_turned_off_account_leaves_smb_closed(self):
+        with mock.patch.object(fnas.users, "smb_accounts", lambda: {"kim": False}), \
+                mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.change_user("kim", enabled=False)
+            self.calls.clear()
+            fnas.set_password("kim", "kims new one")
+            self.assertIn(("smbpasswd", "-s", "-a", "kim"), [c for c, _ in self.calls])
+            self.assertNotIn(("smbpasswd", "-e", "kim"), self.commands())
+
+    def test_the_command_line_takes_must_change_and_leaves_it_alone_when_unasked(self):
+        parser = fnas.build_parser()
+        self.assertEqual(parser.parse_args(["user", "set", "kim", "--must-change", "on"]).must_change, "on")
+        self.assertEqual(parser.parse_args(["user", "set", "kim", "--must-change", "off"]).must_change, "off")
+        self.assertIsNone(parser.parse_args(["user", "set", "kim", "--full-name", "Kim"]).must_change)
+
     def test_admins_come_from_the_store_and_the_last_one_stays(self):
         self.assertEqual(fnas.admins(), {"tester"})
         with self.assertRaisesRegex(fnas.FnasError, "only administrator"):
@@ -3741,6 +3855,12 @@ class Users(unittest.TestCase):
         # The helper reads this and refuses a session that started before it
         with open(self.signed_out) as file:
             self.assertIn("tester", json.load(file))
+
+    def test_must_change_on_the_old_model_points_at_chage(self):
+        # The flag is the store's; a Linux login keeps its own shadow marking
+        with self.assertRaisesRegex(fnas.FnasError, "chage -d 0 kim"):
+            fnas.change_user("kim", must_change=True)
+        self.assertFalse([c for c in self.commands() if c[0] in ("usermod", "chpasswd", "smbpasswd", "gpasswd")])
 
     def test_turning_an_account_off_or_removing_it_ends_its_sessions(self):
         fnas.change_user("kim", enabled=False)

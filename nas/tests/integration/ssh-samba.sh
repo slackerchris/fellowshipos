@@ -140,6 +140,13 @@ refuse "ann, turned off: key SFTP refused too (PAM's account check)" sftp_key an
 fnas user set ann --enabled on > /dev/null
 expect "turned back on, the key works again" sftp_key ann /tmp/kimkey2
 
+echo "== a temporary password: SFTP refuses it, and a key is a separate credential"
+fnas user set ann --must-change on > /dev/null
+refuse "ann, temporary password: password SFTP refused" sftp_pw ann 'ann password 22'
+expect "ann, temporary password: the store key still works, as a key is not the password" sftp_key ann /tmp/kimkey2
+fnas user set ann --must-change off > /dev/null
+expect "clearing the flag restores password SFTP" sftp_pw ann 'ann password 22'
+
 echo "== root's own SSH: off, keys only, his alone"
 ssh-keygen -t ed25519 -f /tmp/rootkey -N '' -q
 refuse "root: password SSH refused while off" ssh_pw root 'root pass 99' true

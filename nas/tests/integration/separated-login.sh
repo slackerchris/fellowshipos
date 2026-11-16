@@ -145,3 +145,46 @@ refuse "SMB refuses them" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
 fnas user set ann --enabled on > /dev/null
 expect "turned back on, SMB takes them again" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
 [ "$(getent shadow ann | cut -d: -f2)" = "!" ] && pass "and their Linux password is still locked" || fail "and their Linux password is still locked"
+
+echo "== a temporary password: must change at the next sign-in"
+r=$(api "$K" POST /api/fnas '{"args":["user","set","ann","--must-change","on"]}')
+[ "$(code "$r")" = 200 ] && pass "kim marks ann's password temporary" || fail "kim marks ann's password temporary: $r"
+r=$(api "$K" POST /api/fnas '{"args":["--json","user","list"]}')
+body "$r" | python3 -c 'import json,sys
+people = {p["name"]: p for p in json.loads(json.load(sys.stdin)["output"])}
+sys.exit(0 if people["ann"]["must_change"] and not people["kim"]["must_change"] else 1)' \
+    && pass "the JSON list reports the flag" || fail "the JSON list reports the flag: $r"
+fnas user list | grep -q "must change password" && pass "the text list reports the flag" || fail "the text list reports the flag"
+r=$(login "$(mktemp)" ann 'set by kim 44')
+[ "$(code "$r")" != 200 ] && grep -q "must be changed" <<< "$r" \
+    && pass "the desktop refuses the temporary password" || fail "the desktop refuses the temporary password: $r"
+refuse "SMB refuses the temporary password" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+refuse "fnas auth check refuses it, which is what SFTP asks" bash -c 'echo "set by kim 44" | fnas auth check ann'
+why=$(echo "set by kim 44" | fnas auth check ann 2>&1 >/dev/null || true)
+[ "$why" = "fnas: expired" ] && pass "the right password is told it must be changed" || fail "the right password is told it must be changed: $why"
+why=$(echo "nope" | fnas auth check ann 2>&1 >/dev/null || true)
+[ "$why" = "fnas: wrong" ] && pass "a wrong password learns nothing about the flag" || fail "a wrong password learns nothing about the flag: $why"
+
+echo "== turning the account off and on doesn't hand a temporary password its shares"
+fnas user set ann --enabled off > /dev/null
+fnas user set ann --enabled on > /dev/null
+refuse "SMB stays closed while the password is temporary" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+r=$(login "$(mktemp)" ann 'set by kim 44')
+[ "$(code "$r")" != 200 ] && pass "the desktop still refuses them" || fail "the desktop still refuses them: $r"
+
+echo "== clearing the flag restores the password they already have"
+r=$(api "$K" POST /api/fnas '{"args":["user","set","ann","--must-change","off"]}')
+[ "$(code "$r")" = 200 ] && pass "kim clears the flag" || fail "kim clears the flag: $r"
+expect "SMB takes the same password again" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+r=$(login "$(mktemp)" ann 'set by kim 44')
+[ "$(code "$r")" = 200 ] && pass "the desktop takes the same password again" || fail "the desktop takes the same password again: $r"
+
+echo "== a new password clears the flag and opens SMB by itself"
+fnas user set ann --must-change on > /dev/null
+refuse "SMB closed again" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+echo 'ann chosen 55' | fnas user password ann --password-stdin > /dev/null
+expect "SMB takes the new password with no flag left to clear" smbclient //127.0.0.1/t -U 'ann%ann chosen 55' -c ls
+refuse "SMB refuses the temporary one" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+r=$(login "$(mktemp)" ann 'ann chosen 55')
+[ "$(code "$r")" = 200 ] && pass "the new password logs in to the desktop" || fail "the new password logs in to the desktop: $r"
+[ "$(getent shadow ann | cut -d: -f2)" = "!" ] && pass "their Linux password stayed locked throughout" || fail "their Linux password stayed locked throughout"

@@ -309,6 +309,9 @@ export interface User {
     password: boolean;
     smb_password: boolean;
     enabled: boolean;
+    // A temporary password: they choose a new one at the next sign-in, and
+    // shares are closed to them until they do. Only a separated NAS reports it.
+    must_change?: boolean;
 }
 
 export interface Group {

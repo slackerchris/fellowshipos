@@ -235,14 +235,21 @@ def set_password(name, password):
     password that drifted apart back together."""
     find_user(name)
     check_password(password)
+    enabled = True
     if accounts.is_separated():
         hashed = accounts.hash_password(password)
         with accounts.changing_store() as store:
-            accounts.set_password_hash(store["people"][name], hashed)
+            entry = store["people"][name]
+            accounts.set_password_hash(entry, hashed)
+            enabled = entry.get("enabled", True)
     else:
         run("chpasswd", stdin=f"{name}:{password}\n")
     if os.path.isdir("/etc/samba"):
         run("smbpasswd", "-s", "-a", name, stdin=f"{password}\n{password}\n")
+        # A password that had to be changed kept SMB closed. A new one is what
+        # opens it again, unless the account itself is turned off.
+        if accounts.is_separated() and enabled:
+            run("smbpasswd", "-e", name)
     end_sessions(name)
 
 
@@ -314,11 +321,14 @@ def create_user(name, full_name, kind, admin, groups, password):
     set_admin(name, admin)
 
 
-def change_user(name, full_name=None, kind=None, admin=None, groups=None, enabled=None):
+def change_user(name, full_name=None, kind=None, admin=None, groups=None, enabled=None, must_change=None):
     user = find_user(name)
     if accounts.is_separated():
-        change_separated(user, full_name, kind, admin, groups, enabled)
+        change_separated(user, full_name, kind, admin, groups, enabled, must_change)
         return
+    if must_change is not None:
+        raise FnasError(f"this NAS keeps Linux logins, so a password marked for change is {name}'s own "
+                        f"shadow entry: chage -d 0 {name}")
     if full_name is not None:
         check_full_name(full_name)
         run("usermod", "--comment", full_name, name)
@@ -341,7 +351,7 @@ def change_user(name, full_name=None, kind=None, admin=None, groups=None, enable
             run("smbpasswd", "-e", name)
 
 
-def change_separated(user, full_name, kind, admin, groups, enabled):
+def change_separated(user, full_name, kind, admin, groups, enabled, must_change=None):
     """change_user on a separated NAS. Turning someone off never touches their
     Linux password, which stays locked either way: `usermod --unlock` on it would
     try to make a passwordless account. The account's expiry is what makes SMB
@@ -367,15 +377,23 @@ def change_separated(user, full_name, kind, admin, groups, enabled):
             entry["sftp"] = kind == "sftp"
         if enabled is not None:
             entry["enabled"] = enabled
+        if must_change is not None:
+            entry["must_change"] = must_change
     if enabled is False:
         run("usermod", "--expiredate", OFF_EXPIRY, name)
-        if user["smb_password"]:
-            run("smbpasswd", "-d", name)
         end_sessions(name)
     elif enabled is True:
         run("usermod", "--expiredate", "", name)
-        if user["smb_password"]:
-            run("smbpasswd", "-e", name)
+    if must_change is True:
+        # Making a password temporary is a reason to end every session it opened
+        end_sessions(name)
+    # SMB follows the account: closed while it is turned off or its password is
+    # temporary, and open again only when neither is true. Turning an account
+    # back on therefore doesn't hand a temporary password its shares again.
+    if (enabled is not None or must_change is not None) and user["smb_password"]:
+        on = (user["enabled"] if enabled is None else enabled) and not (
+            user["must_change"] if must_change is None else must_change)
+        run("smbpasswd", "-e" if on else "-d", name)
 
 
 def remove_user(name, keep_home, confirm, shares_lost):

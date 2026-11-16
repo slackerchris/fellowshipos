@@ -212,7 +212,8 @@ def print_users(found):
         extras = [user["kind"] == "ssh" and "SSH", user["kind"] == "sftp" and "SFTP only",
                   user["admin"] and "administrator",
                   not user["password"] and "no password yet",
-                  user["password"] and not user["smb_password"] and "no SMB password", not user["enabled"] and "turned off"]
+                  user["password"] and not user["smb_password"] and "no SMB password",
+                  user.get("must_change") and "must change password", not user["enabled"] and "turned off"]
         print(f"{user['name']}  {user['full_name']}  " + ", ".join(e for e in extras if e))
         if user["groups"]:
             print(f"    groups: {', '.join(user['groups'])}")
@@ -531,6 +532,8 @@ def build_parser():
     user_set.add_argument("--kind", choices=tuple(users.KINDS))
     user_set.add_argument("--admin", choices=ON_OFF)
     user_set.add_argument("--enabled", choices=ON_OFF, help="off: can't log in or reach shares")
+    user_set.add_argument("--must-change", choices=ON_OFF,
+                          help="on: the password is temporary, and they choose a new one at the next sign-in")
     user_set.add_argument("--groups", help="comma-separated; replaces the account's groups")
     for action, text in (("password", "set the one password for the desktop and every way to share"),
                          ("smb-password", "the same as password, kept for older desktops")):
@@ -954,7 +957,8 @@ def dispatch_user_action(args, show):
         print(f"Added {args.name}")
     elif args.action == "set":
         users.change_user(args.name, args.full_name, args.kind, switch(args.admin),
-                          None if args.groups is None else names(args.groups), switch(args.enabled))
+                          None if args.groups is None else names(args.groups), switch(args.enabled),
+                          switch(args.must_change))
         print(f"Updated {args.name}")
     elif args.action in ("password", "smb-password"):
         users.set_password(args.name, read_secret(True))

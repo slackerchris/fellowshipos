@@ -156,8 +156,10 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
     const [chosen, setChosen] = useState(user.groups);
     const [password, setPassword] = useState("");
     const [again, setAgain] = useState("");
+    const [temporary, setTemporary] = useState(false);
     const save = useAction(onDone);
     const setPasswordAction = useAction();
+    const flagAction = useAction(onDone);
     const { user: me } = useContext(SessionContext);
     return (
         <div class="stack">
@@ -183,16 +185,35 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
                 event.preventDefault();
                 setPasswordAction.run(async () => {
                     const output = await fnas(["user", "password", user.name, "--password-stdin"], password);
-                    setPassword(""); setAgain("");
-                    return output;
+                    // Setting a password clears the flag, so a temporary one is asked for after it
+                    const flagged = temporary ? await fnas(["user", "set", user.name, "--must-change", "on"]) : "";
+                    setPassword(""); setAgain(""); setTemporary(false);
+                    return [output, flagged].filter(Boolean).join("\n");
                 });
             }}>
                 <PasswordFields password={password} setPassword={setPassword} again={again} setAgain={setAgain}
                                 label="New password" />
+                <label class="check">
+                    <input type="checkbox" checked={temporary}
+                           onChange={event => setTemporary(event.currentTarget.checked)} />
+                    <span>Temporary: they choose a new one at the next sign-in</span>
+                </label>
                 <div class="row"><Button type="submit" busy={setPasswordAction.busy}
                                          disabled={!!passwordProblem(password, again)}>Set password</Button></div>
                 <Result outcome={setPasswordAction.outcome} />
             </form>}
+            {user.name !== me && <div class="field">
+                <span class="field-label">Password must be changed</span>
+                <label class="check">
+                    <input type="checkbox" checked={!!user.must_change} disabled={flagAction.busy}
+                           onChange={event => flagAction.run(() => fnas(["user", "set", user.name, "--must-change",
+                                                                        onOff(event.currentTarget.checked)]))} />
+                    <span>{user.name} chooses a new password at the next sign-in</span>
+                </label>
+                <p class="muted small">Until they do, the password they have now is refused by the desktop and by
+                    shares. An SFTP key is a separate credential and still works.</p>
+                <Result outcome={flagAction.outcome} />
+            </div>}
             <SshKeys user={user} />
             <div class="field">
                 <span class="field-label">Shares {user.name} can use</span>
@@ -298,6 +319,7 @@ function UserList({ users, groups, reload, adding, setAdding }: {
                                     </td>
                                     <td class="small">{user.groups.join(", ") || <span class="muted">none</span>}</td>
                                     <td class="small">{!user.password ? <Badge kind="warning">No password yet</Badge>
+                                        : user.must_change ? <Badge kind="warning">Must change</Badge>
                                         : user.smb_password ? "Set" : <Badge kind="warning">Not set for shares</Badge>}</td>
                                     <td class="row-actions">
                                         <span class="menu-wrap">
@@ -323,6 +345,8 @@ function UserList({ users, groups, reload, adding, setAdding }: {
                                 </tr>
                                 {editing === user.name && (
                                     <tr><td colSpan={5}>
+                                        {user.must_change && <Notice>{user.name}'s password is temporary: they choose a
+                                            new one at the next sign-in, and shares are closed to them until they do.</Notice>}
                                         {!user.password ? <Notice>{user.name} has no password yet, as after restoring
                                             settings: passwords are never saved on a pool. Set one below.</Notice>
                                             : !user.smb_password && <Notice>{user.name} has no password for shares yet, as
