@@ -6,6 +6,7 @@ package front
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -219,6 +220,24 @@ func remoteAddress(r *http.Request) string {
 	return host
 }
 
+type localKey struct{}
+
+// ConnContext remembers the address each connection arrived at. The kernel
+// chooses it, not the client, so it proves where a request landed even when
+// the NAS holds several addresses (docs/fellowship-nas-network-rollback-plan.md).
+func ConnContext(ctx context.Context, conn net.Conn) context.Context {
+	return context.WithValue(ctx, localKey{}, conn.LocalAddr().String())
+}
+
+func localAddress(r *http.Request) string {
+	value, _ := r.Context().Value(localKey{}).(string)
+	host, _, err := net.SplitHostPort(value)
+	if err != nil {
+		return value
+	}
+	return host
+}
+
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.sameOrigin(r) {
 		writeError(w, http.StatusForbidden, otherSite)
@@ -232,7 +251,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response, ok := s.call(w, protocol.Request{Op: protocol.OpLogin, User: strings.TrimSpace(body.User),
-		Password: body.Password, Remote: remoteAddress(r)})
+		Password: body.Password, Remote: remoteAddress(r), Local: localAddress(r)})
 	if !ok {
 		return
 	}
@@ -264,7 +283,7 @@ func (s *Server) fnas(w http.ResponseWriter, r *http.Request, session *protocol.
 		return
 	}
 	response, ok := s.call(w, protocol.Request{Op: protocol.OpFnas, Session: token, Args: body.Args, Input: body.Input,
-		Current: body.Current, Touch: r.Header.Get(BackgroundHeader) == ""})
+		Current: body.Current, Local: localAddress(r), Touch: r.Header.Get(BackgroundHeader) == ""})
 	if ok {
 		writeJSON(w, http.StatusOK, map[string]string{"output": response.Output})
 	}

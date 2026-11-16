@@ -58,13 +58,17 @@ const (
 type Request struct {
 	Op string `json:"op"`
 	// The secret from the session cookie; the helper alone decides what it is worth
-	Session  string   `json:"session,omitempty"`
-	Touch    bool     `json:"touch,omitempty"`
-	User     string   `json:"user,omitempty"`
-	Password string   `json:"password,omitempty"`
-	Remote   string   `json:"remote,omitempty"`
-	Args     []string `json:"args,omitempty"`
-	Input    string   `json:"input,omitempty"`
+	Session  string `json:"session,omitempty"`
+	Touch    bool   `json:"touch,omitempty"`
+	User     string `json:"user,omitempty"`
+	Password string `json:"password,omitempty"`
+	Remote   string `json:"remote,omitempty"`
+	// The NAS address the connection arrived at, which the front takes from
+	// the socket itself: the client can't choose it, so it proves where a
+	// request landed when the NAS has more than one address
+	Local string   `json:"local,omitempty"`
+	Args  []string `json:"args,omitempty"`
+	Input string   `json:"input,omitempty"`
 	// The password a person has now, which changing their own needs
 	Current string `json:"current,omitempty"`
 	// The public ID of a session to end

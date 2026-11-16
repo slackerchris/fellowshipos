@@ -13,3 +13,5 @@ fellowship-nas-recovery usr/lib/fellowship-nas
 systemd/fellowship-recovery.target usr/lib/systemd/system
 systemd/fellowship-recovery.service usr/lib/systemd/system
 systemd/fellowship-recovery-notice.service usr/lib/systemd/system
+systemd/fellowship-network-rollback.service usr/lib/systemd/system
+systemd/fellowship-network-rollback.timer usr/lib/systemd/system

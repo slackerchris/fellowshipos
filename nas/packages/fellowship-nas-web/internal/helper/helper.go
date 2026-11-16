@@ -68,6 +68,9 @@ var commands = map[string][]string{
 	"setup": {"status", "done", "reset"},
 	// Updates are looked for and installed only when a NAS admin asks
 	"updates": {"show", "check", "install"},
+	// The address changes only with a way back; confirm is gated on the
+	// connection's local address besides (docs/fellowship-nas-network-rollback-plan.md)
+	"network": {"show", "apply", "confirm"},
 	// Whether people are kept in the NAS's store, which decides what Users offers
 	"accounts": {"status"},
 	"health":   nil,
@@ -420,6 +423,9 @@ var (
 	hostName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	zoneName = regexp.MustCompile(`^[A-Za-z0-9_+-]{1,32}(/[A-Za-z0-9_+-]{1,32}){0,3}$`)
 	amount   = regexp.MustCompile(`^(all|[0-9]{1,6}[KMGT]?)$`)
+	// Shapes only: fnas judges the addresses themselves (private, in subnet)
+	ipv4 = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}$`)
+	cidr = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$`)
 )
 
 // maintenanceArgs checks the arguments of the maintenance interface's
@@ -451,8 +457,50 @@ func maintenanceArgs(rest []string) bool {
 		return true
 	case "updates check", "updates install", "updates show":
 		return len(rest) == 2
+	case "network show", "network confirm":
+		return len(rest) == 2
+	case "network apply":
+		return networkApplyArgs(rest[2:])
 	}
 	return true
+}
+
+// networkApplyArgs allows --dhcp alone, or one each of --address, --gateway
+// and --dns with values of the right shape, in any order
+func networkApplyArgs(args []string) bool {
+	if slices.Equal(args, []string{"--dhcp"}) {
+		return true
+	}
+	if len(args) != 6 {
+		return false
+	}
+	seen := map[string]bool{}
+	for i := 0; i < len(args); i += 2 {
+		flag, value := args[i], args[i+1]
+		if seen[flag] {
+			return false
+		}
+		seen[flag] = true
+		switch flag {
+		case "--address":
+			if !cidr.MatchString(value) {
+				return false
+			}
+		case "--gateway":
+			if !ipv4.MatchString(value) {
+				return false
+			}
+		case "--dns":
+			for _, server := range strings.Split(value, ",") {
+				if !ipv4.MatchString(server) {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return seen["--address"] && seen["--gateway"] && seen["--dns"]
 }
 
 func (h *Helper) fnas(request protocol.Request) protocol.Response {
@@ -467,6 +515,14 @@ func (h *Helper) fnas(request protocol.Request) protocol.Response {
 	if !Allowed(request.Args, found.user, h.admin(found.user)) {
 		log.Printf("refused fnas %q for %s", request.Args, found.user)
 		return failure(protocol.CodeForbidden, notAdmin)
+	}
+	// Keeping a network change is only worth anything from the address it
+	// moved the NAS to, and the connection's local address is what proves
+	// where it landed (docs/fellowship-nas-network-rollback-plan.md)
+	if isNetworkConfirm(request.Args) {
+		if response, ok := h.checkConfirmAddress(request.Local); !ok {
+			return response
+		}
 	}
 	// Changing one's own password needs the one in use now, admins included, so
 	// a browser left signed in can't be used to take the account over
@@ -501,6 +557,41 @@ func OwnPassword(args []string, user string) bool {
 	}
 	return slices.Equal(args, []string{"user", "password", user, "--password-stdin"}) ||
 		slices.Equal(args, []string{"user", "smb-password", user, "--password-stdin"})
+}
+
+func isNetworkConfirm(args []string) bool {
+	if len(args) > 0 && args[0] == "--json" {
+		args = args[1:]
+	}
+	return slices.Equal(args, []string{"network", "confirm"})
+}
+
+// checkConfirmAddress proves a confirm arrived at the address the waiting
+// change moved the NAS to. The local address comes from the front's socket,
+// not from anything the client says; the client's own address is the same
+// whichever NAS address it dialed, so it can't prove this. fnas owns the
+// pending state, so it is asked rather than read behind its back.
+func (h *Helper) checkConfirmAddress(local string) (protocol.Response, bool) {
+	stdout, _, err := h.config.Fnas([]string{"--json", "network", "show"}, "")
+	if err != nil {
+		return failure(protocol.CodeFailed, "The network state couldn't be read."), false
+	}
+	var state struct {
+		Pending *struct {
+			Address string `json:"address"`
+		} `json:"pending"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &state); err != nil ||
+		state.Pending == nil || state.Pending.Address == "" {
+		return failure(protocol.CodeFailed, "There is no network change waiting to be confirmed."), false
+	}
+	if local == "" || local != state.Pending.Address {
+		log.Printf("refused a network confirm that arrived at %q, not the new address %q",
+			local, state.Pending.Address)
+		return failure(protocol.CodeForbidden,
+			"Confirm from the NAS's new address: open it in the browser and sign in there."), false
+	}
+	return protocol.Response{}, true
 }
 
 // checkCurrent checks a person's current password with the same limits as

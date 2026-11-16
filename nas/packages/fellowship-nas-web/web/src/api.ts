@@ -81,6 +81,20 @@ export async function fnas(args: string[], input?: string): Promise<string> {
     return output;
 }
 
+/** What `fnas network show` answers: the LAN interface, and any change waiting
+    to be confirmed from the new address. */
+export interface NetworkState {
+    interface: string | null;
+    chosen: "override" | "default-route" | "lan-subnet" | null;
+    mode: "dhcp" | "static" | null;
+    address: string | null;
+    prefix: number | null;
+    gateway: string | null;
+    dns: string[];
+    lan: string | null;
+    pending: { mode: "dhcp" | "static"; address: string | null; deadline: number } | null;
+}
+
 /** What `fnas updates show` answers: what is waiting, and whether a restart is needed. */
 export interface UpdatesStatus {
     checked: number | null;

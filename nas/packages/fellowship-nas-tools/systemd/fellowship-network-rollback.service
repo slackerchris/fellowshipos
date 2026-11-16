@@ -1,0 +1,13 @@
+[Unit]
+Description=Put back the network settings if a change was never confirmed
+# After the interface has been brought up (or tried), before the desktop
+# starts, so a change left pending by a restart is rolled back either way
+After=networking.service
+Before=fellowship-nas-web.service fellowship-nas-helper.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/fnas network rollback
+
+[Install]
+WantedBy=multi-user.target

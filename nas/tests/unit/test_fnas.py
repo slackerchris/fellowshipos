@@ -3,6 +3,7 @@ command goes through a fake, and a test fails if fnas runs one it didn't expect.
 import contextlib
 import importlib
 import io
+import ipaddress
 import json
 import os
 import pkgutil
@@ -3113,6 +3114,231 @@ class MaintenanceInterface(unittest.TestCase):
                           "kim asked for: system restart --confirm restart the NAS"])
         # A restart is one every admin hears about; a new name is in the journal only
         self.assertEqual(self.alerts, ["Maintenance by kim: system restart"])
+
+
+class Network(unittest.TestCase):
+    """The LAN address changes with a way back (phase 6): the waiting state,
+    the rollback unit's work, the LAN subnet following, and ifupdown files
+    that keep their IPv6 stanza exactly."""
+
+    OLD = ("# Written by the FellowshipOS installer\nallow-hotplug veth1\n"
+           "iface veth1 inet dhcp\niface veth1 inet6 auto\n")
+
+    def setUp(self):
+        self.network = {m.__name__: m for m in MODULES}["fellowship_nas.network"]
+        self.shares = {m.__name__: m for m in MODULES}["fellowship_nas.shares"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = directory.name
+        self.interfaces = os.path.join(self.root, "interfaces.d")
+        os.makedirs(self.interfaces)
+        with open(os.path.join(self.interfaces, "veth1"), "w") as file:
+            file.write(self.OLD)
+        self.lan_path = os.path.join(self.root, "nas-lan")
+        with open(self.lan_path, "w") as file:
+            file.write("10.99.0.0/24\n")
+        self.resolv = os.path.join(self.root, "resolv.conf")
+        with open(self.resolv, "w") as file:
+            file.write("nameserver 10.99.0.1\n")
+        self.state = os.path.join(self.root, "network-rollback")
+        self.calls, self.alerts, self.configs = [], [], []
+        self.addr = ("2: veth1    inet 10.99.0.2/24 brd 10.99.0.255 scope global veth1"
+                     "\\       valid_lft forever preferred_lft forever")
+        self.routes = "default via 10.99.0.1 dev veth1 proto dhcp metric 100"
+        self.no_address = False
+        self.lease_after = None
+        self.polls = 0
+        self.ifup_fails = False
+
+        def run(*command, check=True, stdin=None, **kw):
+            self.calls.append(command)
+            ok = SimpleNamespace(stdout="", stderr="", returncode=0)
+            if command[:4] == ("ip", "-4", "-o", "addr"):
+                if self.no_address:
+                    ok.stdout = ""
+                elif self.lease_after is not None:
+                    self.polls += 1
+                    ok.stdout = self.addr if self.polls > self.lease_after else ""
+                else:
+                    ok.stdout = self.addr
+            elif command == ("ip", "-4", "route", "show", "default"):
+                ok.stdout = self.routes
+            elif command[:5] == ("ip", "-4", "route", "show", "default"):
+                ok.stdout = "default via 10.99.0.1 dev veth1"
+            elif command[:3] == ("ip", "link", "show"):
+                ok.returncode = 0 if command[3] in ("veth0", "veth1", "eth0") else 1
+            elif command[0] == "ifup" and self.ifup_fails:
+                ok.returncode, ok.stderr = 1, "ifup: failed to bring up veth1"
+            if check and ok.returncode != 0:
+                raise fnas.FnasError(ok.stderr.strip() or f"{command[0]} failed")
+            return ok
+
+        for name, value in (("INTERFACES_DIR", self.interfaces), ("RESOLV", self.resolv),
+                            ("CONFIG_FILE", os.path.join(self.root, "nas-network.json")),
+                            ("STATE", self.state), ("PENDING", os.path.join(self.state, "pending.json")),
+                            ("BACKUP", os.path.join(self.state, "backup.json")),
+                            ("LOCK", os.path.join(self.state, "lock")),
+                            ("CONSOLE", os.path.join(self.root, "no-console")), ("LEASE_WAIT", 3)):
+            patcher = mock.patch.object(self.network, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(self.network, "run", run),
+                        mock.patch.object(self.shares, "LAN_FILE", self.lan_path),
+                        mock.patch.object(self.shares, "write_config", lambda *a, **kw: self.configs.append(a)),
+                        mock.patch.object(fnas.alerts, "send_alert",
+                                          lambda severity, title, body: self.alerts.append(title)),
+                        mock.patch.object(self.network.time, "sleep", lambda seconds: None)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def file(self):
+        with open(os.path.join(self.interfaces, "veth1")) as file:
+            return file.read()
+
+    def lan(self):
+        with open(self.lan_path) as file:
+            return file.read().strip()
+
+    def apply_static(self, address="10.99.0.50/24"):
+        gateway = str(next(ipaddress.ip_network(address, strict=False).hosts()))
+        return self.network.apply("static", address, gateway, [gateway])
+
+    def test_make_config_keeps_the_ipv6_stanza_exactly(self):
+        with open(os.path.join(self.interfaces, "veth1"), "w") as file:
+            file.write(self.OLD.replace("iface veth1 inet6 auto", "iface veth1 inet6 static\n    address fd00::5/64"))
+        for mode, args in (("static", ("10.99.0.50/24", "10.99.0.1")), ("dhcp", ())):
+            made = self.network.make_config("veth1", mode, *args)
+            self.assertIn("iface veth1 inet6 static\n    address fd00::5/64", made)
+            self.assertIn(f"iface veth1 inet {mode}", made)
+        # A file with no IPv6 stanza gains none
+        with open(os.path.join(self.interfaces, "veth1"), "w") as file:
+            file.write("allow-hotplug veth1\niface veth1 inet dhcp\n")
+        self.assertNotIn("inet6", self.network.make_config("veth1", "static", "10.99.0.50/24", "10.99.0.1"))
+
+    def test_check_static_refuses_what_isnt_a_lan_address(self):
+        for address, gateway, dns in (
+                ("8.8.8.8/24", "8.8.8.1", ["8.8.8.1"]),          # public
+                ("10.99.0.50/31", "10.99.0.49", ["10.99.0.1"]),  # prefix out of bounds
+                ("10.99.0.0/24", "10.99.0.1", ["10.99.0.1"]),    # the network address
+                ("10.99.0.255/24", "10.99.0.1", ["10.99.0.1"]),  # the broadcast address
+                ("10.99.0.50/24", "10.50.0.1", ["10.99.0.1"]),   # gateway outside
+                ("10.99.0.50/24", "10.99.0.50", ["10.99.0.1"]),  # gateway is the NAS
+                ("10.99.0.50/24", "10.99.0.1", ["224.0.0.1"]),   # multicast DNS
+                ("10.99.0.50/24", "10.99.0.1", []),              # no DNS
+                ("nonsense", "10.99.0.1", ["10.99.0.1"])):
+            with self.subTest(address=address, gateway=gateway, dns=dns), self.assertRaises(fnas.FnasError):
+                self.network.check_static(address, gateway, dns)
+
+    def test_apply_static_writes_the_file_and_waits(self):
+        found = self.apply_static()
+        self.assertEqual(found["address"], "10.99.0.50")
+        self.assertIn("iface veth1 inet static", self.file())
+        self.assertIn("    address 10.99.0.50/24", self.file())
+        self.assertIn("iface veth1 inet6 auto", self.file())
+        self.assertIn(("systemctl", "start", "fellowship-network-rollback.timer"), self.calls)
+        self.assertIn(("ifup", "veth1"), self.calls)
+        pending = fnas.read_json(self.network.PENDING)
+        self.assertEqual(pending["address"], "10.99.0.50")
+        self.assertGreater(pending["deadline"], fnas.time.time())
+        with open(self.resolv) as file:
+            self.assertEqual(file.read(), "nameserver 10.99.0.1\n")
+        # Same subnet: the LAN setting is left alone
+        self.assertEqual(self.lan(), "10.99.0.0/24")
+        self.assertEqual(self.configs, [])
+
+    def test_apply_follows_the_lan_and_rollback_restores_it(self):
+        self.apply_static("10.50.0.50/24")
+        self.assertEqual(self.lan(), "10.50.0.0/24")
+        self.assertTrue(self.configs)
+        self.assertTrue(self.network.rollback())
+        self.assertEqual(self.lan(), "10.99.0.0/24")
+        self.assertEqual(self.file(), self.OLD)
+        with open(self.resolv) as file:
+            self.assertEqual(file.read(), "nameserver 10.99.0.1\n")
+        self.assertFalse(os.path.exists(self.network.PENDING))
+        self.assertEqual(self.alerts, ["Network change rolled back"])
+        # Nothing pending: the unit's work is a no-op, however often it runs
+        self.assertFalse(self.network.rollback())
+        self.assertEqual(self.alerts, ["Network change rolled back"])
+
+    def test_a_second_change_is_refused_while_one_waits(self):
+        self.apply_static()
+        with self.assertRaises(fnas.FnasError):
+            self.apply_static("10.99.0.51/24")
+
+    def test_confirm_keeps_the_change_and_clears_the_wait(self):
+        self.apply_static()
+        self.network.confirm()
+        self.assertFalse(os.path.exists(self.network.PENDING))
+        self.assertIn(("systemctl", "stop", "fellowship-network-rollback.timer"), self.calls)
+        self.assertIn("iface veth1 inet static", self.file())
+        with self.assertRaises(fnas.FnasError):
+            self.network.confirm()
+
+    def test_a_failed_apply_puts_everything_back(self):
+        self.ifup_fails = True
+        with self.assertRaises(fnas.FnasError):
+            self.apply_static("10.50.0.50/24")
+        self.assertEqual(self.file(), self.OLD)
+        self.assertEqual(self.lan(), "10.99.0.0/24")
+        self.assertFalse(os.path.exists(self.network.PENDING))
+        self.assertIn(("systemctl", "stop", "fellowship-network-rollback.timer"), self.calls)
+
+    def test_dhcp_waits_for_the_lease_and_reports_it(self):
+        self.addr = self.addr.replace("10.99.0.2/24", "10.99.0.100/24")
+        self.lease_after = 2
+        found = self.network.apply("dhcp")
+        self.assertEqual(found["address"], "10.99.0.100")
+        self.assertIn("iface veth1 inet dhcp", self.file())
+        self.assertIn("iface veth1 inet6 auto", self.file())
+        self.assertEqual(fnas.read_json(self.network.PENDING)["address"], "10.99.0.100")
+        self.network.confirm()
+        self.assertIn("iface veth1 inet dhcp", self.file())
+
+    def test_dhcp_with_no_lease_restores_at_once(self):
+        self.no_address = True
+        with self.assertRaises(fnas.FnasError):
+            self.network.apply("dhcp")
+        self.assertEqual(self.file(), self.OLD)
+        self.assertFalse(os.path.exists(self.network.PENDING))
+
+    def test_the_lan_interface_is_picked_and_pinned(self):
+        self.assertEqual(self.network.lan_interface(), ("veth1", "default-route"))
+        self.routes = ("default via 10.99.0.1 dev veth1 proto dhcp metric 100\n"
+                       "default via 10.99.0.1 dev veth0 proto dhcp metric 50")
+        self.assertEqual(self.network.lan_interface(), ("veth0", "default-route"))
+        self.routes = ""
+        self.assertEqual(self.network.lan_interface(), ("veth1", "lan-subnet"))
+        self.network.set_interface("veth0")
+        self.assertEqual(self.network.lan_interface(), ("veth0", "override"))
+        self.addr = self.addr.replace("10.99.0.2/24", "172.16.0.2/24")
+        os.remove(os.path.join(self.root, "nas-network.json"))
+        with self.assertRaises(fnas.FnasError):
+            self.network.lan_interface()
+        with self.assertRaises(fnas.FnasError):
+            self.network.set_interface("no such name!")
+        with self.assertRaises(fnas.FnasError):
+            self.network.set_interface("veth9")
+
+    def test_show_reports_the_change_that_waits(self):
+        self.apply_static()
+        shown = self.network.show()
+        self.assertEqual(shown["interface"], "veth1")
+        self.assertEqual(shown["mode"], "static")
+        self.assertEqual(shown["pending"]["address"], "10.99.0.50")
+        self.assertEqual(shown["lan"], "10.99.0.0/24")
+        self.network.confirm()
+        self.assertIsNone(self.network.show()["pending"])
+
+    def test_the_locks_sort_the_network_commands(self):
+        maintenance = {m.__name__: m for m in MODULES}["fellowship_nas.maintenance"]
+        self.assertEqual(maintenance.kind("network", "show"), "read")
+        self.assertEqual(maintenance.kind("network", "apply"), "maintenance")
+        self.assertEqual(maintenance.kind("network", "confirm"), "maintenance")
+        self.assertEqual(maintenance.kind("network", "rollback"), "root")
+        self.assertEqual(maintenance.kind("network", "interface"), "root")
+        self.assertIn(("network", "apply"), maintenance.ANNOUNCED)
+        self.assertIn(("network", "confirm"), maintenance.ANNOUNCED)
 
 
 class Updates(unittest.TestCase):

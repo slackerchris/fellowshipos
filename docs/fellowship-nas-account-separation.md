@@ -4,8 +4,9 @@
 Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
 container on 2026-11-15. Phases 1 (SFTP read-only shares), 2 (the NAS store
-and login), 3 (the maintenance interface and updates) and 4 (install, the
-recovery key and recovery) and 5 (migration and undo) are done.
+and login), 3 (the maintenance interface and updates), 4 (install, the
+recovery key and recovery), 5 (migration and undo) and 6 (network changes
+with rollback) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -553,6 +554,20 @@ Run in VMs, from the image, against a real system:
   - afterwards, the same checks as path 1, plus root's password reset
     through recovery
   - a wrong recovery key is refused, with the growing delay
+- **Network changes with rollback:**
+  `nas/tests/integration/network-rollback.sh` (the real packages, helper and
+  web server, a real interface and a real DHCP server) and
+  `nas/tests/integration/network-rollback-timer.sh` (the same, under real
+  systemd). Done: all pass.
+  - A static and a DHCP change, each confirmed from the new address and kept.
+  - A confirm through the old address, still reachable as a second address on
+    the port, is refused; through the new one it is kept.
+  - The timeout restores the file, the address, the LAN subnet and the IPv6
+    stanza, and alerts; the rollback fires with the web server and helper
+    stopped, and the timer fires on its own under real systemd.
+  - A confirm stops the timer, and nothing rolls back afterwards.
+  - The LAN subnet follows a change into another subnet, and comes back on
+    rollback.
 
 ## Phases
 
@@ -733,7 +748,60 @@ Run in VMs, from the image, against a real system:
        restart, the admin's old password logs in and `sudo` works with it,
        root logs in with the recovery password, file owners are unchanged,
        and "Recovery was used at the console" was alerted.
-6. **Network changes with rollback.**
+6. **Network changes with rollback.** Done. The plan, with Chris's decisions,
+   is `docs/fellowship-nas-network-rollback-plan.md`.
+   - **`fellowship_nas/network.py`:** `fnas network show`, `apply`, `confirm`,
+     `rollback` and `interface`. ifupdown stays, as the installer set it up;
+     the IPv6 stanza is preserved exactly, its options included. Static DNS
+     is written to `resolv.conf` in place, as dhclient writes it.
+   - **The LAN interface** is the default route's port, the convention first
+     boot already uses, falling back to the port in the configured LAN
+     subnet; root can pin another with `fnas network interface`.
+   - **The LAN subnet follows the change** through `set_lan`, so NFS exports
+     and share access stay with the live network; rollback restores it.
+   - **The rollback unit** (`fellowship-network-rollback.timer`, 120 s with
+     `AccuracySec=1s` so it keeps the deadline the desktop counts down to,
+     and its service) runs `fnas network rollback` as root, independent of
+     the helper and the web server. The service is also enabled at boot: a
+     change left pending by a restart is rolled back, since no session
+     survives to confirm it.
+   - **Confirm is proved by the connection's local address.** The front takes
+     it from the socket (`ConnContext`), a new `Local` field carries it to the
+     helper, and the helper refuses a confirm that didn't arrive at the new
+     address. The client's own address can't prove this. The session cookie
+     is host-only, so the admin signs in again at the new address, as designed.
+   - **DHCP:** apply waits up to 30 s for the lease and reports the address it
+     took; with no lease it restores at once. The console status screen shows
+     a waiting change, where to confirm it and its deadline.
+   - **Settings → Network** replaces the placeholder: the state, the form,
+     the countdown and the link to the new address.
+
+   **Tested** with `nas/tests/integration/network-rollback.sh`: the real
+   packages, helper and web server, a real interface and a real DHCP server
+   (dnsmasq in its own namespace), all 51 checks passing.
+   - A static change confirmed from the new address is kept.
+   - A confirm through the old address, still reachable as a second address
+     on the port, is refused; through the new one it is kept.
+   - The timeout restores the file, the address, the LAN subnet and the IPv6
+     stanza, and alerts.
+   - The rollback fires with the web server and helper stopped.
+   - A DHCP change reports its lease in the apply answer and `network show`,
+     is confirmed from it, and unconfirmed restores the static settings byte
+     for byte.
+   - Both locks refuse bad shapes, non-admins and root-only commands; the
+     journal and alerts record what was asked for, and nothing refused.
+
+   **Tested under real systemd** with
+   `nas/tests/integration/network-rollback-timer.sh` (a privileged container
+   running systemd as PID 1), all 14 checks passing: the timer fires on its
+   own after the window with the desktop stopped, a confirm stops it and
+   nothing rolls back afterwards, and the boot guard is enabled and rolls
+   back a pending change. The first run caught the timer firing late —
+   systemd's default minute of slack — so it carries `AccuracySec=1s`.
+
+   Still to check on an installed system, as with phases 4 and 5: the console
+   screen's waiting-change line on the machine's own monitor, and a DHCP
+   change against a real router.
 7. **SSH and Samba settings.** `AllowGroups`, root SSH through
    `fellowship-root-ssh`, the SFTP PAM stack and `AuthorizedKeysCommand`,
    Samba's password sync turned off. These ship with phase 4 for new installs,

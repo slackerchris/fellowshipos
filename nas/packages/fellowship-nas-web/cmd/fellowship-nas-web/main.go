@@ -56,8 +56,8 @@ func main() {
 	if *devHTTP {
 		log.Printf("WARNING: plain HTTP for development on %s; passwords cross the network unencrypted", *listen)
 		server.Scheme = "http"
-		plain := &http.Server{Addr: *listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout: 60 * time.Second}
+		plain := &http.Server{Addr: *listen, Handler: server.Handler(), ConnContext: front.ConnContext,
+			ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second}
 		log.Fatal(plain.ListenAndServe())
 	}
 	pair, err := tls.LoadX509KeyPair(*cert, *key)
@@ -69,6 +69,7 @@ func main() {
 	https := &http.Server{
 		Addr:              *listen,
 		Handler:           server.Handler(),
+		ConnContext:       front.ConnContext,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}},
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,

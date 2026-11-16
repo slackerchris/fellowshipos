@@ -7,6 +7,7 @@ doing, instead of a bare login prompt. agetty reads /run/issue.d; \\4 and \\n ar
 its escapes for this machine's IPv4 address and name, so they stay current
 without this script running again.
 """
+import datetime
 import json
 import os
 import subprocess
@@ -18,6 +19,7 @@ DONE_FLAG = "/etc/fellowshipos/.nas-role-complete"
 STATUS_FILE = "/var/lib/fellowshipos/nas-role-status"
 CERT = "/etc/fellowship-nas/web/cert.pem"
 STORE = "/var/lib/fellowship-nas/accounts.json"
+NETWORK_PENDING = "/var/lib/fellowship-nas/network-rollback/pending.json"
 
 # agetty colour escapes
 BOLD, DIM, RESET = "\\e{bold}", "\\e{halfbright}", "\\e{reset}"
@@ -94,6 +96,18 @@ def main():
     text = ["", f"  {BOLD}FellowshipOS NAS{RESET}  \\n", "",
             f"  {'Open:':<13}{BOLD}https://\\4{RESET}  or  {BOLD}https://\\n{RESET}",
             f"  {'':<13}from a browser on another computer"]
+    # A network change waiting to be confirmed: where to confirm it, and when
+    # the previous settings come back. fnas redraws this screen when it applies,
+    # confirms or rolls back a change; \4 above keeps the address current.
+    try:
+        with open(NETWORK_PENDING) as f:
+            pending = json.load(f)
+        by = datetime.datetime.fromtimestamp(pending["deadline"]).strftime("%H:%M")
+        text += ["", f"  {'Network:':<13}{COLOURS['warning']}a change is waiting: confirm at "
+                 f"{BOLD}https://{pending.get('address') or 'the new address'}{RESET}",
+                 f"  {'':<13}by {by}, or the previous settings come back"]
+    except (OSError, ValueError, KeyError):
+        pass
     found = fingerprint()
     if found:
         text += [f"  {'Certificate:':<13}SHA-256 {found[:47]}",

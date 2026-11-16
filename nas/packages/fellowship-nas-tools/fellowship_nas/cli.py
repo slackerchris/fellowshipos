@@ -9,7 +9,7 @@ import time
 from .common import DAY, FnasError, HOUR, human_size, later, read_json, run, when
 from . import alerts, backup, config, disks, health, jobs, look, pools, services, shares, sftp, snapshots, \
     ssh, system, usage, users
-from . import accounts, maintenance, separate, storage_checks, updates
+from . import accounts, maintenance, network, separate, storage_checks, updates
 from .engines import mdadm
 
 
@@ -50,6 +50,50 @@ def dispatch_system(args, show):
     elif args.action in system.POWER:
         system.power(args.action, args.confirm)
         print("Restarting in a few seconds" if args.action == "restart" else "Shutting down in a few seconds")
+
+
+def dispatch_network(args, show):
+    if args.action == "show":
+        show(network.show(), print_network)
+    elif args.action == "apply":
+        if args.dhcp and (args.address or args.gateway or args.dns):
+            raise FnasError("choose --dhcp or a fixed address, not both")
+        if not args.dhcp and not (args.address and args.gateway and args.dns):
+            raise FnasError("a fixed address needs --address, --gateway and --dns")
+        found = network.apply("dhcp" if args.dhcp else "static",
+                              args.address, args.gateway, names(args.dns))
+        show(found, print_network_applied)
+    elif args.action == "confirm":
+        network.confirm()
+        print("The network change is kept.")
+    elif args.action == "rollback":
+        print("The previous network settings are back." if network.rollback()
+              else "There is no network change to roll back.")
+    elif args.action == "interface":
+        print(f"The LAN interface is pinned to {network.set_interface(args.name)}")
+
+
+def print_network(found):
+    if not found["interface"]:
+        print("No LAN interface found")
+    else:
+        address = f"{found['address']}/{found['prefix']}" if found["address"] else "no address yet"
+        print(f"Interface: {found['interface']} ({found['chosen']})")
+        print(f"Address: {address}" + (f" via {found['gateway']}" if found["gateway"] else ""))
+        print("Way: " + (found["mode"] or "unknown"))
+        if found["dns"]:
+            print("DNS: " + ", ".join(found["dns"]))
+    if found["lan"]:
+        print(f"LAN subnet: {found['lan']}")
+    pending = found["pending"]
+    if pending:
+        print(f"A change is waiting: {pending['address'] or 'a DHCP lease'}, "
+              f"confirm by {when(pending['deadline'])} or the previous settings come back")
+
+
+def print_network_applied(found):
+    print(f"The NAS is now at {found['address']}.")
+    print(f"Confirm in the desktop by {when(found['deadline'])}, or the previous settings come back.")
 
 
 def print_system(info):
@@ -634,6 +678,18 @@ def build_parser():
     updates_.add_parser("check", help="fetch the package lists and say what is waiting; installs nothing")
     updates_.add_parser("install", help="install what is waiting, as a job")
 
+    network_ = area.add_parser("network", help="the LAN address, with a way back if a change isn't confirmed"
+                               ).add_subparsers(dest="action", required=True)
+    network_.add_parser("show", help="the interface, its address, and any change waiting to be confirmed")
+    network_apply = network_.add_parser("apply", help="change the address; rolls back unless confirmed in time")
+    network_apply.add_argument("--dhcp", action="store_true", help="take an address from DHCP")
+    network_apply.add_argument("--address", help="a fixed address and prefix, such as 192.168.1.50/24")
+    network_apply.add_argument("--gateway", help="the gateway, inside the address's subnet")
+    network_apply.add_argument("--dns", help="DNS servers, comma-separated")
+    network_.add_parser("confirm", help="keep the waiting change (the desktop proves the new address)")
+    network_.add_parser("rollback", help="put back the settings a change replaced (the rollback unit's)")
+    network_.add_parser("interface", help="pin the LAN interface on a machine with several ports").add_argument("name")
+
     accounts_ = area.add_parser("accounts", help="where people's accounts are kept").add_subparsers(
         dest="action", required=True)
     accounts_.add_parser("status", help="whether this NAS keeps people in its own store")
@@ -702,6 +758,8 @@ def dispatch(args):
             started(jobs.start("update", "Installing updates"))
         else:
             show(updates.check() if args.action == "check" else updates.status(), print_updates)
+    elif args.area == "network":
+        dispatch_network(args, show)
     elif args.area == "accounts" and args.action == "separate":
         if args.undo is not None:
             separate.undo(args.undo or None)
@@ -1104,7 +1162,8 @@ def main(argv=None):
         if args.caller is not None:
             check_caller(args, [a for a in argv[argv.index(args.area) + 1:] if a != getattr(args, "action", None)])
         dispatch(args)
-        if args.area not in ("check", "health", "system", "job", "setup", "look", "updates", "auth", "accounts") and \
+        if args.area not in ("check", "health", "system", "job", "setup", "look", "updates", "auth", "accounts",
+                             "network") and \
                 args.action not in READ_ONLY_ACTIONS:
             config.after_change()
     except FnasError as error:

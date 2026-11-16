@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -268,6 +269,26 @@ func TestAllowed(t *testing.T) {
 		{[]string{"updates", "install"}, true, true},
 		{[]string{"updates", "install", "--yes"}, true, false},
 		{[]string{"updates", "install"}, false, false},
+		// The network changes only in the shapes listed; confirm is gated on
+		// the connection's local address besides, in TestNetworkConfirm below
+		{[]string{"network", "show"}, true, true},
+		{[]string{"--json", "network", "show"}, true, true},
+		{[]string{"network", "show"}, false, false},
+		{[]string{"network", "apply", "--dhcp"}, true, true},
+		{[]string{"network", "apply", "--address", "192.168.1.50/24", "--gateway", "192.168.1.1", "--dns", "192.168.1.1"}, true, true},
+		{[]string{"network", "apply", "--dns", "192.168.1.1,1.1.1.1", "--gateway", "192.168.1.1", "--address", "192.168.1.50/24"}, true, true},
+		{[]string{"network", "apply", "--dhcp", "--address", "192.168.1.50/24"}, true, false},
+		{[]string{"network", "apply", "--address", "192.168.1.50", "--gateway", "192.168.1.1", "--dns", "192.168.1.1"}, true, false},
+		{[]string{"network", "apply", "--address", "192.168.1.50/33", "--gateway", "192.168.1.1", "--dns", "192.168.1.1"}, true, false},
+		{[]string{"network", "apply", "--address", "192.168.1.50/24", "--gateway", "192.168.1.1"}, true, false},
+		{[]string{"network", "apply", "--address", "192.168.1.50/24", "--gateway", "192.168.1.1", "--dns", "not-an-ip"}, true, false},
+		{[]string{"network", "apply", "--address", "192.168.1.50/24", "--gateway", "192.168.1.1", "--dns", "192.168.1.1", "--force"}, true, false},
+		{[]string{"network", "apply"}, true, false},
+		{[]string{"network", "confirm"}, true, true},
+		{[]string{"network", "confirm", "--force"}, true, false},
+		{[]string{"network", "rollback"}, true, false},
+		{[]string{"network", "interface", "enp4s0"}, true, false},
+		{[]string{"network", "apply", "--dhcp"}, false, false},
 		// Root's alone, never the desktop's
 		{[]string{"auth", "check", "kim"}, true, false},
 		{[]string{"accounts", "separate"}, true, false},
@@ -316,6 +337,90 @@ func TestFnas(t *testing.T) {
 	}
 	if h.Handle(protocol.Request{Op: protocol.OpFnas, Session: "made-up", Args: []string{"pool", "list"}}).Code != protocol.CodeUnauthenticated {
 		t.Fatal("ran fnas without a session")
+	}
+}
+
+// Keeping a network change is only worth anything from the address it moved
+// the NAS to. The connection's local address proves where it landed; the
+// client's own address is the same whichever NAS address it dialed, so it
+// can't (docs/fellowship-nas-network-rollback-plan.md).
+func TestNetworkConfirm(t *testing.T) {
+	f := &fake{now: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC), admins: map[string]bool{"sam": true}}
+	state := `{"interface":"enp4s0","mode":"static","address":"10.99.0.50","prefix":24,
+		"gateway":"10.99.0.1","dns":["10.99.0.1"],"lan":"10.99.0.0/24",
+		"pending":{"mode":"static","address":"10.99.0.50","deadline":1800000000}}`
+	h := New(Config{
+		Authenticate: func(user, password string) error { return nil },
+		Lookup: func(user string) (Account, error) {
+			switch user {
+			case "sam", "kim":
+				return Account{UID: 1000, Admin: f.admins[user]}, nil
+			}
+			return Account{}, errors.New("no such user")
+		},
+		Fnas: func(args []string, input string) (string, string, error) {
+			f.ran = append(f.ran, args)
+			if slices.Equal(args, []string{"--json", "network", "show"}) {
+				return state, "", nil
+			}
+			return "ok\n", "", nil
+		},
+		Now: func() time.Time { return f.now },
+	})
+	admin := login(t, h, "sam").Token
+	person := login(t, h, "kim").Token
+
+	confirm := func(session, local string, args ...string) protocol.Response {
+		if args == nil {
+			args = []string{"network", "confirm"}
+		}
+		return h.Handle(protocol.Request{Op: protocol.OpFnas, Session: session, Args: args, Local: local})
+	}
+
+	// From the new address: kept, and fnas hears who asked
+	if response := confirm(admin, "10.99.0.50"); response.Code != "" {
+		t.Fatalf("confirm from the new address: %+v", response)
+	}
+	if !slices.ContainsFunc(f.ran, func(args []string) bool {
+		return slices.Equal(args, []string{"--caller", "sam", "network", "confirm"})
+	}) {
+		t.Fatalf("confirm never reached fnas: %q", f.ran)
+	}
+	// The state is asked of fnas, not read behind its back
+	if !slices.ContainsFunc(f.ran, func(args []string) bool {
+		return slices.Equal(args, []string{"--json", "network", "show"})
+	}) {
+		t.Fatalf("the pending state was never asked for: %q", f.ran)
+	}
+	// From the old address, or with no local address at all: refused
+	for _, local := range []string{"10.99.0.2", "", "10.99.0.51"} {
+		if response := confirm(admin, local); response.Code != protocol.CodeForbidden {
+			t.Errorf("confirm arriving at %q: %+v", local, response)
+		}
+	}
+	// The --json prefix makes no difference to the gate
+	if response := confirm(admin, "10.99.0.2", "--json", "network", "confirm"); response.Code != protocol.CodeForbidden {
+		t.Errorf("confirm with --json from the old address: %+v", response)
+	}
+	if response := confirm(admin, "10.99.0.50", "--json", "network", "confirm"); response.Code != "" {
+		t.Errorf("confirm with --json from the new address: %+v", response)
+	}
+	// A person who isn't an admin never reaches the gate
+	if response := confirm(person, "10.99.0.50"); response.Code != protocol.CodeForbidden {
+		t.Errorf("a non-admin confirmed: %+v", response)
+	}
+	// Nothing waiting: fnas's own refusal, surfaced
+	state = `{"interface":"enp4s0","pending":null}`
+	if response := confirm(admin, "10.99.0.50"); response.Code != protocol.CodeFailed {
+		t.Errorf("confirm with nothing pending: %+v", response)
+	}
+	// A DHCP change is confirmed against the lease it took
+	state = `{"interface":"enp4s0","pending":{"mode":"dhcp","address":"10.99.0.100","deadline":1800000000}}`
+	if response := confirm(admin, "10.99.0.100"); response.Code != "" {
+		t.Errorf("confirm of a DHCP change from its lease: %+v", response)
+	}
+	if response := confirm(admin, "10.99.0.50"); response.Code != protocol.CodeForbidden {
+		t.Errorf("confirm of a DHCP change from another address: %+v", response)
 	}
 }
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Roll back a network change that was never confirmed
+
+[Timer]
+# Started by fnas network apply, stopped by confirm or the rollback itself;
+# never enabled, so it only runs while a change is waiting
+OnActiveSec=120
+# The desktop counts down to this deadline, so the rollback keeps it: without
+# this, systemd's default minute of slack could roll back a minute late
+AccuracySec=1s
+Unit=fellowship-network-rollback.service

@@ -1,7 +1,8 @@
 import { createContext } from "preact";
-import { useContext, useState } from "preact/hooks";
+import { useContext, useEffect, useState } from "preact/hooks";
 import {
-    CheckSchedule, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus, changeOwnPassword, endSession,
+    CheckSchedule, NetworkState, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus,
+    changeOwnPassword, endSession,
     fnas, fnasJson,
     humanSize, jobStarted,
     onOff, sessions, when,
@@ -519,11 +520,150 @@ function SetupAgain() {
     );
 }
 
-function NotBuilt({ title, phase, children }: { title: string; phase: number; children: preact.ComponentChildren }) {
+/** The LAN address, with a way back: a change rolls back by itself unless it
+    is confirmed from the new address (docs/fellowship-nas-network-rollback-plan.md). */
+function Network() {
+    const state = useLoad(() => fnasJson<NetworkState>(["network", "show"], true));
+    const [mode, setMode] = useState<"dhcp" | "static">("dhcp");
+    const [address, setAddress] = useState("");
+    const [gateway, setGateway] = useState("");
+    const [dns, setDns] = useState("");
+    const [seeded, setSeeded] = useState(false);
+    const [asking, setAsking] = useState(false);
+    const [now, setNow] = useState(Date.now() / 1000);
+    const apply = useAction(state.reload);
+    const confirm = useAction(state.reload);
+    const pending = state.data?.pending ?? null;
+
+    useEffect(() => {
+        const found = state.data;
+        if (found && !seeded) {
+            setMode(found.mode === "static" ? "static" : "dhcp");
+            setAddress(found.address && found.prefix !== null ? `${found.address}/${found.prefix}` : "");
+            setGateway(found.gateway ?? "");
+            setDns(found.dns.join(", "));
+            setSeeded(true);
+        }
+    }, [state.data, seeded]);
+
+    // While a change waits, the countdown ticks and the state is asked for
+    // again, so a rollback or a confirm from another browser shows up here
+    useEffect(() => {
+        if (!pending) return;
+        const tick = setInterval(() => setNow(Date.now() / 1000), 1000);
+        const poll = setInterval(state.reload, 5000);
+        return () => { clearInterval(tick); clearInterval(poll); };
+    }, [pending?.deadline, state.reload]);
+
+    const servers = dns.split(",").map(part => part.trim()).filter(Boolean).join(",");
+    const ready = mode === "dhcp" || Boolean(address.trim() && gateway.trim() && servers);
+    const args = mode === "dhcp" ? ["network", "apply", "--dhcp"]
+        : ["network", "apply", "--address", address.trim(), "--gateway", gateway.trim(), "--dns", servers];
+    const left = pending ? Math.max(0, Math.floor(pending.deadline - now)) : 0;
     return (
-        <Card title={title}>
-            <Notice>Not built yet (Phase {phase}).</Notice>
-            <p class="small">{children}</p>
+        <Card title="Network" actions={<Button onClick={state.reload}>Refresh</Button>}>
+            <Loading loaded={state}>{() => {
+                const found = state.data!;
+                return (
+                    <div class="stack">
+                        {!found.interface && <Notice kind="warning">No LAN interface was found. If this NAS has several
+                            network ports, root can pin the right one with <span class="mono">fnas network interface NAME</span>.</Notice>}
+                        {found.interface && (
+                            <p class="small">
+                                <span class="mono">{found.interface}</span>
+                                {" · "}{found.address ? <span class="mono">{found.address}/{found.prefix}</span> : "no address yet"}
+                                {found.gateway ? <> via <span class="mono">{found.gateway}</span></> : null}
+                                {" · "}<Badge kind="neutral">{found.mode === "static" ? "fixed address" : "DHCP"}</Badge>
+                                {found.dns.length ? <> · DNS <span class="mono">{found.dns.join(", ")}</span></> : null}
+                            </p>
+                        )}
+                        {found.lan && <p class="small muted">Shares are offered to the LAN subnet <span class="mono">{found.lan}</span>,
+                            which follows the address here.</p>}
+                        {pending && (
+                            <Notice kind="warning">
+                                <div class="stack">
+                                    <p>A network change is waiting: <strong>{pending.address
+                                        ? <span class="mono">{pending.address}</span> : "a DHCP lease"}</strong>.
+                                        {" "}{left} second{left === 1 ? "" : "s"} to confirm, or the previous settings come back.</p>
+                                    {pending.address && (
+                                        <p>Open <a href={`https://${pending.address}/`} target="_blank" rel="noreferrer"
+                                                   class="mono">https://{pending.address}/</a> and sign in there, then confirm.
+                                            This page can't confirm a change to a different address.</p>
+                                    )}
+                                    <div class="row">
+                                        <Button kind="primary" busy={confirm.busy} disabled={!pending.address}
+                                                onClick={() => confirm.run(() => fnas(["network", "confirm"]))}>
+                                            Confirm from here</Button>
+                                    </div>
+                                    <Result outcome={confirm.outcome} />
+                                </div>
+                            </Notice>
+                        )}
+                        <form class="stack" onSubmit={event => { event.preventDefault(); setAsking(true); }}>
+                            <Field label="How the NAS gets its address">
+                                <div class="segmented" role="group" aria-label="Address way">
+                                    <button type="button" class={mode === "dhcp" ? "current" : ""}
+                                            aria-pressed={mode === "dhcp"} onClick={() => setMode("dhcp")}>
+                                        Automatically (DHCP)</button>
+                                    <button type="button" class={mode === "static" ? "current" : ""}
+                                            aria-pressed={mode === "static"} onClick={() => setMode("static")}>
+                                        A fixed address</button>
+                                </div>
+                            </Field>
+                            {mode === "static" && (
+                                <div class="grid-2">
+                                    <Field label="Address and prefix" hint="For example 192.168.1.50/24">
+                                        <input class="mono" value={address} placeholder="192.168.1.50/24"
+                                               onInput={event => setAddress(event.currentTarget.value)} />
+                                    </Field>
+                                    <Field label="Gateway" hint="Inside the address's subnet">
+                                        <input class="mono" value={gateway} placeholder="192.168.1.1"
+                                               onInput={event => setGateway(event.currentTarget.value)} />
+                                    </Field>
+                                    <Field label="DNS servers" hint="Comma-separated">
+                                        <input class="mono" value={dns} placeholder="192.168.1.1"
+                                               onInput={event => setDns(event.currentTarget.value)} />
+                                    </Field>
+                                </div>
+                            )}
+                            <div class="row">
+                                <Button kind="primary" type="submit" busy={apply.busy}
+                                        disabled={!ready || Boolean(pending) || !found.interface}>Apply</Button>
+                            </div>
+                        </form>
+                        {asking && (
+                            <Confirm title="Change the address" phrase="change the address" busy={apply.busy}
+                                     outcome={apply.outcome}
+                                     onCancel={() => { setAsking(false); apply.clear(); }}
+                                     onConfirm={() => apply.run(async () => {
+                                         // The answer may never arrive: the change can take the
+                                         // NAS off this page's address, so the dialog closes either way
+                                         try {
+                                             return await fnas(args);
+                                         } finally {
+                                             setAsking(false);
+                                         }
+                                     })}>
+                                <p>The NAS takes the new address at once, and this page may lose it.
+                                    {mode === "static"
+                                        ? <> Open <span class="mono">https://{address.trim().split("/")[0]}/</span> and
+                                            sign in there to confirm within 120 seconds.</>
+                                        : <> If the lease changes the address, read the new one on the NAS's own screen
+                                            and sign in there to confirm within 120 seconds.</>}
+                                    {" "}Without a confirm, the previous settings come back by themselves.</p>
+                            </Confirm>
+                        )}
+                        {!asking && <Result outcome={apply.outcome} />}
+                        {!pending && apply.outcome?.kind === "error" && (
+                            <Notice>If the address changed, this page can't reach the NAS anymore.
+                                {mode === "static" && address.trim()
+                                    ? <> Open <span class="mono">https://{address.trim().split("/")[0]}/</span> and sign in there.</>
+                                    : <> Read the new address on the NAS's own screen, or find its lease in your router.</>}
+                                {" "}If nobody confirms, the previous settings come back by themselves and this page finds the NAS again.</Notice>
+                        )}
+                    </div>
+                );
+            }}</Loading>
         </Card>
     );
 }
@@ -597,9 +737,7 @@ export function Settings() {
                 {section === "nas" && <Loading loaded={info}>{() => <ThisNas info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "certificate" && <Loading loaded={info}>{() => <Certificate info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "space" && <SystemSpace />}
-                {section === "network" && <NotBuilt title="Network" phase={15}>Choosing between an automatic address (DHCP)
-                    and a fixed one, and setting DNS and the gateway, comes here. Until then the NAS takes its address
-                    automatically; to keep it from changing, reserve it in your router.</NotBuilt>}
+                {section === "network" && <Network />}
                 {section === "updates" && <Updates />}
                 {section === "checks" && <StorageChecks />}
                 {section === "ssh" && <Ssh />}
