@@ -208,18 +208,26 @@ function EditUser({ user, groups, onDone }: { user: User; groups: Group[]; onDon
 }
 
 function SshKeys({ user }: { user: User }) {
-    const keys = useLoad(() => user.kind === "ssh" ? fnasJson<SshKey[]>(["user", "keys", user.name]) : Promise.resolve([]));
+    // On a separated NAS keys are for SFTP people; the old model keeps them
+    // for Shares and SSH accounts
+    const status = useLoad(() => fnasJson<{ separated: boolean }>(["accounts", "status"]));
+    const separated = !!status.data?.separated;
+    const mayKey = user.kind === "ssh" || (separated && user.kind === "sftp");
+    const keys = useLoad(() => mayKey ? fnasJson<SshKey[]>(["user", "keys", user.name]) : Promise.resolve([]), [mayKey]);
     const [text, setText] = useState<string | null>(null);
     const action = useAction(keys.reload);
-    if (user.kind !== "ssh") {
+    if (!mayKey) {
         return <p class="muted small">SSH keys: {user.name} uses shares only, so SSH lets them nowhere.</p>;
     }
     return (
         <div class="field">
-            <span class="field-label">SSH keys</span>
+            <span class="field-label">{separated ? "SFTP keys" : "SSH keys"}</span>
             <Loading loaded={keys}>{() => <>
-                {!keys.data!.length && <p class="muted small">None: {user.name} logs in over SSH with their password, while
-                    passwords are allowed in Settings → SSH.</p>}
+                {!keys.data!.length && (separated
+                    ? <p class="muted small">None: {user.name} uses SFTP with their NAS password, while passwords are
+                        allowed in Settings → SSH. A key here lets them use SFTP without one.</p>
+                    : <p class="muted small">None: {user.name} logs in over SSH with their password, while
+                        passwords are allowed in Settings → SSH.</p>)}
                 {keys.data!.map(key => <span key={key.line} class="small mono">{key.type} {key.fingerprint} {key.comment}</span>)}
                 <textarea rows={3} placeholder="ssh-ed25519 AAAA… name@computer, one key per line"
                           value={text ?? keys.data!.map(key => key.line).join("\n")}

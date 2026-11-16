@@ -5,8 +5,8 @@ Chris on 2026-11-15 (option B), and his decisions are recorded below. The
 credential reuse in the migration section was checked in a Debian trixie
 container on 2026-11-15. Phases 1 (SFTP read-only shares), 2 (the NAS store
 and login), 3 (the maintenance interface and updates), 4 (install, the
-recovery key and recovery), 5 (migration and undo) and 6 (network changes
-with rollback) are done.
+recovery key and recovery), 5 (migration and undo), 6 (network changes
+with rollback) and 7 (SSH and Samba settings) are done.
 
 This supersedes the account parts of
 `fellowship-nas-accounts-review-2026-11-15.md`. The gaps that review found are
@@ -68,11 +68,16 @@ every share.
 - `fnas` (Python) calls `libcrypt.so.1` through ctypes. Python 3.13 removed the
   `crypt` module, so the standard library can't be used.
 
-**Samba changes** in `smb.conf`:
+**Samba changes** (Chris's ruling 1, 2026-11-15, built in phase 7):
 - Debian ships `unix password sync = yes` and `pam password change = yes`.
-  Both are turned off. A password change from a Windows "change password"
-  dialog is refused with a pointer to the desktop, because otherwise it would
-  try to set a Linux password that no longer exists.
+  Both stay on, and `/etc/pam.d/samba` gains `password requisite pam_deny.so`.
+  A password change from a Windows "change password" dialog is refused: smbd
+  checks the old password through PAM, which a locked Linux account can't
+  pass, and the PAM password path is denied outright on top. Turning both
+  options off instead was verified against real smbd to accept the change and
+  drift the SMB password from the desktop one. The pointer to the desktop
+  lives in Users and the docs; the SMB client itself sees a generic Access
+  Denied.
 - `obey pam restrictions = yes` stays. It's what makes a turned-off account
   (account expiry) refuse SMB too, and that was verified.
 
@@ -568,6 +573,18 @@ Run in VMs, from the image, against a real system:
   - A confirm stops the timer, and nothing rolls back afterwards.
   - The LAN subnet follows a change into another subnet, and comes back on
     rollback.
+- **SSH and Samba settings:** `nas/tests/integration/ssh-samba.sh` (the real
+  packages, sshd and smbd) and the phase 7 section of `separate.sh`. Done:
+  all pass.
+  - SFTP takes the NAS password through the PAM stack; wrong, unknown and
+    shares-only are refused; a turned-off person is refused with a key too.
+  - Keys come from the store alone: a replaced or removed key stops working
+    at once, and an old `authorized_keys` file is not consulted.
+  - Root SSH is off by default, keys only, refused without a key, and the
+    desktop can only read it. SFTP off never touches it.
+  - A Windows password change is refused; neither password drifts.
+  - The old model is unchanged; migration applies the policy, and undo
+    restores the PAM files and sshd's settings.
 
 ## Phases
 
@@ -802,12 +819,87 @@ Run in VMs, from the image, against a real system:
    Still to check on an installed system, as with phases 4 and 5: the console
    screen's waiting-change line on the machine's own monitor, and a DHCP
    change against a real router.
-7. **SSH and Samba settings.** `AllowGroups`, root SSH through
-   `fellowship-root-ssh`, the SFTP PAM stack and `AuthorizedKeysCommand`,
-   Samba's password sync turned off. These ship with phase 4 for new installs,
-   and with phase 5 for migrated ones. The plan, with the audit of what
-   already exists and Chris's rulings of 2026-11-15, is
-   `docs/fellowship-nas-ssh-samba-plan.md`. Note: the "sync turned off"
-   wording above is superseded by ruling 1 in that plan — turning both
-   options off was verified to accept Windows password changes and drift
-   the SMB password; the agreed policy keeps them on with a PAM deny.
+7. **SSH and Samba settings.** Done. The plan, with the audit of what already
+   existed and Chris's three rulings, is `docs/fellowship-nas-ssh-samba-plan.md`;
+   the session handoff is `docs/fellowship-nas-ssh-samba-session-2026-11-15.md`.
+   - **`ssh.py` keeps two models.** The old one is unchanged, byte for byte.
+     On a separated NAS the drop-in admits `nas-sftp` — and `root` only while
+     root has turned his own SSH on — with `PermitRootLogin prohibit-password`
+     then, `no` otherwise. `AuthorizedKeysCommand` runs `fnas auth keys %u` as
+     root, reading the store per connection; the `nas-sftp` Match sets
+     `AuthorizedKeysFile none`, so the store is the only source of keys and a
+     migrated person's old `authorized_keys` stops being consulted. With SFTP
+     and root SSH both off the drop-in says `DenyGroups *` and the service
+     stops; with SFTP off and root SSH on, sshd keeps running for root alone.
+   - **The SFTP PAM stack:** `/etc/pam.d/sshd` checks passwords against the
+     store (`pam_exec` with `expose_authtok`, through a wrapper that calls
+     `fnas auth check "$PAM_USER"`), and keeps `pam_unix` for the account
+     phase, so a turned-off person is refused over SFTP too, keys included.
+     Written by `ssh.refresh()` with the same validate-and-restore care as the
+     drop-in; the old model keeps Debian's file.
+   - **`fellowship-root-ssh`** (root's tool, `on`/`off`/`status`): refuses on a
+     non-separated NAS, refuses `on` without a key in
+     `/root/.ssh/authorized_keys`, keeps its state in
+     `/etc/fellowshipos/root-ssh.json`, journals each change, and regenerates
+     the drop-in through `fnas ssh refresh`. The desktop reads the state in
+     `ssh show` and Settings; neither lock lets it change it.
+   - **Keys live in the store.** `fnas user keys` reads and writes the store
+     on a separated NAS, for people with SFTP allowed; a shares-only person is
+     refused with a pointer to enable SFTP first. Validation and the 32-key
+     limit stay. The Users panel offers the editor for SFTP people.
+   - **Samba keeps one password** (ruling 1): both sync options stay `yes`
+     and `/etc/pam.d/samba` gains `password requisite pam_deny.so`, so a
+     Windows password change is refused and neither password drifts. Applied
+     by `shares.samba_password_policy()` on every share refresh, at
+     `fnas accounts init`, and in migration's lockdown.
+   - **`fnas accounts init` refreshes the SSH and Samba policy** the moment a
+     fresh install becomes separated — the installer engine itself was not
+     touched (Chris's uncommitted LVM fix lives there).
+   - **`ssh set` is the SFTP service switch** on a separated NAS, and
+     `--passwords off` needs no admin key there (ruling 3): nobody
+     administers over SSH, so keys-only SFTP can't lock anyone out of the
+     desktop. The old model keeps its guard.
+   - **Migration and undo:** the backup now keeps `/etc/pam.d/sshd` and
+     `/etc/pam.d/samba`; undo restores them with the same checksum checks and
+     removes the separated drop-in. Migrated keys, already copied into the
+     store, start working over SFTP. A same-second retry of a stopped run gets
+     its own backup folder (`new_stamp`), found by the integration test.
+   - **The console screen's root line** follows the state: "logs in here, at
+     the console" or "SSH with a key, and here at the console". The helper's
+     expired-password message no longer says "change it over SSH" — impossible
+     on a separated NAS — and points at a NAS admin instead. (The must-change
+     flow itself is a phase 2 residual: nothing sets the flag and the login
+     page has no flow for it; left for a separate task.)
+
+   **Tested** with `nas/tests/integration/ssh-samba.sh`: the real packages,
+   sshd and smbd, all 66 checks passing.
+   - SFTP takes the NAS password through the PAM stack; a wrong password, a
+     stranger and a shares-only person are refused; no shell is ever given.
+   - A store key logs in; a key planted in the old home file is not consulted;
+     a replaced or removed key stops working at once, with no reload.
+   - A turned-off person is refused with the password and with a key; turned
+     back on, both work again.
+   - Root: password SSH refused always; key SSH refused while off;
+     `fellowship-root-ssh on` without a key refused; with a key, root logs in
+     with the key and still not with a password; the desktop reads the state
+     but can't change it; the change is journaled.
+   - SFTP off with root SSH on: SFTP refused, root's key login untouched;
+     SFTP on restores it; both off admits nobody.
+   - Passwords off without any admin key: keys-only SFTP works.
+   - A Windows password change is refused; the SMB and desktop passwords are
+     unchanged and the Linux password stays locked.
+   - Both locks refuse `ssh set --root`, `auth keys` to a caller, and
+     non-admins; the journal records what was asked for.
+   - The old model is unchanged: both groups, root never, Debian's PAM files,
+     shell SSH and SFTP with the Linux password, and the admin-key guard.
+
+   **Tested in the migration** with `nas/tests/integration/separate.sh`, all
+   65 checks passing: after `--yes` the new policy is in place, SFTP takes the
+   NAS password, a migrated key works from the store and its replacement
+   takes effect at once, the Windows change is refused; `--undo` restores
+   both PAM files and removes the drop-in, and the old sudo admin's shell SSH
+   works again with the old password.
+
+   Still to check on an installed system, as with phases 4–6: the console
+   root line on the machine's own monitor, and root SSH end to end on real
+   hardware. Needs the next ISO build.

@@ -26,16 +26,19 @@ import time
 import urllib.error
 import urllib.request
 
-from . import accounts, recovery, sftp, ssh, users
-from .common import DAY, STATE_DIR, FnasError, read_json, run, write_file, write_json
+from . import accounts, recovery, sftp, shares, ssh, users
+from .common import DAY, STATE_DIR, FnasError, read_json, run, write_json
+from .shares import set_smb_option
 
 
 BACKUP_ROOT = os.path.join(STATE_DIR, "accounts-before-separate")
 PASSDB = "/var/lib/samba/private/passdb.tdb"
 SAMBA_CONF = "/etc/samba/smb.conf"
 # What the backup keeps: the account files, sudo's rules, sshd's and Samba's
-# settings, and the GRUB pieces the recovery key changes
-SAVED_FILES = ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/sudoers", SAMBA_CONF]
+# settings, the PAM files the separation changes, and the GRUB pieces the
+# recovery key changes
+SAVED_FILES = ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/sudoers", SAMBA_CONF,
+               "/etc/pam.d/sshd", "/etc/pam.d/samba"]
 DIRECTORIES = ["/etc/sudoers.d", "/etc/ssh/sshd_config.d"]
 # Groups that give power over the system rather than access to files
 POWER_GROUPS = ("sudo", "adm", "disk", "lxd", "docker", "wheel", "shadow", "systemd-journal")
@@ -197,6 +200,18 @@ def checksum(path):
         return hashlib.sha256(file.read()).hexdigest()
 
 
+def new_stamp():
+    """A backup folder name that can't collide with an earlier attempt in the
+    same second: a run that stopped leaves its backup behind, and a retry
+    must not land on top of it."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    candidate, extra = stamp, 1
+    while os.path.exists(os.path.join(BACKUP_ROOT, candidate)):
+        extra += 1
+        candidate = f"{stamp}-{extra}"
+    return candidate
+
+
 def back_up(stamp):
     """Copy what migration changes, with a manifest of checksums, and answer the folder."""
     folder = os.path.join(BACKUP_ROOT, stamp)
@@ -294,27 +309,6 @@ def write_store(found):
             store["people"][p["name"]] = entry
 
 
-def set_smb_option(text, option, value):
-    """smb.conf with option set in [global], replacing Debian's own line."""
-    lines, done, in_global = [], False, False
-    for line in text.splitlines():
-        stripped = line.strip().lower()
-        if stripped.startswith("["):
-            if in_global and not done:
-                lines.append(f"   {option} = {value}")
-                done = True
-            in_global = stripped == "[global]"
-        elif in_global and stripped.split("=")[0].strip() == option:
-            if not done:
-                lines.append(f"   {option} = {value}")
-                done = True
-            continue
-        lines.append(line)
-    if not done:
-        lines.append(f"   {option} = {value}")
-    return "\n".join(lines) + "\n"
-
-
 def lock_down(found):
     """The Unix side of each person: no password, no shell, no power."""
     for p in found["people"]:
@@ -323,12 +317,7 @@ def lock_down(found):
         run("usermod", "--shell", users.KINDS["sftp" if p["sftp"] else "shares"], name)
         for group in p["leaves"]:
             run("gpasswd", "-d", name, group, check=False)
-    if os.path.exists(SAMBA_CONF):
-        with open(SAMBA_CONF) as file:
-            text = file.read()
-        for option in ("unix password sync", "pam password change"):
-            text = set_smb_option(text, option, "no")
-        write_file(SAMBA_CONF, text)
+    shares.samba_password_policy()
     sftp.sync()
     ssh.refresh()
     for unit in ("smbd.service", "ssh.service", "fellowship-nas-helper.service"):
@@ -382,7 +371,7 @@ def separate(found, ask=ask_secret, later=(), url=None, say=print):
     before_owners = owners(found)
     before_ids = {p["name"]: (p["uid"], p["gid"]) for p in found["people"]}
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = new_stamp()
     folder = back_up(stamp)
     say(f"Saved what this changes to {folder}")
     try:

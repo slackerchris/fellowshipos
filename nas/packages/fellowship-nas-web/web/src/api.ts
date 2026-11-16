@@ -399,9 +399,13 @@ export interface SshStatus {
     enabled: boolean;
     passwords: boolean;
     running: boolean;
-    // Accounts set to Shares and SSH, which may log in
+    // Who may log in: Shares and SSH accounts on an old-model NAS, people
+    // with Files over SFTP allowed on a separated one
     allowed: string[];
     admins_with_keys: string[];
+    // Present only on a separated NAS: root's own SSH, read-only here —
+    // only root turns it on, with fellowship-root-ssh at the console
+    root_ssh?: boolean;
 }
 
 export interface SshKey {

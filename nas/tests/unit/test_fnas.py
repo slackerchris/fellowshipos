@@ -2844,6 +2844,18 @@ class Separation(unittest.TestCase):
         missing = self.separate.set_smb_option("[global]\n   workgroup = W\n[t]\n", "pam password change", "no")
         self.assertIn("   pam password change = no\n[t]", missing)
 
+    def test_a_retry_in_the_same_second_gets_its_own_backup(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        with mock.patch.object(self.separate, "BACKUP_ROOT", directory.name):
+            first = self.separate.new_stamp()
+            os.makedirs(os.path.join(directory.name, first))
+            second = self.separate.new_stamp()
+            self.assertNotEqual(first, second)
+            self.assertTrue(second.startswith(first))
+            # Undo takes the newest: the suffixed retry sorts after its base
+            self.assertEqual(sorted([first, second])[-1], second)
+
     def test_the_dry_run_says_what_needs_setting_and_that_dates_prove_nothing(self):
         found = {"runner": "chris", "root_has_password": False, "people": [
             {"name": "chris", "uid": 1000, "gid": 1000, "admin": True, "enabled": True, "groups": ["sudo"],
@@ -3085,7 +3097,8 @@ class MaintenanceInterface(unittest.TestCase):
                     self.assertIn((area, action), listed)
 
     def test_root_only_commands_are_refused_to_a_caller(self):
-        for argv in (["--caller", "kim", "auth", "check", "kim"], ["--caller", "kim", "job", "run", "0123456789ab"],
+        for argv in (["--caller", "kim", "auth", "check", "kim"], ["--caller", "kim", "auth", "keys", "kim"],
+                     ["--caller", "kim", "job", "run", "0123456789ab"],
                      ["--caller", "kim", "alert", "send", "x", "y"]):
             with self.subTest(argv), mock.patch.object(fnas.os, "geteuid", return_value=0), \
                     contextlib.redirect_stderr(io.StringIO()) as err, \
@@ -3895,6 +3908,253 @@ class Ssh(unittest.TestCase):
                 fnas.refresh()
         with open(fnas.DROP_IN) as file:
             self.assertEqual(file.read(), "old\n")
+
+
+class SeparatedSsh(unittest.TestCase):
+    """Phase 7 (docs/fellowship-nas-ssh-samba-plan.md): on a separated NAS sshd
+    serves Files over SFTP to nas-sftp, passwords are checked against the store
+    through PAM, keys come from the store, and root's SSH is his own keys-only
+    switch that the desktop can only read."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.calls = []
+        by_module = {m.__name__: m for m in MODULES}
+        self.accounts_module = by_module["fellowship_nas.accounts"]
+        self.ssh_module = by_module["fellowship_nas.ssh"]
+        self.sftp_module = by_module["fellowship_nas.sftp"]
+        self.store = os.path.join(self.dir, "accounts.json")
+        self.people = {
+            "kim": {"uid": 1001, "full_name": "Kim", "admin": True, "enabled": True, "sftp": True,
+                    "hash": "", "password_set": None, "must_change": False, "keys": []},
+            "ann": {"uid": 1002, "full_name": "Ann", "admin": False, "enabled": True, "sftp": False,
+                    "hash": "", "password_set": None, "must_change": False, "keys": []}}
+        with open(self.store, "w") as file:
+            json.dump({"version": 1, "people": self.people}, file)
+        self.root_ssh_file = os.path.join(self.dir, "root-ssh.json")
+        self.root_keys = os.path.join(self.dir, "root_keys")
+        self.pam_file = os.path.join(self.dir, "sshd.pam")
+        self.drop_in_file = os.path.join(self.dir, "fellowship.conf")
+        self.settings_file = os.path.join(self.dir, "ssh.json")
+
+        def run(*command, check=True, stdin=None):
+            self.calls.append(command)
+            return SimpleNamespace(stdout="256 SHA256:abc kim@laptop (ED25519)\n", stderr="", returncode=0)
+
+        def by_name(name):
+            if name in self.people:
+                person = self.people[name]
+                return SimpleNamespace(pw_name=name, pw_uid=person["uid"], pw_gid=person["uid"], pw_gecos="",
+                                       pw_shell=fnas.users.SFTP_SHELL if person["sftp"] else "/usr/sbin/nologin",
+                                       pw_dir="/nonexistent")
+            raise KeyError(name)
+
+        for patcher in (patch("run", run),
+                        patch("SETTINGS_FILE", self.settings_file),
+                        patch("DROP_IN", self.drop_in_file),
+                        mock.patch.object(self.accounts_module, "STORE", self.store),
+                        mock.patch.object(self.accounts_module, "STORE_LOCK", self.store + ".lock"),
+                        mock.patch.object(self.ssh_module, "PAM_SSHD", self.pam_file),
+                        mock.patch.object(self.ssh_module, "ROOT_SSH_FILE", self.root_ssh_file),
+                        mock.patch.object(self.ssh_module, "ROOT_KEYS", self.root_keys),
+                        mock.patch.object(fnas.pwd, "getpwnam", by_name),
+                        mock.patch.object(self.sftp_module, "sync", lambda: None),
+                        mock.patch.object(self.sftp_module, "accounts", lambda: ["kim"])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def root_on(self):
+        with open(self.root_ssh_file, "w") as file:
+            json.dump({"enabled": True}, file)
+
+    def stored(self, name):
+        with open(self.store) as file:
+            return json.load(file)["people"][name]
+
+    def test_sftp_gets_in_and_root_does_not_until_he_says_so(self):
+        text = self.ssh_module.drop_in({"enabled": True, "passwords": True})
+        self.assertIn("AllowGroups nas-sftp\n", text)
+        self.assertIn("PermitRootLogin no\n", text)
+        self.assertIn("AuthorizedKeysCommand /usr/sbin/fnas auth keys %u\n", text)
+        self.assertIn("AuthorizedKeysCommandUser root\n", text)
+        # The store is the only source of keys for SFTP people
+        self.assertIn("    AuthorizedKeysFile none\n", text)
+        self.assertNotIn("nas-ssh", text)
+        self.assertTrue(text.rstrip().endswith("Match all"))
+
+    def test_root_ssh_is_keys_only_and_joins_allowgroups(self):
+        self.root_on()
+        text = self.ssh_module.drop_in({"enabled": True, "passwords": False})
+        self.assertIn("AllowGroups root nas-sftp\n", text)
+        self.assertIn("PermitRootLogin prohibit-password\n", text)
+        self.assertIn("PasswordAuthentication no\n", text)
+
+    def test_sftp_off_never_touches_root_ssh(self):
+        self.root_on()
+        text = self.ssh_module.drop_in({"enabled": False, "passwords": True})
+        self.assertIn("AllowGroups root\n", text)
+        self.assertNotIn("AllowGroups root nas-sftp", text)
+
+    def test_both_off_denies_everyone(self):
+        text = self.ssh_module.drop_in({"enabled": False, "passwords": True})
+        self.assertIn("DenyGroups *\n", text)
+        self.assertNotIn("AllowGroups", text)
+
+    def test_root_ssh_keeps_the_service_up_with_sftp_off(self):
+        self.root_on()
+        with open(self.settings_file, "w") as file:
+            json.dump({"enabled": False, "passwords": True}, file)
+        self.ssh_module.refresh()
+        self.assertIn(("systemctl", "enable", "--now", "ssh.service"), self.calls)
+        self.assertNotIn(("systemctl", "disable", "--now", "ssh.service"), self.calls)
+        with open(self.drop_in_file) as file:
+            self.assertIn("AllowGroups root\n", file.read())
+        with open(self.pam_file) as file:
+            pam = file.read()
+        self.assertIn("pam_exec.so expose_authtok /usr/lib/fellowship-nas/sftp-auth", pam)
+        # The account phase is what refuses a turned-off person, keys included
+        self.assertIn("account  requisite   pam_unix.so", pam)
+
+    def test_both_off_stops_the_service(self):
+        with open(self.settings_file, "w") as file:
+            json.dump({"enabled": False, "passwords": True}, file)
+        self.ssh_module.refresh()
+        self.assertIn(("systemctl", "disable", "--now", "ssh.service"), self.calls)
+        self.assertNotIn(("systemctl", "enable", "--now", "ssh.service"), self.calls)
+
+    def test_passwords_off_needs_no_admin_key_on_a_separated_nas(self):
+        found = self.ssh_module.set_settings(passwords=False)
+        self.assertFalse(found["passwords"])
+        with open(self.drop_in_file) as file:
+            self.assertIn("PasswordAuthentication no\n", file.read())
+
+    def test_keys_go_to_the_store_and_read_back(self):
+        self.ssh_module.set_keys("kim", "ssh-ed25519 AAAA kim@laptop\n")
+        self.assertEqual(self.stored("kim")["keys"], ["ssh-ed25519 AAAA kim@laptop"])
+        found = self.ssh_module.list_keys("kim")
+        self.assertEqual(found[0]["fingerprint"], "SHA256:abc")
+        self.assertEqual(found[0]["line"], "ssh-ed25519 AAAA kim@laptop")
+
+    def test_shares_only_is_refused_keys(self):
+        with self.assertRaisesRegex(fnas.FnasError, "SFTP allowed"):
+            self.ssh_module.set_keys("ann", "ssh-ed25519 AAAA ann@laptop")
+
+    def test_keys_are_validated_and_limited(self):
+        with self.assertRaisesRegex(fnas.FnasError, "public key"):
+            self.ssh_module.set_keys("kim", "hello")
+        with self.assertRaisesRegex(fnas.FnasError, "at most 32"):
+            self.ssh_module.set_keys("kim", "\n".join(f"ssh-ed25519 AAAA k{i}" for i in range(33)))
+
+    def test_empty_text_clears_the_keys(self):
+        self.ssh_module.set_keys("kim", "ssh-ed25519 AAAA kim@laptop")
+        self.ssh_module.set_keys("kim", "")
+        self.assertEqual(self.stored("kim")["keys"], [])
+
+    def test_auth_keys_answers_from_the_store_and_nothing_for_root(self):
+        self.ssh_module.set_keys("kim", "ssh-ed25519 AAAA kim@laptop")
+        self.assertEqual(fnas.accounts.ssh_keys("kim"), ["ssh-ed25519 AAAA kim@laptop"])
+        self.assertEqual(fnas.accounts.ssh_keys("root"), [])
+        self.assertEqual(fnas.accounts.ssh_keys("nobody"), [])
+
+    def test_root_ssh_needs_a_key_first(self):
+        with self.assertRaisesRegex(fnas.FnasError, "key"):
+            self.ssh_module.set_root_ssh(True)
+        with open(self.root_keys, "w") as file:
+            file.write("# a comment\n\nssh-ed25519 AAAA root@desk\n")
+        self.assertTrue(self.ssh_module.set_root_ssh(True))
+        self.assertTrue(self.ssh_module.root_ssh())
+        with open(self.drop_in_file) as file:
+            self.assertIn("PermitRootLogin prohibit-password\n", file.read())
+        self.assertTrue([c for c in self.calls if c[0] == "logger" and "fellowship-root-ssh" in c])
+        self.assertFalse(self.ssh_module.set_root_ssh(False))
+        with open(self.drop_in_file) as file:
+            self.assertIn("PermitRootLogin no\n", file.read())
+
+    def test_root_ssh_belongs_to_a_separated_nas(self):
+        os.remove(self.store)
+        with self.assertRaisesRegex(fnas.FnasError, "separated"):
+            self.ssh_module.set_root_ssh(True)
+
+    def test_a_setting_sshd_refuses_puts_both_files_back(self):
+        with open(self.drop_in_file, "w") as file:
+            file.write("old conf\n")
+        with open(self.pam_file, "w") as file:
+            file.write("old pam\n")
+
+        def refuse(*command, check=True, stdin=None):
+            failed = command[:2] == ("sshd", "-t")
+            return SimpleNamespace(stdout="", stderr="bad" if failed else "", returncode=1 if failed else 0)
+        with patch("run", refuse):
+            with self.assertRaisesRegex(fnas.FnasError, "refused"):
+                self.ssh_module.refresh()
+        with open(self.drop_in_file) as file:
+            self.assertEqual(file.read(), "old conf\n")
+        with open(self.pam_file) as file:
+            self.assertEqual(file.read(), "old pam\n")
+
+    def test_status_shows_root_ssh_and_the_sftp_people(self):
+        found = self.ssh_module.status()
+        self.assertEqual(found["allowed"], ["kim"])
+        self.assertFalse(found["root_ssh"])
+        self.assertNotIn("admins_with_keys", found)
+
+
+class SambaPasswordPolicy(unittest.TestCase):
+    """Phase 7, ruling 1: a separated NAS keeps Debian's sync on (the locked
+    Linux password is what refuses a Windows change) and denies the PAM
+    password path outright. Both off was verified to drift the SMB password."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        by_module = {m.__name__: m for m in MODULES}
+        self.accounts_module = by_module["fellowship_nas.accounts"]
+        self.shares_module = by_module["fellowship_nas.shares"]
+        self.separate_module = by_module["fellowship_nas.separate"]
+        self.store = os.path.join(self.dir, "accounts.json")
+        with open(self.store, "w") as file:
+            json.dump({"version": 1, "people": {}}, file)
+        self.conf = os.path.join(self.dir, "smb.conf")
+        self.pam = os.path.join(self.dir, "samba.pam")
+        for patcher in (mock.patch.object(self.accounts_module, "STORE", self.store),
+                        mock.patch.object(self.shares_module, "SMB_CONF", self.conf),
+                        mock.patch.object(self.shares_module, "SAMBA_PAM", self.pam)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_sync_stays_on_and_the_password_path_is_denied(self):
+        with open(self.conf, "w") as file:
+            file.write("[global]\n   workgroup = WORKGROUP\n   unix password sync = no\n"
+                       "   pam password change = no\n[homes]\n   unix password sync = no\n")
+        self.shares_module.samba_password_policy()
+        with open(self.conf) as file:
+            text = file.read()
+        self.assertIn("   unix password sync = yes\n", text)
+        self.assertIn("   pam password change = yes\n", text)
+        # Only [global] is touched
+        self.assertIn("[homes]\n   unix password sync = no\n", text)
+        with open(self.pam) as file:
+            pam = file.read()
+        self.assertIn("@include common-auth", pam)
+        self.assertIn("@include common-account", pam)
+        self.assertIn("@include common-session-noninteractive", pam)
+        self.assertIn("password   requisite   pam_deny.so", pam)
+
+    def test_the_old_model_is_untouched(self):
+        os.remove(self.store)
+        with open(self.conf, "w") as file:
+            file.write("[global]\n   unix password sync = yes\n")
+        self.shares_module.samba_password_policy()
+        with open(self.conf) as file:
+            self.assertEqual(file.read(), "[global]\n   unix password sync = yes\n")
+        self.assertFalse(os.path.exists(self.pam))
+
+    def test_migration_backs_up_the_pam_files_it_changes(self):
+        self.assertIn("/etc/pam.d/sshd", self.separate_module.SAVED_FILES)
+        self.assertIn("/etc/pam.d/samba", self.separate_module.SAVED_FILES)
 
 
 class LookTests(unittest.TestCase):

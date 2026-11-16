@@ -112,6 +112,13 @@ def set_password_hash(entry, hashed, now=None):
     entry["must_change"] = False
 
 
+def ssh_keys(name):
+    """The keys sshd may use for this person, from the store: nothing for root
+    or a name the NAS doesn't keep. AllowGroups and PAM's account check do the
+    gating, so this only answers what the store holds."""
+    return store_people().get(name, {}).get("keys", [])
+
+
 def check_login(name, password):
     """Why name can't log in with password, or None when they can. One answer
     for an unknown name and a wrong password, so a guess learns nothing."""

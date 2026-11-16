@@ -1,8 +1,13 @@
 # Phase 7: SSH and Samba settings — implementation and test plan
 
-**Status:** planned, not built. The audit and the three rulings below were
-agreed by Chris on 2026-11-15. Implements phase 7 of
-`fellowship-nas-account-separation.md`, which will record the results.
+**Status:** implemented and tested 2026-11-15; the plan below was agreed by
+Chris before coding. Implements phase 7 of
+`fellowship-nas-account-separation.md`, which records the results; the session
+handoff is `docs/fellowship-nas-ssh-samba-session-2026-11-15.md`. Two things
+the plan left open were settled while building: with SFTP and root SSH both
+off the drop-in says `DenyGroups *` (so a manually started sshd admits
+nobody), and the password-SFTP integration checks pipe commands on stdin —
+`sftp -b` implies `BatchMode=yes`, which disables password authentication.
 
 Everything here was checked against the code on branch `nas-edition`
 (`d6425d0`), not against the design doc alone. The Samba behavior was verified

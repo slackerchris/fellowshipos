@@ -242,7 +242,8 @@ func (h *Helper) login(request protocol.Request) protocol.Response {
 		}
 	}
 	if errors.Is(err, ErrExpired) {
-		return failure(protocol.CodeUnauthenticated, "Your password has expired. Change it over SSH, then log in here.")
+		return failure(protocol.CodeUnauthenticated,
+			"Your password must be changed before you can sign in. Ask a NAS administrator to set a new one in Users.")
 	}
 	if err != nil {
 		log.Printf("failed login for %q from %s: %v", request.User, request.Remote, err)

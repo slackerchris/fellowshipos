@@ -4,6 +4,10 @@
 # packages, Samba, helper and web server. It starts from the old model, with an
 # installer-made sudo admin with no Samba password, an ordinary person, a shell
 # account whose two passwords already differ, and a turned-off account.
+# Phase 7 (docs/fellowship-nas-ssh-samba-plan.md) is checked here too: the
+# migrated SSH and Samba policy, SFTP through the store, migrated keys with the
+# store as their only source, the refused Windows change, and undo putting the
+# PAM files and sshd's settings back.
 #   nas/packages/build.sh      (builds the packages this installs)
 #   nas/tests/integration/separate.sh
 # Runs in a privileged Debian trixie container. Every result line says PASS or
@@ -41,7 +45,12 @@ printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/pol
 dpkg-divert --quiet --local --rename --add /usr/bin/systemctl
 printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fellowship-nas-tools fellowship-nas-web \
-    fellowship-nas-smb smbclient curl > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
+    fellowship-nas-smb smbclient openssh-server curl > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
+ssh-keygen -A > /dev/null; mkdir -p /run/sshd
+printf '#!/bin/sh\necho "$SSHPASS"\n' > /tmp/askpass && chmod +x /tmp/askpass
+# The stopped runs try wrong passwords on purpose; OpenSSH's per-source
+# penalties would refuse the later, correct attempts, so they are off here only
+echo "PerSourcePenalties no" > /etc/ssh/sshd_config.d/00-test.conf
 
 echo "== packages installed; this NAS isn't separated"
 echo "== a NAS made the old way"
@@ -56,6 +65,14 @@ echo 'ann password 22' | fnas user create ann --password-stdin > /dev/null
 echo 'bob old smb 33' | fnas user create bob --kind ssh --password-stdin > /dev/null
 echo 'bob:bob new linux 44' | chpasswd
 chage -d $(( $(date +%s) / 86400 + 1 )) bob
+# bob keeps an SSH key in his home, as a shell account would: migration copies
+# it into the store, and phase 7 makes the store its only source
+ssh-keygen -t ed25519 -f /tmp/bobkey -N '' -q
+ssh-keygen -t ed25519 -f /tmp/bobkey2 -N '' -q
+mkdir -p /home/bob/.ssh
+cp /tmp/bobkey.pub /home/bob/.ssh/authorized_keys
+chown -R bob:bob /home/bob/.ssh
+chmod 700 /home/bob/.ssh; chmod 600 /home/bob/.ssh/authorized_keys
 echo 'carol pass 555' | fnas user create carol --password-stdin > /dev/null
 fnas user set carol --enabled off > /dev/null
 mkdir -p /srv/t && chmod 777 /srv/t && printf '[t]\npath = /srv/t\nread only = no\n' >> /etc/samba/smb.conf
@@ -142,7 +159,11 @@ refuse "tester has no sudo" bash -c 'id -nG tester | grep -qw sudo'
 # a shell that refuses, file access only
 [ "$(getent passwd tester | cut -d: -f7)" = /usr/local/lib/fellowship-nas/sftp-only ] && pass "tester's shell is gone (Files over SFTP only)" || fail "tester's shell is gone: $(getent passwd tester)"
 [ "$(getent passwd bob | cut -d: -f7)" = /usr/local/lib/fellowship-nas/sftp-only ] && pass "bob has Files over SFTP, not a shell" || fail "bob has Files over SFTP: $(getent passwd bob)"
-grep -q "^   unix password sync = no" /etc/samba/smb.conf && pass "Samba no longer syncs to Linux passwords" || fail "Samba no longer syncs to Linux passwords"
+grep -q "^   unix password sync = yes" /etc/samba/smb.conf && grep -q "^   pam password change = yes" /etc/samba/smb.conf \
+    && pass "Samba keeps sync on: the locked password refuses Windows changes" || fail "Samba keeps sync on"
+grep -q "^password   requisite   pam_deny.so" /etc/pam.d/samba && pass "Samba's PAM password path is denied" || fail "Samba's PAM password path is denied"
+grep -q "^AllowGroups nas-sftp$" /etc/ssh/sshd_config.d/fellowship.conf && pass "sshd admits SFTP only, root off" || fail "sshd admits SFTP only, root off"
+grep -q "pam_exec.so expose_authtok /usr/lib/fellowship-nas/sftp-auth" /etc/pam.d/sshd && pass "the SFTP PAM stack is in place" || fail "the SFTP PAM stack is in place"
 
 echo "== every credential that worked still works"
 [ "$(desk tester 'tester new pw 66')" = True ] && pass "tester: desktop, as a NAS admin" || fail "tester: desktop"
@@ -158,6 +179,30 @@ echo 'bob one pass 77' | fnas user password bob --password-stdin > /dev/null
     || fail "bob's new password works on the desktop"
 refuse "and his old Samba one doesn't" smb bob 'bob old smb 33'
 
+echo "== phase 7: SFTP and Samba after migration"
+/usr/sbin/sshd
+printf 'ls\n' > /tmp/sftp-batch
+sftp_pw() { # sftp_pw <user> <password>. No -b: batch mode implies
+    # BatchMode=yes, which disables password authentication
+    printf 'ls\n' | SSHPASS="$2" SSH_ASKPASS=/tmp/askpass SSH_ASKPASS_REQUIRE=force \
+        sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o PreferredAuthentications=password -o PubkeyAuthentication=no "$1@127.0.0.1" > /dev/null 2>&1
+}
+sftp_key() { # sftp_key <user> <keyfile>
+    sftp -i "$2" -b /tmp/sftp-batch -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o PreferredAuthentications=publickey -o PasswordAuthentication=no "$1@127.0.0.1" > /dev/null 2>&1
+}
+expect "tester: SFTP with the NAS password, through the PAM stack" sftp_pw tester 'tester new pw 66'
+expect "bob: SFTP with his migrated key, now from the store" sftp_key bob /tmp/bobkey
+fnas user keys bob --set-stdin < /tmp/bobkey2.pub > /dev/null
+refuse "bob's old key stops working: the store is the only source" sftp_key bob /tmp/bobkey
+expect "bob's new key works at once, with no reload" sftp_key bob /tmp/bobkey2
+printf 'tester new pw 66\nwindows try 88\nwindows try 88\n' | smbpasswd -r 127.0.0.1 -U tester > /dev/null 2>&1 \
+    && fail "the Windows change was accepted" || pass "the Windows change is refused"
+expect "tester's SMB password is unchanged" smb tester 'tester new pw 66'
+refuse "the attempted one doesn't work" smb tester 'windows try 88'
+[ "$(getent shadow tester | cut -d: -f2 | cut -c1)" = "!" ] && pass "tester's Linux password stayed locked" || fail "tester's Linux password stayed locked"
+
 echo "== undo"
 fnas accounts separate --undo > /tmp/undo 2>&1 && pass "undo ran" || fail "undo ran: $(tail -3 /tmp/undo)"
 id -nG tester | grep -qw sudo && [ "$(getent passwd tester | cut -d: -f7)" = /bin/bash ] && pass "tester has sudo and a shell again" || fail "tester has sudo and a shell again"
@@ -169,3 +214,11 @@ refuse "tester is back to no Samba password, as before" smb tester 'tester new p
 python3 -c 'from fellowship_nas import separate; import sys; sys.exit(0 if separate.root_usable("root new pw 1") in (None, "no login prompt is enabled on the console") else 1)' \
     && pass "root keeps the password it was given" || fail "root keeps the password it was given"
 [ "$(stat -c %u:%g /home/tester/docs/a.txt)" = "$owner_before" ] && pass "file owners are still unchanged" || fail "file owners are still unchanged"
+# The SSH and Samba settings go back too, PAM files included
+pkill -x sshd; sleep 0.5; /usr/sbin/sshd
+grep -q pam_exec /etc/pam.d/sshd && fail "undo restored Debian's sshd PAM" || pass "undo restored Debian's sshd PAM"
+grep -q pam_deny /etc/pam.d/samba && fail "undo restored Debian's samba PAM" || pass "undo restored Debian's samba PAM"
+[ ! -e /etc/ssh/sshd_config.d/fellowship.conf ] && pass "undo removed the separated drop-in" || fail "undo removed the separated drop-in"
+expect "tester: shell SSH with the old Linux password, as before" env SSHPASS='tester old 1' \
+    SSH_ASKPASS=/tmp/askpass SSH_ASKPASS_REQUIRE=force ssh \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 true

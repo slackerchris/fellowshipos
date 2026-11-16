@@ -19,6 +19,7 @@ DONE_FLAG = "/etc/fellowshipos/.nas-role-complete"
 STATUS_FILE = "/var/lib/fellowshipos/nas-role-status"
 CERT = "/etc/fellowship-nas/web/cert.pem"
 STORE = "/var/lib/fellowship-nas/accounts.json"
+ROOT_SSH = "/etc/fellowshipos/root-ssh.json"
 NETWORK_PENDING = "/var/lib/fellowship-nas/network-rollback/pending.json"
 
 # agetty colour escapes
@@ -114,8 +115,16 @@ def main():
                  f"  {'':<13}        {found[48:]}",
                  f"  {'':<13}{DIM}The browser warns about it once; check it matches before you accept.{RESET}"]
     if os.path.exists(STORE):
-        # A separated NAS: root is the system administrator, apart from the NAS's people
-        text += ["", f"  {'Root:':<13}logs in here, at the console, for system administration"]
+        # A separated NAS: root is the system administrator, apart from the NAS's
+        # people. His own SSH is keys only, off unless he turned it on himself.
+        root_ssh = False
+        try:
+            with open(ROOT_SSH) as f:
+                root_ssh = json.load(f).get("enabled") is True
+        except (OSError, ValueError):
+            pass
+        text += ["", f"  {'Root:':<13}" + ("SSH with a key, and here at the console" if root_ssh
+                 else "logs in here, at the console, for system administration")]
     text += [""] + status_lines() + ["", ""]
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(OUT + ".new", "w") as f:

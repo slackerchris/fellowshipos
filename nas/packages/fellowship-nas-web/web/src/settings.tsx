@@ -334,6 +334,36 @@ function Ssh() {
         <Card title="SSH">
             <Loading loaded={status}>{() => {
                 const ssh = status.data!;
+                if (ssh.root_ssh !== undefined) {
+                    return (
+                        <div class="stack">
+                            <p class="small">People with <strong>Files over SFTP</strong> allowed in Users can transfer
+                                files over SFTP: no shell, nothing to forward, and just their shares. They sign in with
+                                their NAS password, or with a key kept in Users. Root's SSH is separate — keys only,
+                                and only root can turn it on at the console with
+                                {" "}<span class="mono">fellowship-root-ssh</span>.</p>
+                            <p class="small">May use SFTP now: {ssh.allowed.length ? <strong>{ssh.allowed.join(", ")}</strong>
+                                : "nobody"} · {ssh.running ? <Badge kind="good">running</Badge>
+                                : <Badge kind={ssh.enabled ? "bad" : "neutral"}>{ssh.enabled ? "not running" : "off"}</Badge>}</p>
+                            <label class="check">
+                                <input type="checkbox" checked={ssh.enabled} disabled={action.busy}
+                                       onChange={event => action.run(() => fnas(["ssh", "set", "--enabled", onOff(event.currentTarget.checked)]))} />
+                                <span>SFTP on{!ssh.enabled && ssh.root_ssh
+                                    ? <span class="muted small"> (root's SSH stays on)</span> : null}</span>
+                            </label>
+                            <label class="check">
+                                <input type="checkbox" checked={ssh.passwords} disabled={action.busy}
+                                       onChange={event => action.run(() => fnas(["ssh", "set", "--passwords", onOff(event.currentTarget.checked)]))} />
+                                <span>Allow passwords for SFTP{!ssh.passwords
+                                    ? <span class="muted small"> (off: keys only)</span> : null}</span>
+                            </label>
+                            <p class="small">Root SSH: {ssh.root_ssh
+                                ? <Badge kind="good">on, keys only</Badge>
+                                : <Badge kind="neutral">off — root logs in at the console</Badge>}</p>
+                            <Result outcome={action.outcome} />
+                        </div>
+                    );
+                }
                 const noKey = !ssh.admins_with_keys.length;
                 return (
                     <div class="stack">

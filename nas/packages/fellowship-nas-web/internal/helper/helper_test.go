@@ -105,7 +105,7 @@ func TestLoginRefusals(t *testing.T) {
 		}
 	}
 	expired := h.Handle(protocol.Request{Op: protocol.OpLogin, User: "kim", Password: "old"})
-	if !strings.Contains(expired.Error, "expired") || expired.Token != "" {
+	if !strings.Contains(expired.Error, "must be changed") || expired.Token != "" {
 		t.Errorf("expired: %+v", expired)
 	}
 }

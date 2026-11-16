@@ -707,6 +707,8 @@ def build_parser():
         dest="action", required=True)
     auth_check = auth.add_parser("check", help="exit 0 if the password on stdin is right and the person may log in")
     auth_check.add_argument("name")
+    auth_keys = auth.add_parser("keys", help="print a person's SSH keys from the store (root only, for sshd)")
+    auth_keys.add_argument("name")
 
     area.add_parser("check", help="look for problems and send alerts")
     area.add_parser("health", help="show every check, service, pool and disk, sending nothing")
@@ -770,12 +772,22 @@ def dispatch(args):
                 separate.separate(found, later=args.later, url=args.login_url)
     elif args.area == "accounts" and args.action == "init":
         accounts.create_store()
+        # The moment this NAS becomes separated, its SSH and Samba policy
+        # follows: the installer runs this inside the new system, and can't
+        # ask for a refresh of its own
+        ssh.refresh()
+        shares.samba_password_policy()
         print("This NAS now keeps its people in its own store.")
     elif args.area == "accounts":
         separated = accounts.is_separated()
         show({"separated": separated}, lambda found: print(
             "People are kept in the NAS's own store: they have no Linux login." if separated else
             "People are Linux accounts, checked through PAM. This NAS hasn't been separated yet."))
+    elif args.area == "auth" and args.action == "keys":
+        # sshd's AuthorizedKeysCommand: the store's keys, or nothing for root
+        # and unknown names. Always exits 0; the groups and PAM do the gating.
+        for line in accounts.ssh_keys(args.name):
+            print(line)
     elif args.area == "auth":
         # Says nothing on stdout: whoever calls it learns yes or no from the exit
         # code, and a reason only on stderr for root reading it
@@ -975,6 +987,13 @@ def dispatch_look(args, show):
 
 
 def print_ssh(status):
+    if "root_ssh" in status:
+        print("SFTP is " + ("on" if status["enabled"] else "off")
+              + (", running" if status["running"] else ", not running"))
+        print("Passwords: " + ("allowed" if status["passwords"] else "off, keys only"))
+        print("Root SSH: " + ("on, keys only" if status["root_ssh"] else "off (root logs in at the console)"))
+        print("May use SFTP: " + (", ".join(status["allowed"]) or "nobody"))
+        return
     print("SSH is " + ("on" if status["enabled"] else "off") + (", running" if status["running"] else ", not running"))
     print("Passwords: " + ("allowed" if status["passwords"] else "off, keys only"))
     print("May log in: " + (", ".join(status["allowed"]) or "nobody"))

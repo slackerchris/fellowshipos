@@ -447,6 +447,7 @@ ZFS's `sharenfs` and `sharesmb` properties aren't used.
   - Members of `nas-sftp` get SFTP only, with no shell, through an `sshd` `Match Group` block with `ForceCommand internal-sftp`.
   - Each user is chrooted to a folder holding bind mounts of the shares they may use, so they see only those shares.
   - Admins keep normal SSH.
+  - On a separated NAS this old-model policy is replaced by phase 7 of `fellowship-nas-account-separation.md` (plan: `fellowship-nas-ssh-samba-plan.md`): SFTP only, passwords and keys from the NAS store, and root's SSH as his own keys-only switch.
   - **Built** (Nov 10): an account's kind is read from its shell, so "Files over SFTP" is a third kind beside Shares only and Shares and SSH. It carries a shell that refuses, which sshd never runs because `internal-sftp` is forced instead — so a client that asks for a shell, or for a tunnel, is turned away twice over.
   - The drop-in lets both groups through with `AllowGroups nas-ssh nas-sftp`, since `AllowGroups` can't be used inside a `Match` block; everything the SFTP accounts may not do is in the block, with forwarding, agent forwarding, X11 and tunnels all off.
   - The drop-in ends with `Match all`. Debian puts the `Include` for that directory near the top of `sshd_config`, so without it everything after the include — `UsePAM`, `Subsystem sftp` — would be read inside the match, which `sshd -t` refuses, and the save-the-old-file path would leave the views unbuilt on every stock host.
