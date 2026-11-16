@@ -585,6 +585,15 @@ Run in VMs, from the image, against a real system:
   - A Windows password change is refused; neither password drifts.
   - The old model is unchanged; migration applies the policy, and undo
     restores the PAM files and sshd's settings.
+- **Installed system, phases 6 and 7:** an ISO built from the committed
+  branch in a clean worktree (the uncommitted installer LVM fix excluded by
+  construction), installed through the graphical installer's own HTTPS API
+  into a QEMU/KVM VM (`nas/tests/vm/vm.sh`), checked on the machine's own
+  screen and over SSH from the host. Results, per-item verdicts and
+  screendumps: `docs/fellowship-nas-iso-verify-session-2026-11-15.md`. The
+  console lines, root SSH end to end, the DHCP change against an external
+  router and the rollback timer pass; the rollback's live-address restoration
+  on a DHCP-booted NAS is open (the leftover-address finding, phase 6).
 
 ## Phases
 
@@ -816,9 +825,34 @@ Run in VMs, from the image, against a real system:
    back a pending change. The first run caught the timer firing late —
    systemd's default minute of slack — so it carries `AccuracySec=1s`.
 
-   Still to check on an installed system, as with phases 4 and 5: the console
-   screen's waiting-change line on the machine's own monitor, and a DHCP
-   change against a real router.
+   **Checked on an installed system** (2026-11-15, ISO built from the committed
+   `nas-edition` in a clean worktree, installed through the graphical
+   installer's own HTTPS API, QEMU/KVM with user-mode networking; handoff:
+   `docs/fellowship-nas-iso-verify-session-2026-11-15.md`):
+   - The console screen's waiting-change line on the machine's own monitor:
+     **pass**, for a DHCP and a static change — "a change is waiting: confirm
+     at https://<new address> by <deadline>, or the previous settings come
+     back" — and gone once the change is kept or rolled back.
+   - A DHCP change against a router outside the NAS: **pass** against QEMU
+     user-mode networking's DHCP (lease, gateway and DNS all learned from it).
+     A run against Chris's physical LAN router is still his to do.
+   - The rollback timer under the installed systemd: **pass** for the file,
+     the pending state, the timer, the console line and the alert ("Network
+     change rolled back" in the alert store, twice).
+   - The helper's confirm gate on the installed system: **pass** for the
+     refusal — a confirm arriving at the old address (as QEMU's port forward
+     delivers it) is refused with "Confirm from the NAS's new address". The
+     positive path, confirming from the new address, is proven by the
+     container integration, not repeated here.
+   - **Found, open (phase 6):** on a NAS that booted with DHCP, changing the
+     method leaves the previous method's address on the interface: the
+     boot dhclient survives `ifdown` (which reads the rewritten stanza), and
+     `ifup`'s dhclient then skips its flush. So a static change keeps the old
+     lease as a secondary address, a DHCP change reports the leftover static
+     address as its "lease", and a rollback restores the file and state but
+     not the live address. The container tests start from static, with no
+     boot dhclient, which is why they pass. Evidence and a proposed fix are
+     in the handoff; Chris's call, not fixed in this pass.
 7. **SSH and Samba settings.** Done. The plan, with the audit of what already
    existed and Chris's three rulings, is `docs/fellowship-nas-ssh-samba-plan.md`;
    the session handoff is `docs/fellowship-nas-ssh-samba-session-2026-11-15.md`.
@@ -900,6 +934,18 @@ Run in VMs, from the image, against a real system:
    both PAM files and removes the drop-in, and the old sudo admin's shell SSH
    works again with the old password.
 
-   Still to check on an installed system, as with phases 4–6: the console
-   root line on the machine's own monitor, and root SSH end to end on real
-   hardware. Needs the next ISO build.
+   **Checked on an installed system** (2026-11-15, same ISO and VM as phase 6's
+   installed-system checks; handoff:
+   `docs/fellowship-nas-iso-verify-session-2026-11-15.md`):
+   - The console root line on the machine's own monitor: **pass** in both
+     states — "logs in here, at the console, for system administration" and,
+     after `fellowship-root-ssh on`, "SSH with a key, and here at the console"
+     (the issue timer redraws within its two-minute tick), and back after
+     `off`.
+   - Root SSH end to end: **pass** in the installed VM — `on` without a key
+     refused at the console; with a key added, root signs in over SSH from
+     another machine (the host, through the VM's network) with the key and
+     runs fnas; the root password over SSH is refused; `off` refuses the key
+     again. SSH has no hardware-dependent part, so the VM is the whole check;
+     a run on the Dell remains available to Chris but adds nothing for sshd.
+   - Root's console login with the installer-set password: **pass**.
