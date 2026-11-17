@@ -291,6 +291,7 @@ except Exception: pass' > "$1.csrf"
     echo "$r"
 }
 code() { tail -1 <<< "$1"; }
+body() { head -n -1 <<< "$1"; }
 K=$(mktemp); A=$(mktemp)
 login "$K" kim 'admin password 1' > /dev/null
 login "$A" ann 'ann password 22' > /dev/null
@@ -307,6 +308,33 @@ r=$(api "$K" POST /api/fnas '{"args":["ssh","set","--enabled","on"]}')
 grep -q "fellowship-nas-maintenance.*kim asked for: ssh set --enabled on" /var/log/auth.log \
     && pass "the journal says kim asked for it" || fail "the journal says kim asked for it"
 refuse "fnas itself refuses auth keys to a caller" fnas --caller kim auth keys kim
+
+echo "== the CPU figure tracks real load, and is one number everywhere"
+cores=$(nproc)
+# The container shares the host's counters, and the host is not idle: compare
+# against this machine's own baseline, not against zero
+baseline=$(fnas --json health | python3 -c 'import json,sys; print(json.load(sys.stdin)["system"]["cpu"])')
+yes > /dev/null & y1=$!
+yes > /dev/null & y2=$!
+sleep 12
+cli=$(fnas --json health | python3 -c 'import json,sys; print(json.load(sys.stdin)["system"]["cpu"])')
+r=$(api "$K" POST /api/fnas '{"args":["--json","health"]}')
+web=$(body "$r" | python3 -c 'import json,sys; print(json.loads(json.load(sys.stdin)["output"])["system"]["cpu"])')
+want=$((200 / cores))
+python3 -c "import sys; sys.exit(0 if abs($cli - $want) <= 10 else 1)" \
+    && pass "under two busy loops the figure is near 2 of $cores cores" || fail "under two busy loops the figure is near 2 of $cores cores: $cli want ~$want"
+python3 -c "import sys; sys.exit(0 if abs($cli - $web) <= 3 else 1)" \
+    && pass "the desktop and the command line read one number" || fail "the desktop and the command line read one number: $cli vs $web"
+kill $y1 $y2 2>/dev/null || true
+sleep 12
+idle=$(fnas --json health | python3 -c 'import json,sys; print(json.load(sys.stdin)["system"]["cpu"])')
+# The host's own load moves too, so accept either a fall from the loaded reading
+# or a return near this machine's baseline
+if [ "$idle" -le $((cli - 3)) ] || [ "$idle" -le $((baseline + 5)) ]; then
+    pass "the figure falls when the load stops"
+else
+    fail "the figure falls when the load stops: idle $idle, loaded $cli, baseline $baseline"
+fi
 
 echo "== the old model is unchanged"
 mv /var/lib/fellowship-nas/accounts.json /tmp/store.json

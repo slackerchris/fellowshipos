@@ -67,6 +67,15 @@ the same moment, and Proxmox showed 1.5% of 4 CPUs.
    2` on 4 CPUs it reads about 50%. The widget and the app always show the
    same number.
 
+**Fixed 2026-11-17** (Chris reported 0% at ~5% load and at ~1% idle): the helper
+now keeps one continuous sampler (2 s readings, 10 s smoothing, 5 min history)
+in `cpu.json`; `fnas health`, the Health page and the widget all read that one
+figure, and only a helper-less command line samples a second itself. iowait is
+idle, steal is shown apart, and the card says "of N processors" with a
+sparkline. Proven under real busy loops in `ssh-samba.sh` (figure near 2-of-N
+cores, CLI and desktop agree, falls at idle). The `mpstat`/`stress-ng` eyeball
+check above remains for the next Proxmox tour.
+
 ## Open: green stays green in every theme
 
 **Seen:** in Silverwater, Highwatch and Hearthfield, the memory ring, the CPU

@@ -10,6 +10,7 @@ import pkgutil
 import re
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -3919,11 +3920,29 @@ class Usage(unittest.TestCase):
 
 
 class Cpu(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.cpu_file = os.path.join(directory.name, "cpu.json")
+        self.health = {m.__name__: m for m in MODULES}["fellowship_nas.health"]
+
     def test_usage_is_a_percentage(self):
         # Sampled from this machine's own counters, so only the bounds are known
-        value = fnas.cpu_usage()
+        value = fnas.cpu_usage()["cpu"]
         self.assertGreaterEqual(value, 0)
         self.assertLessEqual(value, 100)
+
+    def test_a_running_helpers_figure_is_used_and_a_stale_one_is_not(self):
+        now = int(time.time())
+        fresh = {"time": now, "busy": 37.4, "steal": 2.2,
+                 "history": [{"time": now - 4, "busy": 30.0}, {"time": now - 2, "busy": 44.0}]}
+        with mock.patch.object(self.health, "CPU_SAMPLE_FILE", self.cpu_file):
+            fnas.write_json(self.cpu_file, fresh)
+            found = fnas.cpu_status()
+            self.assertEqual((found["cpu"], found["steal"]), (37, 2))
+            self.assertEqual(found["cpu_history"], [[now - 4, 30], [now - 2, 44]])
+            fnas.write_json(self.cpu_file, {**fresh, "time": now - 60})
+            self.assertEqual(fnas.cpu_status()["cpu_history"], [])
 
 
 class Space(unittest.TestCase):

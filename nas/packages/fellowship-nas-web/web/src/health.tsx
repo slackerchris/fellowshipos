@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { Check, Health as HealthData, PoolDetail, Problem, Projection, diskName, fnasJson, humanSize, plural, when } from "./api";
 import { STATE_BADGE } from "./sharing";
 import { Badge, Button, Card, Loading, Page, Usage, useLoad } from "./ui";
-import { ArcGauge, Dial, DotChart, Gauge, Kind, MetricIcon, NotEnoughHistory, RangePicker, TrendChart } from "./charts";
+import { ArcGauge, Dial, DotChart, Gauge, Kind, MetricIcon, NotEnoughHistory, RangePicker, Sparkline, TrendChart } from "./charts";
 import { useDiskFocus } from "./desktop/focus";
 
 const VERDICT = {
@@ -419,6 +419,10 @@ function Overview({ health, open }: { health: HealthData; open: (view: View) => 
             <div class="metrics">
                 <Metric icon="cpu" title="CPU usage" onOpen={() => open("system")}>
                     <ArcGauge percent={system.cpu} centre={`${system.cpu}%`} kind={level(system.cpu, 80, 95)} />
+                    <p class="small muted">of {plural(system.cpus, "processor")}{system.steal
+                        ? `, ${system.steal}% taken by the host` : ""}</p>
+                    {(system.cpu_history || []).length > 1 &&
+                        <Sparkline points={system.cpu_history} kind={level(system.cpu, 80, 95)} />}
                 </Metric>
                 <Metric icon="memory" title="Memory" onOpen={() => open("system")}>
                     <Gauge percent={memoryPercent} centre={`${memoryPercent}%`} size={128} stroke={14}

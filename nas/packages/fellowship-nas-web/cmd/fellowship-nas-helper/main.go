@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"fellowship-nas-web/internal/filechild"
 	"fellowship-nas-web/internal/helper"
@@ -293,6 +294,9 @@ func main() {
 
 	h := helper.New(helper.Config{Authenticate: authenticate, Lookup: lookup, Fnas: runFnas,
 		Child: runChild, Alert: alert, SignedOut: signedOutFile})
+	// One continuous CPU figure for the Health page, the widget and fnas health
+	sampler := &helper.CPUSampler{}
+	go sampler.Run(2*time.Second, filepath.Join(filepath.Dir(*storePath), "cpu.json"))
 	log.Printf("listening on %s", *socket)
 	for {
 		conn, err := listener.AcceptUnix()

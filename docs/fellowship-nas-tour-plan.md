@@ -160,7 +160,28 @@ still stored and still shown once, never typed back. Installer Go tests and the
 page's `tsc --noEmit` pass; a full install through the installer API without any
 type-back is proven by `nas/tests/vm/vm-delete-proof.sh`.
 
+## The CPU gauge — fixed, 2026-11-17
+
+Chris reported it again from Proxmox: 0% while the machine was at ~5%, and 0% at
+~1% idle. The cause was the one diagnosed on 11-14 and never built: every request
+sampled `/proc/stat` for 0.12 s inside a fresh `fnas` process, so the sample mostly
+measured that process starting and rounded to zero.
+
+Now the helper runs one continuous sampler (`internal/helper/cpu.go`): a reading
+every 2 s, a smoothed "now" over the last 10 s, and five minutes of history,
+written to `cpu.json` in the state dir. `fnas health` reads that figure when it is
+fresh (≤6 s) and only samples a whole second itself when no helper is running —
+so the Health page, the desktop widget and the command line show **one number**.
+iowait counts as idle; steal is reported apart ("N% taken by the host") because in
+a VM it is time the host took back. The Health CPU card says "of N processors"
+and draws the five-minute sparkline.
+
+Proven: unit tests for the tick math, the smoothing and the fresh/stale figure;
+Go tests for the sampler; and `ssh-samba.sh` under two real busy loops — the
+figure lands near 2-of-N cores, the desktop and the CLI agree within 3 points,
+and it falls back at idle. The Proxmox eyeball check against `mpstat` and
+`stress-ng` is the remaining done-when from the 11-14 plan, for the next tour.
+
 ## Out of scope here
 
-The CPU gauge (diagnosed, awaiting go-ahead), green-in-every-theme, and the black
-rectangles.
+Green-in-every-theme and the black rectangles.

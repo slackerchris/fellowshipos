@@ -20,8 +20,10 @@ SYSTEM_WARNING = 85
 SYSTEM_HIGH = 95
 REBOOT_FLAG = "/run/reboot-required"
 THERMAL_GLOB = "/sys/class/thermal/thermal_zone*/temp"
-# Long enough for the kernel's counters to move, short enough not to be noticed
-CPU_SAMPLE = 0.12
+# Only used when no running helper has a continuous figure: a whole second, so
+# the sample sees the machine rather than the act of sampling
+CPU_SAMPLE = 1.0
+CPU_SAMPLE_FILE = os.path.join(STATE_DIR, "cpu.json")
 # Units that may be stopped without anything being wrong
 MAY_STOP = {"smartmontools.service"}
 
@@ -309,28 +311,44 @@ def temperature_status():
     return max(temperatures) if temperatures else None
 
 
-def cpu_usage():
-    """The share of the processors busy just now, as a percentage. The kernel's
-    counters only ever grow, so two reads a moment apart are what says
-    anything about now."""
-    def ticks():
-        values = [int(n) for n in read_lines("/proc/stat")[0].split()[1:]]
-        # user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice
-        return sum(values), sum(values[3:5])
+def cpu_ticks():
+    values = [int(n) for n in read_lines("/proc/stat")[0].split()[1:]]
+    # user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice
+    return sum(values), sum(values[3:5]), values[7] if len(values) > 7 else 0
 
-    total_before, idle_before = ticks()
+
+def cpu_usage():
+    """A whole-second sample, for when no helper is running to keep a continuous
+    figure. iowait counts as idle; steal is reported apart."""
+    total_before, idle_before, steal_before = cpu_ticks()
     time.sleep(CPU_SAMPLE)
-    total_after, idle_after = ticks()
+    total_after, idle_after, steal_after = cpu_ticks()
     elapsed = total_after - total_before
-    busy = elapsed - (idle_after - idle_before)
-    return round(busy * 100 / elapsed) if elapsed > 0 else 0
+    if elapsed <= 0:
+        return {"cpu": 0, "steal": 0, "cpu_history": []}
+    return {"cpu": round((elapsed - (idle_after - idle_before)) * 100 / elapsed),
+            "steal": round((steal_after - steal_before) * 100 / elapsed),
+            "cpu_history": []}
+
+
+def cpu_status():
+    """The running helper's continuous CPU figure, so the Health page, the
+    desktop widget and this command line all read one number. A stale or absent
+    file means no helper is running, and a whole-second sample stands in."""
+    now = int(time.time())
+    with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
+        found = read_json(CPU_SAMPLE_FILE, None)
+        if found and now - found["time"] <= 6:
+            return {"cpu": round(found["busy"]), "steal": round(found.get("steal", 0)),
+                    "cpu_history": [[s["time"], round(s["busy"])] for s in found.get("history", [])]}
+    return cpu_usage()
 
 
 def system_status():
     return {"disk": system_disk(),
             "memory": memory_status(),
             "load": load_status(),
-            "cpu": cpu_usage(),
+            **cpu_status(),
             "cpus": os.cpu_count(),
             "uptime": int(float(read_lines("/proc/uptime")[0].split()[0])),
             "temperature": temperature_status(),

@@ -428,8 +428,12 @@ export interface SystemStatus {
     disk: { size: number; used: number };
     memory: { total: number; available: number };
     load: number[];
-    // Percent of the processors busy, sampled over a moment
+    // Percent of the processors busy, from the helper's continuous sampler
     cpu: number;
+    // Percent of time the host took back, in a VM; shown apart when nonzero
+    steal: number;
+    // [time, busy] over the last five minutes, for the sparkline
+    cpu_history: [number, number][];
     cpus: number;
     uptime: number;
     temperature: number | null;
