@@ -261,6 +261,7 @@
     box-shadow: var(--shadow);
 }
 .brand { display: flex; gap: 14px; align-items: center; margin-bottom: 6px; }
+.login-tree { width: 64px; height: 64px; object-fit: contain; flex-shrink: 0; }
 .brand h1 { font-family: var(--serif); font-weight: 600; font-size: 1.65rem; letter-spacing: 0.02em; }
 .brand h1 span { color: var(--gold); }
 

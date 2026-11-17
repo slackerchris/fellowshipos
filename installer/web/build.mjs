@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { THEMES, THEMES_DIR, themesCss } from "../../nas/packages/fellowship-nas-web/web/themes.mjs";
 
 mkdirSync("dist", { recursive: true });
+copyFileSync(join(THEMES_DIR, "branding", "fellowship-tree.png"), "dist/fellowship-tree.png");
 writeFileSync("dist/index.html", `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,6 +14,7 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>Install FellowshipOS</title>
+  <link rel="icon" href="fellowship-tree.png" type="image/png">
   <link rel="stylesheet" href="main.css">
   <link rel="stylesheet" href="themes.css">
 </head>

@@ -12,6 +12,7 @@ if (process.argv.includes("--themes")) {
 }
 
 mkdirSync("dist", { recursive: true });
+copyFileSync(join(THEMES_DIR, "branding", "fellowship-tree.png"), "dist/fellowship-tree.png");
 
 writeFileSync("dist/index.html", `<!DOCTYPE html>
 <html lang="en">
@@ -20,7 +21,7 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>FellowshipOS NAS</title>
-  <link rel="icon" href="mark.svg" type="image/svg+xml">
+  <link rel="icon" href="fellowship-tree.png" type="image/png">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="themes.css">
 </head>
@@ -29,13 +30,6 @@ writeFileSync("dist/index.html", `<!DOCTYPE html>
   <script src="main.js"></script>
 </body>
 </html>
-`);
-
-writeFileSync("dist/mark.svg", `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
-<rect x="2" y="2" width="44" height="44" rx="11" fill="#1b2923"/>
-<path d="M8 35l9-13 5 7 6-11 12 17z" fill="#29392f" stroke="#efe7d5" stroke-width="1.8" stroke-linejoin="round"/>
-<path d="M34 10l1.1 2.4 2.4 1.1-2.4 1.1L34 17l-1.1-2.4-2.4-1.1 2.4-1.1z" fill="#c5a465"/>
-</svg>
 `);
 
 // Misty mountains, drawn the same way every build from a fixed seed

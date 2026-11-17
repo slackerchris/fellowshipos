@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Session, login } from "../api";
-import { Mark } from "./icons";
 
 export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     const [user, setUser] = useState("");
@@ -26,7 +25,7 @@ export function Login({ onLogin }: { onLogin: (session: Session) => void }) {
                 }
             }}>
                 <div class="brand">
-                    <Mark />
+                    <img class="login-tree" src="fellowship-tree.png" alt="" width="64" height="64" />
                     <div>
                         <h1>FellowshipOS</h1>
                         <span class="muted small">NAS · {window.location.hostname}</span>
