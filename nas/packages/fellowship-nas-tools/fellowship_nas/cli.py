@@ -423,6 +423,9 @@ def build_parser():
                          help="the engine whose scan didn't list it; the one that did is used instead")
     export = pool.add_parser("export", help="export a pool")
     export.add_argument("name")
+    delete = pool.add_parser("delete", help="stop an array and wipe its disks; its shares must go first")
+    delete.add_argument("name")
+    delete.add_argument("--confirm", default="", help="type the pool's name")
     pool.add_parser("scrub", help="check every block on a pool now").add_argument("name")
     repair = pool.add_parser("repair", help="mend the blocks a check found to be wrong")
     repair.add_argument("name")
@@ -552,6 +555,13 @@ def build_parser():
     ssh_set.add_argument("--enabled", choices=ON_OFF, help="off: nobody can log in over SSH")
     ssh_set.add_argument("--passwords", choices=ON_OFF, help="off: keys only, once an administrator has one")
     ssh_.add_parser("refresh", help="rewrite sshd's settings and who is in nas-ssh")
+
+    service = area.add_parser("service", help="start, stop and restart the sharing services").add_subparsers(
+        dest="action", required=True)
+    service.add_parser("list", help="the services the desktop can control, with their live state")
+    for action in ("start", "stop", "restart"):
+        found = service.add_parser(action, help=f"{action} one service")
+        found.add_argument("name", choices=tuple(services.CONTROLLED))
 
     look_ = area.add_parser("look", help="how a person likes the desktop: light, dark and the theme"
                             ).add_subparsers(dest="action", required=True)
@@ -720,6 +730,13 @@ def build_parser():
     return parser
 
 
+def print_services(found):
+    for service in found:
+        print(f"{service['name']}  {service['title']}  {service['detail']}")
+        if service.get("also_stops"):
+            print("    stopping this also stops: " + ", ".join(service["also_stops"]))
+
+
 def dispatch(args):
     def show(data, printer, *extra):
         if args.json:
@@ -744,6 +761,11 @@ def dispatch(args):
             show(ssh.set_settings(switch(args.enabled), switch(args.passwords)), print_ssh)
         else:
             ssh.refresh()
+    elif args.area == "service":
+        if args.action == "list":
+            show(services.controlled(), print_services)
+        else:
+            show(services.control(args.name, args.action), lambda entry: print_services([entry]))
     elif args.area == "look":
         dispatch_look(args, show)
     elif args.area == "sharing":
@@ -885,6 +907,13 @@ def dispatch_pool(args, show):
     elif args.action == "export":
         pools.engine_for(args.name).export_pool(args.name)
         print(f"Exported {args.name}")
+    elif args.action == "delete":
+        engine = pools.engine_for(args.name)
+        if not hasattr(engine, "delete_pool"):
+            kind = next(name for name, found in pools.ENGINES.items() if found is engine)
+            raise FnasError(f"deleting a {pools.engine_title(kind)} pool isn't built yet; export keeps it")
+        engine.delete_pool(args.name, args.confirm)
+        print(f"Deleted {args.name}; its disks are empty again")
     elif args.action == "scrub":
         started(pools.engine_for(args.name).scrub_pool(args.name))
     elif args.action == "repair":
@@ -1193,7 +1222,7 @@ def main(argv=None):
             check_caller(args, [a for a in argv[argv.index(args.area) + 1:] if a != getattr(args, "action", None)])
         dispatch(args)
         if args.area not in ("check", "health", "system", "job", "setup", "look", "updates", "auth", "accounts",
-                             "network") and \
+                             "network", "service") and \
                 args.action not in READ_ONLY_ACTIONS:
             config.after_change()
     except FnasError as error:

@@ -1,6 +1,8 @@
 """Every way to share files and every service the NAS runs, with whether each
 is running, so the desktop can show them all, built or not."""
-from .common import run
+import os
+
+from .common import STATE_DIR, FnasError, read_json, run, write_json
 from . import accounts, shares, ssh
 
 
@@ -39,6 +41,54 @@ def ssh_expected():
     return ssh.settings()["enabled"] or (accounts.is_separated() and ssh.root_ssh())
 
 
+# Services the owner may start, stop and restart from the desktop. The web
+# server and the helper that serve the click are deliberately not here.
+CONTROLLED = {"smb": ("smbd.service", "Samba"), "nfs": ("nfs-server.service", "NFS"),
+              "ssh": ("ssh.service", "SSH daemon")}
+SERVICE_STATE = os.path.join(STATE_DIR, "services.json")
+
+
+def owner_stopped(unit):
+    """Whether the owner stopped this on purpose, so Health stays quiet about it."""
+    return bool(read_json(SERVICE_STATE, {}).get(unit))
+
+
+def controlled():
+    """The services the desktop can control, with their live state. A stop the
+    owner asked for reads as off, not as a failure."""
+    shown = []
+    for name, (unit, title) in CONTROLLED.items():
+        state = unit_state(unit)
+        detail = {"running": "Running", "stopped": "Stopped", "failed": "Failed",
+                  "missing": "Not installed"}[state]
+        if state == "stopped" and (owner_stopped(unit) or (unit == ssh.UNIT and not ssh_expected())):
+            state, detail = "off", "Stopped on purpose"
+        entry = {"name": name, "unit": unit, "title": title, "state": state, "detail": detail}
+        if name == "ssh":
+            # One daemon serves both: stopping it takes share SFTP offline too
+            entry["also_stops"] = ["sftp"]
+        shown.append(entry)
+    return shown
+
+
+def control(name, action):
+    """Start, stop or restart one of the controlled services, remembering a stop
+    the owner asked for so Health can tell it from a crash."""
+    if name not in CONTROLLED:
+        raise FnasError(f"no such service here: {name}")
+    if action not in ("start", "stop", "restart"):
+        raise FnasError(f"unknown service action: {action}")
+    unit = CONTROLLED[name][0]
+    run("systemctl", action, unit)
+    marks = read_json(SERVICE_STATE, {})
+    if action == "stop":
+        marks[unit] = True
+    else:
+        marks.pop(unit, None)
+    write_json(SERVICE_STATE, marks)
+    return next(found for found in controlled() if found["name"] == name)
+
+
 def unit_state(unit):
     """running, stopped, failed or missing, read from systemd. A service turned off on purpose is "off"."""
     shown = run("systemctl", "show", "-p", "LoadState,ActiveState,Result", unit, check=False).stdout
@@ -55,7 +105,8 @@ def protocols():
     found = shares.list_shares()
     shown = []
     for name, title, use, unit, phase in PROTOCOLS:
-        entry = {"name": name, "title": title, "for": use, "shares": [s["name"] for s in found if s.get(name)]}
+        entry = {"name": name, "title": title, "for": use, "unit": unit,
+                 "shares": [s["name"] for s in found if s.get(name)]}
         if phase == "later":
             entry.update(state="later", detail="Planned for after the storage engines")
         elif phase:
@@ -72,6 +123,8 @@ def protocols():
             # The daemon may be up for root's SSH while SFTP itself is off
             if name == "sftp" and not ssh.settings()["enabled"]:
                 entry.update(state="off", detail="Turned off in Settings")
+            if state == "stopped" and owner_stopped(unit):
+                entry.update(state="off", detail="Stopped on purpose")
         shown.append(entry)
     return shown
 
@@ -84,7 +137,7 @@ def system_services():
         # smartd stops by itself when no disk reports SMART data, as in most VMs
         if unit == "smartmontools.service" and state == "stopped":
             detail = "Not running. It stops by itself when no disk reports SMART data"
-        if unit == ssh.UNIT and not ssh_expected():
+        if unit == ssh.UNIT and (not ssh_expected() or owner_stopped(unit)):
             state, detail = "off", "Turned off in Settings: SFTP and root SSH are both off"
         shown.append({"unit": unit, "title": title, "does": does, "state": state, "detail": detail})
     return shown

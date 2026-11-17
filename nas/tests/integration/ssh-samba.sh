@@ -40,7 +40,33 @@ apt-get update -qq > /dev/null
 # and their systemctl calls are answered by a stand-in that does nothing
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
 dpkg-divert --quiet --local --rename --add /usr/bin/systemctl
-printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
+# A systemctl stand-in that really stops and starts the three controlled
+# daemons, and answers `show` from a state file, so service control and the
+# state Health reads are the real path, not a stub that always says yes
+cat > /usr/bin/systemctl <<'STUB'
+#!/bin/sh
+case "$1" in
+  show)
+    unit=""
+    for a in "$@"; do case "$a" in *.service|*.timer) unit=$a ;; esac; done
+    state=$(cat "/tmp/unit-state/$unit" 2>/dev/null)
+    if [ -z "$state" ]; then
+      case $unit in nfs-server.service) state=inactive ;; *) state=active ;; esac
+    fi
+    printf 'LoadState=loaded\nActiveState=%s\nResult=success\n' "$state"
+    ;;
+  start|restart)
+    mkdir -p /tmp/unit-state; echo active > "/tmp/unit-state/$2"
+    case $2 in smbd.service) smbd -D ;; ssh.service) /usr/sbin/sshd ;; esac
+    ;;
+  stop)
+    mkdir -p /tmp/unit-state; echo inactive > "/tmp/unit-state/$2"
+    case $2 in smbd.service) pkill -x smbd ;; ssh.service) pkill -x sshd ;; esac
+    ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x /usr/bin/systemctl
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fellowship-nas-tools fellowship-nas-web \
     fellowship-nas-smb smbclient openssh-server curl rsyslog > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
 rsyslogd; sleep 1
@@ -208,6 +234,32 @@ sys.exit(0 if next(s for s in services if s["unit"] == "ssh.service")["state"] =
     && pass "both off: the daemon reads as turned off" || fail "both off: the daemon reads as turned off"
 fnas ssh set --enabled on > /dev/null
 reload_sshd
+
+echo "== the owner can stop and start services, and Health knows it was on purpose"
+fnas service stop smb > /dev/null
+refuse "SMB stops answering when the owner stops it" smbclient //127.0.0.1/t -U 'kim%admin password 1' -c ls
+expect "SFTP still works while Samba is stopped" sftp_pw kim 'admin password 1'
+fnas --json health | python3 -c 'import json,sys
+sys.exit(0 if not [p for p in json.load(sys.stdin)["problems"] if p["key"] == "service-smb"] else 1)' \
+    && pass "Health stays quiet about a stop the owner asked for" || fail "Health stays quiet about a stop the owner asked for"
+fnas --json service list | python3 -c 'import json,sys
+sys.exit(0 if next(s for s in json.load(sys.stdin) if s["name"] == "smb")["state"] == "off" else 1)' \
+    && pass "the stopped service reads as off, not failed" || fail "the stopped service reads as off, not failed"
+fnas service start smb > /dev/null
+expect "SMB answers again once started" smbclient //127.0.0.1/t -U 'kim%admin password 1' -c ls
+fnas service stop ssh > /dev/null
+refuse "SFTP goes offline with the daemon" sftp_pw kim 'admin password 1'
+fnas --json health | python3 -c 'import json,sys
+problems = json.load(sys.stdin)["problems"]
+sys.exit(0 if not [p for p in problems if p["key"] in ("service-ssh.service", "service-sftp")] else 1)' \
+    && pass "Health stays quiet about the daemon stop too" || fail "Health stays quiet about the daemon stop too"
+fnas --json service list | python3 -c 'import json,sys
+sys.exit(0 if next(s for s in json.load(sys.stdin) if s["name"] == "ssh")["also_stops"] == ["sftp"] else 1)' \
+    && pass "the panel is told SFTP goes with the daemon" || fail "the panel is told SFTP goes with the daemon"
+fnas service start ssh > /dev/null
+expect "SFTP is back once the daemon starts" sftp_pw kim 'admin password 1'
+refuse "a service outside the list is refused" fnas service stop web
+refuse "an unknown action is refused" fnas service reload smb
 
 echo "== a Windows password change is refused, and nothing drifts (ruling 1)"
 printf 'admin password 1\nwindows try 88\nwindows try 88\n' | smbpasswd -r 127.0.0.1 -U kim > /dev/null 2>&1 \

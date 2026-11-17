@@ -866,6 +866,37 @@ def export_pool(name):
     save_conf()
 
 
+def delete_pool(name, confirm):
+    """Stop the array and wipe its disks' superblocks, so they read as empty and
+    can build a new array. Shares must go first: a share pointing at a wiped pool
+    is a broken promise, and removing people's shares is not this command's call."""
+    pools.find_pool(name)
+    using = [s["name"] for s in shares.list_shares() if s.get("pool") == name]
+    if using:
+        raise FnasError(f"{name} still holds {len(using)} share" + ("" if len(using) == 1 else "s")
+                        + ": " + ", ".join(using) + ". Remove them in Shares first.")
+    status = pool_status(name)
+    wiped = [d["path"] for d in member_disks(status) + status["spares"] if d["path"]]
+    if confirm != name:
+        raise FnasError(f"deleting {name} wipes " + ", ".join(wiped)
+                        + f'\nconfirm by passing --confirm "{name}"')
+    # NFS and Samba hold the shares open, so they let go first
+    shares.write_config(leaving=name)
+    result = run("umount", pools.mountpoint(name), check=False)
+    if result.returncode != 0:
+        shares.write_config()
+        raise FnasError(f"{result.stderr.strip()}: disconnect any clients and try again")
+    forget_mount(name)
+    run("mdadm", "--stop", array_device(name), check=False)
+    for path in wiped:
+        run("mdadm", "--zero-superblock", path, check=False)
+    save_conf()
+    try:
+        os.rmdir(pools.mountpoint(name))
+    except OSError:
+        pass
+
+
 def import_pool(pool, readonly, force=False):
     found = [p for p in scan_pools() if pool in (p.get("pool"), p.get("uuid"))]
     if not found:

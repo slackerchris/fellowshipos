@@ -1,7 +1,7 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import {
-    CheckSchedule, NetworkState, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus,
+    CheckSchedule, NetworkState, ServiceEntry, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus,
     changeOwnPassword, endSession,
     fnas, fnasJson,
     humanSize, jobStarted,
@@ -717,6 +717,58 @@ function Network() {
     );
 }
 
+/** The sharing services the owner can start, stop and restart, with live state.
+    A stop the owner asked for is not a fault, and Health stays quiet about it. */
+function Services() {
+    const rows = useLoad(() => fnasJson<ServiceEntry[]>(["service", "list"]));
+    const action = useAction(rows.reload);
+    const [asking, setAsking] = useState<{ service: ServiceEntry; action: "stop" | "restart" } | null>(null);
+    return (
+        <Card title="Services" actions={<Button onClick={rows.reload}>Refresh</Button>}>
+            <p class="muted small row-intro">The services that serve your shares. Stopping one on purpose is not a
+                fault: Health stays quiet until it is meant to run again.</p>
+            <Loading loaded={rows}>{() => (
+                <div class="stack">
+                    {rows.data!.map(service => (
+                        <div class="row" key={service.name}>
+                            <strong>{service.title}</strong>
+                            <Badge kind={service.state === "running" ? "good" : service.state === "off" ? "neutral" : "warning"}>
+                                {service.detail}</Badge>
+                            <span class="row">
+                                <Button busy={action.busy} disabled={service.state === "running"}
+                                        onClick={() => action.run(() => fnas(["service", "start", service.name]))}>Start</Button>
+                                <Button busy={action.busy} disabled={service.state !== "running"}
+                                        onClick={() => setAsking({ service, action: "stop" })}>Stop</Button>
+                                <Button busy={action.busy} disabled={service.state !== "running"}
+                                        onClick={() => setAsking({ service, action: "restart" })}>Restart</Button>
+                            </span>
+                        </div>
+                    ))}
+                    <Result outcome={action.outcome} />
+                </div>
+            )}</Loading>
+            {asking && (
+                <Confirm title={`${asking.action === "stop" ? "Stop" : "Restart"} ${asking.service.title}`}
+                         phrase={asking.service.name} busy={action.busy} outcome={action.outcome}
+                         onCancel={() => { setAsking(null); action.clear(); }}
+                         onConfirm={() => action.run(async () => {
+                             const output = await fnas(["service", asking.action, asking.service.name]);
+                             setAsking(null);
+                             return output;
+                         })}>
+                    {asking.service.also_stops?.length ? (
+                        <p>This one daemon also serves {asking.service.also_stops.join(", ")}. Stopping it takes
+                            {" "}{asking.service.also_stops.join(", ")} offline too, until it is started again. The
+                            SFTP switch in SSH settings is not changed.</p>
+                    ) : (
+                        <p>Shares stop answering over {asking.service.title} until it is started again.</p>
+                    )}
+                </Confirm>
+            )}
+        </Card>
+    );
+}
+
 const SECTIONS = [
     { id: "account", label: "Your account", admin: false },
     { id: "look", label: "Appearance", admin: false },
@@ -728,6 +780,7 @@ const SECTIONS = [
     { id: "updates", label: "Updates", admin: true },
     { id: "checks", label: "Storage checks", admin: true },
     { id: "ssh", label: "SSH", admin: true },
+    { id: "services", label: "Services", admin: true },
     { id: "power", label: "Power", admin: true },
     { id: "setup", label: "Setup", admin: true },
 ] as const;
@@ -790,6 +843,7 @@ export function Settings() {
                 {section === "updates" && <Updates />}
                 {section === "checks" && <StorageChecks />}
                 {section === "ssh" && <Ssh />}
+                {section === "services" && <Services />}
                 {section === "power" && <Power />}
                 {section === "setup" && <SetupAgain />}
             </Page>

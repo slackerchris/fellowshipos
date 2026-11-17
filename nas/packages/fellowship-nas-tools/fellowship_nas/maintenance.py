@@ -18,11 +18,12 @@ from .common import run
 NAS = {
     "disk": ("list", "identify"),
     "pool": ("list", "scan", "engines", "status", "details", "layouts", "create", "grow", "replace", "remove-spare",
-             "import", "export", "scrub", "repair", "schedules", "schedule", "scrub-all"),
+             "import", "export", "delete", "scrub", "repair", "schedules", "schedule", "scrub-all"),
     "share": ("list", "create", "set", "access", "smb", "nfs", "refresh", "services", "delete"),
     "sharing": ("show", "smb", "nfs"),
     "user": ("list", "shares", "create", "set", "password", "smb-password", "keys", "remove"),
     "look": ("show", "set"),
+    "service": ("list", "start", "stop", "restart"),
     "group": ("list", "create", "members", "rename", "remove"),
     "lan": ("show", "set"),
     "snapshot": ("list", "policy"),

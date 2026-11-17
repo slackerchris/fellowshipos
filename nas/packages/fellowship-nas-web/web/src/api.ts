@@ -623,6 +623,17 @@ export interface Alert {
     dismissed?: boolean;
 }
 
+/** A service the desktop can start, stop and restart, with its live state. */
+export interface ServiceEntry {
+    name: string;
+    unit: string;
+    title: string;
+    state: "running" | "stopped" | "failed" | "missing" | "off";
+    detail: string;
+    // What else goes offline with it: the SSH daemon also serves SFTP
+    also_stops?: string[];
+}
+
 export interface Channels {
     email?: { to: string; host: string; port: number; user: string; tls: string; needs_password: boolean };
     ntfy?: { url: string; token: boolean };

@@ -1,9 +1,10 @@
-import { useState } from "preact/hooks";
+import { useContext, useState } from "preact/hooks";
 import { PoolDetailsView } from "./pooldetails";
 import {
-    Disk, Engine, Growth, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Vdev, diskName, fill, fnas, fnasJson, humanSize,
-    leaves, loadEngines, when,
+    Disk, Engine, Growth, Job, LAYOUT_NAMES, jobStarted, LayoutOption, Pool, PoolStatus, Share, Vdev, diskName, fill, fnas, fnasJson,
+    humanSize, leaves, loadEngines, when,
 } from "./api";
+import { DesktopContext } from "./desktop/context";
 import { useJobsFinished } from "./jobs";
 import { CreatePool, DiskPicker, ImportPools, erasePhrase, usableDisks } from "./pools";
 import { Badge, Button, Card, Confirm, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
@@ -272,6 +273,11 @@ function PoolCard({ pool, engine, disks, reload, details }: {
     const [repairing, setRepairing] = useState(false);
     const action = useAction(() => { status.reload(); reload(); });
     const exportAction = useAction(reload);
+    const deleteAction = useAction(reload);
+    const [deleting, setDeleting] = useState(false);
+    const shares = useLoad(() => fnasJson<Share[]>(["share", "list"]));
+    const desktop = useContext(DesktopContext);
+    const using = (shares.data || []).filter(share => share.pool === pool.name);
     const finished = (text: string) => {
         setReplacing(null);
         setGrowing(false);
@@ -373,6 +379,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                             jobStarted(await fnas(["pool", "scrub", pool.name])))}>{engine.check_button}</Button>
                     )}
                     <Button onClick={() => setExporting(true)}>Export</Button>
+                    {engine.name === "mdadm" && <Button onClick={() => setDeleting(true)}>Delete array…</Button>}
                 </div>
                 {!pool.readonly && <p class="muted small">{fill(engine.check_text, { pool: pool.name })}</p>}
                 {repairing && (
@@ -397,6 +404,32 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                              return output;
                          })}>
                     <p>Its shares stop and the pool is closed so its disks can be moved. Nothing is erased, and it can be imported again.</p>
+                </Confirm>
+            )}
+            {deleting && (
+                <Confirm title="Delete array" phrase={pool.name} busy={deleteAction.busy} outcome={deleteAction.outcome}
+                         onCancel={() => { setDeleting(false); deleteAction.clear(); }}
+                         onConfirm={typed => deleteAction.run(async () => {
+                             const output = await fnas(["pool", "delete", pool.name, "--confirm", typed]);
+                             setDeleting(false);
+                             return output;
+                         })}>
+                    {using.length ? (
+                        <div class="stack">
+                            <Notice kind="warning">{pool.name} still holds {using.map(share => share.name).join(", ")}.
+                                Remove them first: deleting wipes the disks they live on.</Notice>
+                            <div class="row"><Button onClick={() => desktop.open("shares")}>Open these shares</Button></div>
+                        </div>
+                    ) : (
+                        <div class="stack">
+                            <p>This stops the array and wipes its superblocks. Everything on {pool.name} is gone, and these
+                                disks read as empty so they can build a new array:</p>
+                            <ul class="small mono">
+                                {[...(status.data?.groups || []).flatMap(group => group.disks || []),
+                                  ...(status.data?.spares || [])].map(member => <li key={member.path}>{member.path}</li>)}
+                            </ul>
+                        </div>
+                    )}
                 </Confirm>
             )}
         </Card>

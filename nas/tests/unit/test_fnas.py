@@ -4659,3 +4659,127 @@ class JobReasons(unittest.TestCase):
                 mock.patch("builtins.open", side_effect=OSError(22, "Invalid argument")):
             with self.assertRaisesRegex(fnas.FnasError, "kernel refused to start the check on tank"):
                 self.mdadm.scrub_pool("tank")
+
+
+class PoolDelete(unittest.TestCase):
+    """Deleting an array refuses while shares live on it, names the disks it
+    would wipe, and needs the pool's own name typed back."""
+
+    def setUp(self):
+        self.mdadm = {m.__name__: m for m in MODULES}["fellowship_nas.engines.mdadm"]
+        self.status = {"groups": [{"disks": [{"path": "/dev/sdb"}, {"path": "/dev/sdc"}]}], "spares": []}
+
+    def guarded(self, shares):
+        return (mock.patch.object(self.mdadm.pools, "find_pool", lambda name: {"name": name}),
+                mock.patch.object(self.mdadm.shares, "list_shares", lambda: shares),
+                mock.patch.object(self.mdadm, "pool_status", lambda name: self.status),
+                mock.patch.object(self.mdadm, "member_disks", lambda status: status["groups"][0]["disks"]))
+
+    def test_delete_refuses_while_shares_live_on_the_pool(self):
+        patches = self.guarded([{"name": "docs", "pool": "tank"}, {"name": "media", "pool": "tank"}])
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            with self.assertRaisesRegex(fnas.FnasError,
+                                        "still holds 2 shares: docs, media. Remove them in Shares first"):
+                self.mdadm.delete_pool("tank", "tank")
+
+    def test_delete_needs_the_pools_name_and_lists_the_disks(self):
+        patches = self.guarded([])
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            with self.assertRaisesRegex(fnas.FnasError, "wipes /dev/sdb, /dev/sdc"):
+                self.mdadm.delete_pool("tank", "wrong")
+
+    def test_delete_stops_the_array_and_wipes_its_disks(self):
+        calls = []
+        patches = self.guarded([]) + (
+            mock.patch.object(self.mdadm, "run",
+                              lambda *c, **kw: calls.append(c) or SimpleNamespace(stdout="", stderr="", returncode=0)),
+            mock.patch.object(self.mdadm.shares, "write_config", lambda **kw: None),
+            mock.patch.object(self.mdadm, "array_device", lambda name: "/dev/md0"),
+            mock.patch.object(self.mdadm, "forget_mount", lambda name: calls.append(("forget_mount", name))),
+            mock.patch.object(self.mdadm, "save_conf", lambda: None))
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            self.mdadm.delete_pool("tank", "tank")
+        self.assertIn(("umount", "/mnt/tank"), calls)
+        self.assertIn(("mdadm", "--stop", "/dev/md0"), calls)
+        self.assertIn(("mdadm", "--zero-superblock", "/dev/sdb"), calls)
+        self.assertIn(("mdadm", "--zero-superblock", "/dev/sdc"), calls)
+        self.assertIn(("forget_mount", "tank"), calls)
+
+
+class ServiceControl(unittest.TestCase):
+    """Start, stop and restart for the services an owner manages; a stop they
+    asked for is off, not a failure, and a crash without a mark still is one."""
+
+    def setUp(self):
+        by_module = {m.__name__: m for m in MODULES}
+        self.services = by_module["fellowship_nas.services"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        patcher = mock.patch.object(self.services, "SERVICE_STATE", os.path.join(directory.name, "services.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.calls = []
+
+    def shown(self, state, sftp=True):
+        return (mock.patch.object(self.services, "unit_state", lambda unit: state),
+                mock.patch.object(self.services.ssh, "settings", lambda: {"enabled": sftp, "passwords": True}),
+                mock.patch.object(self.services.ssh, "root_ssh", lambda: False),
+                mock.patch.object(self.services.accounts, "is_separated", lambda: True),
+                mock.patch.object(self.services, "run",
+                                  lambda *c, **kw: self.calls.append(c) or SimpleNamespace(stdout="", stderr="",
+                                                                                           returncode=0)),
+                mock.patch.object(self.services.shares, "list_shares",
+                                  lambda: [{"name": "docs", "smb": True, "sftp": True}]))
+
+    def entry(self, name):
+        return next(s for s in self.services.controlled() if s["name"] == name)
+
+    def test_a_stop_is_remembered_and_health_stays_quiet(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in self.shown("stopped"):
+                stack.enter_context(patcher)
+            self.services.control("smb", "stop")
+            self.assertIn(("systemctl", "stop", "smbd.service"), self.calls)
+            self.assertTrue(self.services.owner_stopped("smbd.service"))
+            self.assertEqual(self.entry("smb")["state"], "off")
+            self.assertEqual(next(p for p in self.services.protocols() if p["name"] == "smb")["state"], "off")
+            self.assertFalse([f for f in fnas.service_findings() if f["key"] == "service-smb"])
+
+    def test_starting_clears_the_mark(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in self.shown("stopped"):
+                stack.enter_context(patcher)
+            self.services.control("smb", "stop")
+            self.services.control("smb", "start")
+            self.assertFalse(self.services.owner_stopped("smbd.service"))
+            self.assertIn(("systemctl", "start", "smbd.service"), self.calls)
+
+    def test_stopping_the_daemon_says_sftp_goes_with_it(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in self.shown("stopped"):
+                stack.enter_context(patcher)
+            self.services.control("ssh", "stop")
+            self.assertEqual(self.entry("ssh")["also_stops"], ["sftp"])
+            self.assertEqual(self.entry("ssh")["state"], "off")
+            self.assertEqual(next(p for p in self.services.protocols() if p["name"] == "sftp")["state"], "off")
+            self.assertFalse([f for f in fnas.service_findings()
+                              if f["key"] in ("service-ssh.service", "service-sftp")])
+
+    def test_a_crash_without_a_mark_is_still_a_failure(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in self.shown("stopped"):
+                stack.enter_context(patcher)
+            self.assertEqual(self.entry("smb")["state"], "stopped")
+            self.assertIn("service-smb", [f["key"] for f in fnas.service_findings()])
+
+    def test_only_the_listed_services_and_actions(self):
+        with self.assertRaisesRegex(fnas.FnasError, "no such service"):
+            self.services.control("web", "stop")
+        with self.assertRaisesRegex(fnas.FnasError, "unknown service action"):
+            self.services.control("smb", "reload")
