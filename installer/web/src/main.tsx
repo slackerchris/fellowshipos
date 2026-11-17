@@ -11,12 +11,7 @@ const STEPS = ["Disk", "Space", "You", "Install"];
 
 function Mark() {
     return (
-        <svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true">
-            <rect x="2" y="2" width="44" height="44" rx="11" fill="#1b2923" />
-            <rect x="2.6" y="2.6" width="42.8" height="42.8" rx="10.4" fill="none" stroke="#c5a465" stroke-width="1.2" />
-            <path d="M8 35l9-13 5 7 6-11 12 17z" fill="#29392f" stroke="#efe7d5" stroke-width="1.8" stroke-linejoin="round" />
-            <path d="M34 10l1.1 2.4 2.4 1.1-2.4 1.1L34 17l-1.1-2.4-2.4-1.1 2.4-1.1z" fill="#c5a465" />
-        </svg>
+        <img class="installer-tree" src="fellowship-tree.png" alt="" width="64" height="64" />
     );
 }
 
@@ -299,10 +294,12 @@ function RootPassword({ settings, rootAgain, onChange, onRootAgain }: {
 
 /** The recovery key, shown once to be saved: it is the one way back in if both
     root's password and the NAS admin's are lost. */
-function RecoveryKey({ local, keyText }: { local: boolean; keyText: string }) {
+function RecoveryKey({ keyText }: { keyText: string }) {
     const save = () => {
-        const blob = new Blob([`FellowshipOS NAS recovery key\n\n${keyText}\n\nKeep this somewhere other than the NAS. `
-            + `At the boot menu, FellowshipOS recovery asks for it.\n`], { type: "text/plain" });
+        const blob = new Blob([`FellowshipOS NAS recovery key\n\n${keyText}\n\nKeep this file away from the NAS.\n`
+            + `You need it only if you forget both your password and root's: at the boot menu,\n`
+            + `FellowshipOS recovery asks for it and lets you set new passwords.\n`
+            + `Starting up and signing in normally never ask for it.\n`], { type: "text/plain" });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = "fellowship-recovery-key.txt";
@@ -311,18 +308,23 @@ function RecoveryKey({ local, keyText }: { local: boolean; keyText: string }) {
     };
     return (
         <div class="stack recovery-key">
-            <p class="small"><strong>Your recovery key.</strong> If root's password and yours are both lost, FellowshipOS
-                recovery in the boot menu asks for this, and nothing else gets you back in. It is shown only now.</p>
+            <p class="small"><strong>Save this key before you install.</strong> It is shown only on this screen.</p>
             <p class="mono recovery-key-text">{keyText || "…"}</p>
+            <ol class="small recovery-steps">
+                <li><strong>Keep a copy off this NAS.</strong> Click “Save as text file” and keep the file on your
+                    computer, or write the key on paper. A copy saved on the NAS itself is lost with it.</li>
+                <li><strong>When you would need it:</strong> only if you forget both your password and root's. Then, at
+                    the boot menu, “FellowshipOS recovery” asks for it and lets you set new passwords.</li>
+                <li><strong>Otherwise you never type it.</strong> Starting up and signing in don't ask for it. If the
+                    key and both passwords are all lost, the NAS can only be reinstalled.</li>
+            </ol>
             <div class="row"><button class="button" type="button" onClick={save}>Save as text file</button></div>
-            {local && <p class="small muted">Or write it down or photograph it. Keep it away from the NAS: a copy
-                saved on the NAS itself is lost with it.</p>}
         </div>
     );
 }
 
-function Confirm({ disk, layout, settings, edition, separated, local, onInstall }: {
-    disk: Disk; layout: Layout; settings: Settings; edition?: string; separated: boolean; local: boolean;
+function Confirm({ disk, layout, settings, edition, separated, onInstall }: {
+    disk: Disk; layout: Layout; settings: Settings; edition?: string; separated: boolean;
     onInstall: (typed: string) => Promise<void>;
 }) {
     const [error, setError] = useState("");
@@ -363,7 +365,7 @@ function Confirm({ disk, layout, settings, edition, separated, local, onInstall 
             </table>
             {edition === "nas" && <p class="muted small">Everything the NAS needs is on this disk once it's installed:
                 the first start needs no network and asks nothing.</p>}
-            {separated && <RecoveryKey local={local} keyText={keyText} />}
+            {separated && <RecoveryKey keyText={keyText} />}
             {error && <Notice kind="error">{error}</Notice>}
             <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
@@ -521,7 +523,7 @@ function Installer({ greeting }: { greeting: Hello }) {
             )}
             {step === 3 && canInstall && disk && layout && (
                 <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition}
-                         separated={!!info.separated} local={!!greeting.local} onInstall={async (typed) => {
+                         separated={!!info.separated} onInstall={async (typed) => {
                     await install({ ...settings, disk: disk.path, system: layout.system }, typed);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />

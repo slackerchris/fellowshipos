@@ -26,6 +26,7 @@ body { overflow: auto; }
     box-shadow: var(--shadow);
 }
 .brand { display: flex; gap: 14px; align-items: center; }
+.installer-tree { width: 64px; height: 64px; object-fit: contain; flex-shrink: 0; }
 .brand h1 { font-family: var(--serif); font-weight: 600; font-size: 1.65rem; letter-spacing: 0.02em; }
 .nav { justify-content: flex-end; }
 
@@ -146,3 +147,4 @@ th { width: 120px; }
 /* Shown once, to be written down: large, spaced and easy to copy by hand */
 .recovery-key { border: 1px solid var(--gold); border-radius: 9px; padding: 14px; background: var(--surface-sunk); }
 .recovery-key-text { font-size: 1.35rem; letter-spacing: 0.08em; word-spacing: 0.2em; user-select: all; }
+.recovery-steps { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
