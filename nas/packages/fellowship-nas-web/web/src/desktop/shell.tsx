@@ -1,7 +1,7 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnas, fnasJson, humanSize, logout, plural, when } from "../api";
-import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
+import { SEVERITY, SEVERITY_WORD, Severity, level, measureLevel, severityOf } from "../health";
 import { MODES, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
 import { SessionContext } from "../settings";
@@ -138,7 +138,7 @@ function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => 
                     return (
                         <span class="mini-pool" key={pool.name}>
                             <span class="mini-pool-name">{pool.name}</span>
-                            <span class="bar"><span class={`fill ${level(fill)}`} style={{ width: `${fill}%` }} /></span>
+                            <span class="bar"><span class={`fill ${measureLevel(fill)}`} style={{ width: `${fill}%` }} /></span>
                             <span class={`chip ${healthy ? "good" : building ? "warning" : "bad"}`}>
                                 {healthy && <MetricIcon name="check" size={13} />}
                                 {healthy ? "Healthy" : building ? "Building" : pool.health.toLowerCase()}

@@ -1,18 +1,15 @@
 @import "./desktop.css";
 
-/* The colours that don't change with the theme: chart series, status and
-   severity, and shadows. The theme colours (window, panel, text, accent and
-   everything worked out from them) are in themes.css, built from the shared
-   theme files in themes/ at the top of the repository. */
+/* The colours that don't change with the theme: chart series, severity and
+   shadows. The theme colours (window, panel, text, accent, the status colours
+   good/warning/bad and everything worked out from them) are in themes.css,
+   built from the shared theme files in themes/ at the top of the repository. */
 :root {
     /* Chart series, checked for colour blindness and contrast with the dataviz validator */
     --series-1: #2a78d6;
     --series-2: #1baf7a;
     --series-3: #6250d6;
     --series-4: #e87ba4;
-    --good: #3f7a46;
-    --warning: #9a6316;
-    --bad: #a8463a;
     /* Severity reads green, yellow, orange, red, purple, worst last */
     --sev-low: #9a7b10;
     --sev-medium: #b05f14;
@@ -29,9 +26,6 @@
         --series-2: #199e70;
         --series-3: #9085e9;
         --series-4: #d55181;
-        --good: #86b88a;
-        --warning: #e0a452;
-        --bad: #d87667;
         --sev-low: #b8912a;
         --sev-medium: #c8762b;
         --sev-high: #b85144;
@@ -47,9 +41,6 @@
     --series-2: #199e70;
     --series-3: #9085e9;
     --series-4: #d55181;
-    --good: #86b88a;
-    --warning: #e0a452;
-    --bad: #d87667;
     --sev-low: #b8912a;
     --sev-medium: #c8762b;
     --sev-high: #b85144;
@@ -211,6 +202,7 @@ input[type="range"] { min-height: 0; padding: 0; border: 0; background: none; ac
 .usage-good { background: var(--good); }
 .usage-warning { background: var(--warning); }
 .usage-bad { background: var(--bad); }
+.usage-accent { background: var(--accent); }
 
 /* Dialogs belong to their window, so other windows stay usable */
 .overlay {
@@ -340,6 +332,7 @@ button.banner { cursor: pointer; }
 .bar .fill { display: block; height: 100%; background: var(--good); }
 .bar .fill.warning { background: var(--warning); }
 .bar .fill.bad { background: var(--bad); }
+.bar .fill.accent { background: var(--accent); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
 .chip.good { color: var(--good); }
 .chip.warning { color: var(--warning); }
@@ -461,6 +454,7 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .gauge-fill.kind-warning { stroke: var(--warning); }
 .gauge-fill.kind-bad { stroke: var(--bad); }
 .gauge-fill.kind-neutral { stroke: var(--muted); }
+.gauge-fill.kind-accent { stroke: var(--accent); }
 .gauge-value { position: absolute; font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; }
 .gauge-label { font-weight: 600; }
 
@@ -498,6 +492,7 @@ button.gauge:hover { background: var(--raised); border-color: var(--border); }
 .sparkline.kind-warning { color: var(--warning); }
 .sparkline.kind-bad { color: var(--bad); }
 .sparkline.kind-neutral { color: var(--muted); }
+.sparkline.kind-accent { color: var(--accent); }
 .sparkline .line { fill: none; stroke: currentColor; stroke-width: 2; }
 .sparkline .area { fill: currentColor; opacity: 0.18; stroke: none; }
 .spacebar { display: flex; gap: 2px; height: 22px; border-radius: 6px; overflow: hidden; background: var(--surface-sunk); }

@@ -53,6 +53,21 @@ share `s` of `b` mixed in (sRGB, rounded):
 | accent, gold | accent | accent |
 | accent-text | window | panel |
 | icon-label | text | text |
+| good | readable(mix(#86b88a, accent, 0.4)) | readable(mix(#3f7a46, accent, 0.4)) |
+| warning | readable(mix(#e0a452, accent, 0.3)) | readable(mix(#9a6316, accent, 0.3)) |
+| bad | readable(mix(#d87667, accent, 0.2)) | readable(mix(#a8463a, accent, 0.2)) |
+
+Status follows the theme (Chris, 2026-11-17): the semantic anchors are pulled
+toward the mode's accent — good most, bad least, so a failure still reads as a
+failure — then `readable` mixes toward the mode's text until the colour reads
+at 4.5:1 on both panel and window. Fellowship pins its three to the values
+Chris chose by hand, so the default theme looks exactly as it did.
+
+**Measurements are not verdicts.** A plain reading (CPU, memory, load, a pool's
+fill) is drawn in the theme's `accent` until it crosses a warning or bad
+threshold; only a pass/fail verdict (a check, a pool's health, a banner) uses
+good/warning/bad. The NAS web desktop's `measureLevel` and the chart defaults
+implement this; the Rust desktop should read the same rule.
 
 The bars and app tiles are dark in either mode, from the dark colours. The NAS
 desktop's taskbar uses the bar colours, and so do the Rust desktop's top bar
@@ -80,5 +95,5 @@ weathered green, muted linen and the rest). Taskbar and tile pins go in
 ## Readability
 
 A theme doesn't build if any of these read below 4.5:1 (WCAG AA), in either
-mode: text and muted on panel and on window, accent-text on accent, and the
-taskbar's text and muted text on the bar.
+mode: text and muted on panel and on window, accent-text on accent, good,
+warning and bad on panel, and the taskbar's text and muted text on the bar.

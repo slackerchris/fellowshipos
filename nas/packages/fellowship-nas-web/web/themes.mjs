@@ -109,6 +109,16 @@ export function contrast(a, b) {
     return (high + 0.05) / (low + 0.05);
 }
 
+/** Lift a colour toward the mode's text until it reads at AA on both the panel
+    and the window: light mode deepens it, dark mode lifts it. */
+function readable(colour, c, light) {
+    let out = colour;
+    for (let i = 0; i < 24 && (contrast(out, c.panel) < 4.5 || contrast(out, c.window) < 4.5); i++) {
+        out = mix(out, c.text, 0.08);
+    }
+    return out;
+}
+
 /** The colours worked out from a mode's four, before pins. Names without
     the "--" are what a theme's [mode.pinned] table uses. */
 function workedOut(theme, mode) {
@@ -127,6 +137,12 @@ function workedOut(theme, mode) {
         "accent": c.accent,
         "accent-text": light ? c.panel : c.window,
         "gold": c.accent,
+        // Status follows the theme: semantic anchors pulled toward the accent,
+        // then made readable. Good moves most and bad least, so a failure still
+        // reads as a failure in every theme. A theme can pin any of the three.
+        "good": readable(mix(light ? "#3f7a46" : "#86b88a", c.accent, 0.4), c, light),
+        "warning": readable(mix(light ? "#9a6316" : "#e0a452", c.accent, 0.3), c, light),
+        "bad": readable(mix(light ? "#a8463a" : "#d87667", c.accent, 0.2), c, light),
         "icon-label": c.text,
         // The taskbar is dark in either mode
         "bar": dark.window,
@@ -185,6 +201,9 @@ export function problems(name, theme) {
         const pairs = [["text on panel", t["--text"], t["--surface"]], ["text on window", t["--text"], t["--bg"]],
                        ["muted on panel", t["--muted"], t["--surface"]], ["muted on window", t["--muted"], t["--bg"]],
                        ["accent text on accent", t["--accent-text"], t["--accent"]],
+                       ["good on panel", t["--good"], t["--surface"]],
+                       ["warning on panel", t["--warning"], t["--surface"]],
+                       ["bad on panel", t["--bad"], t["--surface"]],
                        ["taskbar text", t["--bar-text"], t["--bar"]], ["taskbar muted", t["--bar-muted"], t["--bar"]]];
         for (const [what, fg, bg] of pairs) {
             const ratio = contrast(fg, bg);

@@ -121,7 +121,7 @@ export function Badge({ kind, children }: { kind: "good" | "warning" | "bad" | "
 
 export function Usage({ used, total }: { used: number; total: number }) {
     const percent = total ? Math.round((used * 100) / total) : 0;
-    const level = percent >= 90 ? "bad" : percent >= 80 ? "warning" : "good";
+    const level = percent >= 90 ? "bad" : percent >= 80 ? "warning" : "accent";
     return (
         <div class="usage" title={`${percent}% used`}>
             <div class={`usage-fill usage-${level}`} style={{ width: `${percent}%` }} />

@@ -60,7 +60,7 @@ function ProgressBar({ value, label }: { value: number; label: string }) {
         <div class="stack">
             <span class="small">{label} · {Math.floor(value * 100)}%</span>
             <div class="usage" role="progressbar" aria-valuenow={Math.floor(value * 100)} aria-valuemin={0} aria-valuemax={100}>
-                <div class="usage-fill usage-good" style={{ width: `${value * 100}%` }} />
+                <div class="usage-fill usage-accent" style={{ width: `${value * 100}%` }} />
             </div>
         </div>
     );

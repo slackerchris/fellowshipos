@@ -72,6 +72,12 @@ export function level(value: number, warning = 80, bad = 90): Kind {
     return value >= bad ? "bad" : value >= warning ? "warning" : "good";
 }
 
+/** A measurement, not a verdict: below the thresholds it is the theme's accent,
+    not "healthy green". Only crossing a threshold makes it a warning or bad. */
+export function measureLevel(value: number, warning = 80, bad = 90): Kind {
+    return value >= bad ? "bad" : value >= warning ? "warning" : "accent";
+}
+
 /** When a pool fills, in words, or why nothing can be said yet. */
 function projectionText(projection: Projection) {
     if (projection.days === undefined) {
@@ -418,16 +424,16 @@ function Overview({ health, open }: { health: HealthData; open: (view: View) => 
             <h2 class="group-title">System</h2>
             <div class="metrics">
                 <Metric icon="cpu" title="CPU usage" onOpen={() => open("system")}>
-                    <ArcGauge percent={system.cpu} centre={`${system.cpu}%`} kind={level(system.cpu, 80, 95)} />
+                    <ArcGauge percent={system.cpu} centre={`${system.cpu}%`} kind={measureLevel(system.cpu, 80, 95)} />
                     <p class="small muted">of {plural(system.cpus, "processor")}{system.steal
                         ? `, ${system.steal}% taken by the host` : ""}</p>
                     {(system.cpu_history || []).length > 1 &&
-                        <Sparkline points={system.cpu_history} kind={level(system.cpu, 80, 95)} />}
+                        <Sparkline points={system.cpu_history} kind={measureLevel(system.cpu, 80, 95)} />}
                 </Metric>
                 <Metric icon="memory" title="Memory" onOpen={() => open("system")}>
                     <Gauge percent={memoryPercent} centre={`${memoryPercent}%`} size={128} stroke={14}
                            note={`${humanSize(memoryUsed)} of ${humanSize(system.memory.total)} used`}
-                           kind={level(memoryPercent, 85, 95)} />
+                           kind={measureLevel(memoryPercent, 85, 95)} />
                 </Metric>
                 <Metric icon="load" title="CPU load" onOpen={() => open("system")}>
                     <div class="load-body">
@@ -449,7 +455,7 @@ function Overview({ health, open }: { health: HealthData; open: (view: View) => 
                         return (
                             <div class="pool-line" key={pool.name}>
                                 <span class="pool-name">{pool.name}</span>
-                                <span class="bar"><span class={`fill ${level(fill)}`}
+                                <span class="bar"><span class={`fill ${measureLevel(fill)}`}
                                                         style={{ width: `${fill}%` }} /></span>
                                 <span class="small muted">{humanSize(pool.allocated)} / {humanSize(pool.size)}</span>
                                 <span class={`chip ${pool.health === "ONLINE" ? "good"

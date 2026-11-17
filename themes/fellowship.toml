@@ -23,6 +23,10 @@ bar-border = "#405247"
 bar-pressed = "#29392F"
 tile-top = "#344A3D"
 tile-bottom = "#1E2E27"
+# Status as Chris chose it; other themes work theirs out from their accent
+good = "#86B88A"
+warning = "#E0A452"
+bad = "#D87667"
 
 [light]
 window = "#F4EFE3"
@@ -40,3 +44,6 @@ muted = "#5E5A4C"
 accent-text = "#FFF8E8"
 gold = "#9C7A36"
 icon-label = "#101A17"
+good = "#3F7A46"
+warning = "#9A6316"
+bad = "#A8463A"

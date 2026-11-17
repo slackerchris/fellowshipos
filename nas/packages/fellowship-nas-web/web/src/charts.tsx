@@ -57,7 +57,7 @@ function Track({ size, stroke }: { size: number; stroke: number }) {
  * A ring filled to a percentage. The number sits in the middle, and the words
  * under it carry the same meaning, so colour alone never tells the story.
  */
-export function Gauge({ percent, centre, label, note, kind = "good", spark, size = DIAL.size, stroke = DIAL.stroke,
+export function Gauge({ percent, centre, label, note, kind = "accent", spark, size = DIAL.size, stroke = DIAL.stroke,
                        onClick }: {
     percent: number;
     centre: string;
@@ -133,7 +133,7 @@ export function Dial({ parts, centre, label, note, onClick }: {
  * A half ring with a needle, for a percentage that has no ceiling worth
  * drawing. The number sits under the pivot, the way a dial reads.
  */
-export function ArcGauge({ percent, centre, kind = "good", thin = false, ticks = false }: {
+export function ArcGauge({ percent, centre, kind = "accent", thin = false, ticks = false }: {
     percent: number;
     centre: string;
     kind?: Kind;
@@ -269,7 +269,7 @@ export function MetricIcon({ name, size = 20 }: { name: keyof typeof ICONS; size
 }
 
 /** A line with no axes: the shape of a measurement at a glance. */
-export function Sparkline({ points, kind = "good" }: { points: [number, number][]; kind?: Kind }) {
+export function Sparkline({ points, kind = "accent" }: { points: [number, number][]; kind?: Kind }) {
     const W = 100;
     const H = 28;
     const high = Math.max(...points.map(point => point[1]));
@@ -297,7 +297,7 @@ const PAD = { left: 62, right: 12, top: 14, bottom: 24 };
  * matters (the pool's size, all the processors busy) and a hover readout.
  * Draw it with at least two points; callers show an explanation until there are.
  */
-export function TrendChart({ points, hours, format, label, max, guide, kind = "good" }: {
+export function TrendChart({ points, hours, format, label, max, guide, kind = "accent" }: {
     points: [number, number][];
     hours: boolean;
     format: (value: number) => string;
