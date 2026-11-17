@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ type fake struct {
 	size   int64
 	calls  []call
 	fail   string
+	pvs    string
 }
 
 func (f *fake) Run(input string, name string, args ...string) (string, error) {
@@ -38,7 +40,7 @@ func (f *fake) Run(input string, name string, args ...string) (string, error) {
 	case name == "lsblk":
 		return args[len(args)-1] + " disk\n" + Partition(args[len(args)-1], 1) + " part\n", nil
 	case name == "pvs":
-		return "  /dev/sdz2 oldvg\n", nil
+		return f.pvs, nil
 	case name == "vgs":
 		return "  fellowship\n", nil
 	case name == "blkid":
@@ -62,7 +64,7 @@ func settings(disk string) Settings {
 
 func setup(t *testing.T, size int64) (*fake, *Engine, *[]string) {
 	target := t.TempDir()
-	f := &fake{target: target, size: size}
+	f := &fake{target: target, size: size, pvs: "  /dev/sdz2 oldvg\n"}
 	var steps []string
 	e := &Engine{Run: f, Target: target, Squashfs: "/run/live/medium/live/filesystem.squashfs",
 		Installed: 3 * layout.GiB, Memory: 8 * layout.GiB, EFI: true, Network: []string{"enp4s0"},
@@ -135,6 +137,27 @@ func TestSmallDiskHasNoDataPartition(t *testing.T) {
 	}
 	if len(find(f, "mkfs.vfat -F 32 -n EFI /dev/nvme0n1p1")) != 1 || len(find(f, "pvcreate -ff -y /dev/nvme0n1p2")) != 1 {
 		t.Error("NVMe partitions are named wrongly")
+	}
+}
+
+func TestInstallClosesOnlyVolumeGroupsOnTheChosenDisk(t *testing.T) {
+	for _, pv := range []string{"/dev/nvme0n1", "/dev/nvme0n1p1"} {
+		t.Run(filepath.Base(pv), func(t *testing.T) {
+			f, e, _ := setup(t, 32*layout.GiB)
+			f.pvs = pv + " selected\n" +
+				"/dev/nvme0n10p2 neighbor\n" +
+				"/dev/nvme0n1p10 unlisted\n"
+			if err := e.Install(settings("/dev/nvme0n1")); err != nil {
+				t.Fatal(err)
+			}
+			var closed []string
+			for _, c := range find(f, "vgchange -an ") {
+				closed = append(closed, c.String())
+			}
+			if !slices.Equal(closed, []string{"vgchange -an selected"}) {
+				t.Errorf("volume groups closed: %v", closed)
+			}
+		})
 	}
 }
 

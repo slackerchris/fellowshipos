@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -257,7 +258,7 @@ func (e *Engine) clear(disk string) error {
 	pvs, _ := e.run("pvs", "--noheadings", "-o", "pv_name,vg_name")
 	for _, line := range strings.Split(pvs, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && strings.HasPrefix(fields[0], disk) {
+		if len(fields) == 2 && (fields[0] == disk || slices.Contains(parts, fields[0])) {
 			e.Log("Closing old LVM volume group " + fields[1])
 			if _, err := e.run("vgchange", "-an", fields[1]); err != nil {
 				return err
