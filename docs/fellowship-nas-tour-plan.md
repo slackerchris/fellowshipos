@@ -107,6 +107,21 @@ the answer names those shares and offers a button that opens them in Shares, so
 the owner removes them first and then deletes. With no shares left, the typed
 confirmation names the disks about to be wiped.
 
+**Gate C result, 2026-11-16:** built and proven from the desktop on a fresh
+install of the built ISO in a QEMU VM with five disposable virtio disks
+(`nas/tests/vm/vm-delete-proof.sh`, 21 checks): create through the API; a share
+blocks delete and names itself; a wrong name is refused listing the exact four
+member disks; typing the pool's name deletes it; the four read empty; the same
+four rebuild and read ONLINE; the fifth disk's file survives. Unit tests cover
+the refusal, the disk listing and the wipe calls. The container-only
+`pool-delete.sh` was removed: on a host whose udisks/udev probes freshly
+appeared SCSI disks, mdadm cannot open them exclusively, so create-from-desktop
+is impossible there and the VM is the faithful seat. One honest gap in the
+evidence: the unrelated disk's UUID comparison printed nothing because `blkid`
+without `-p` reads a stale cache; the file surviving, the filesystem still
+reading, and the refusal naming exactly the four members carry the claim. The
+harness now uses `blkid -p`.
+
 ## Gate D — service controls
 
 Settings gains per-service start / stop / restart with live state, for the
@@ -122,6 +137,14 @@ the desktop reachable.
 cut that transfer; the panel warns, and the action stays available. Restart of
 the web server or helper is deliberately not offered — it would cut the desktop
 off mid-click.
+
+**Gate D result, 2026-11-16:** built and proven in the same VM run and in
+`ssh-samba.sh` (82/82): Settings → Services lists Samba, NFS and the SSH daemon
+with live state; start, stop and restart sit behind a typed confirmation;
+stopping the SSH daemon says SFTP goes offline with it and never moves SFTP's
+own switch; Health stays quiet for a stop the owner asked for and still flags a
+crash; the web server and helper are not controllable from the desktop. Unit
+tests cover the remembered stop, its clearing on start, and the crash case.
 
 ## Out of scope here
 
