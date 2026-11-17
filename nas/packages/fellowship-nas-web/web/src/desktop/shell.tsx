@@ -1,6 +1,6 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnasJson, humanSize, logout, plural, when } from "../api";
+import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnas, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, severityOf } from "../health";
 import { MODES, useAppearance } from "../appearance";
 import { useJobs } from "../jobs";
@@ -82,6 +82,12 @@ function Clock() {
             {now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
         </time>
     );
+}
+
+/** Dismissing a notice leaves the record alone; the widget stops showing it.
+    A refusal needs no banner: the notice staying put is the answer. */
+function dismissAlert(alert: Alert) {
+    fnas(["alert", "dismiss", "--time", String(alert.time), "--title", alert.title]).catch(() => {});
 }
 
 /** The checks at a glance: the worst problem, CPU and RAM, and each pool's fill.
@@ -238,17 +244,27 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
             </button>
             <HealthWidget status={status} open={open} />
             <DisksWidget status={status} open={open} />
-            <button type="button" class="widget" onClick={() => open("alerts")}>
+            <div class="widget" role="button" tabIndex={0} onClick={() => open("alerts")}
+                 onKeyDown={event => {
+                     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open("alerts"); }
+                 }}>
                 <h2>Recent alerts</h2>
                 {status.alerts && !status.alerts.length && <p class="small muted">None yet.</p>}
                 {[...(status.alerts || [])].reverse().slice(0, 3).map(alert => (
                     <div key={`${alert.time}-${alert.title}`} class="widget-row">
                         <div class="row"><Badge kind={SEVERITY[alert.severity]}>{alert.severity}</Badge>
-                            <span class="small">{alert.title}</span></div>
+                            <span class="small">{alert.title}</span>
+                            <span class="dismiss" role="button" tabIndex={0} aria-label={`Dismiss ${alert.title}`}
+                                  onClick={event => { event.stopPropagation(); dismissAlert(alert); }}
+                                  onKeyDown={event => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault(); event.stopPropagation(); dismissAlert(alert);
+                                      }
+                                  }}>×</span></div>
                         <span class="small muted">{when(alert.time)}</span>
                     </div>
                 ))}
-            </button>
+            </div>
         </aside>
     );
 }

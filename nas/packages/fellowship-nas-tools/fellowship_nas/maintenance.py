@@ -27,7 +27,7 @@ NAS = {
     "lan": ("show", "set"),
     "snapshot": ("list", "policy"),
     "backup": ("show", "set", "off", "run", "list", "restore"),
-    "alert": ("list", "show", "test", "email-set", "email-off", "ntfy-set", "ntfy-off"),
+    "alert": ("list", "show", "test", "email-set", "email-off", "ntfy-set", "ntfy-off", "clear", "dismiss"),
     "config": ("show", "restore", "adopt"),
     "job": ("list", "show"),
     "setup": ("status", "done", "reset"),

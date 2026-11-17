@@ -4545,3 +4545,87 @@ class SftpViews(unittest.TestCase):
         self.assertIn("    ForceCommand internal-sftp\n", text)
         self.assertIn("    AllowTcpForwarding no\n", text)
         self.assertIn("    PermitTunnel no\n", text)
+
+
+class AlertHistory(unittest.TestCase):
+    """The record can be cleared and notices dismissed; neither may hide a
+    problem Health can still see."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.alerts_module = {m.__name__: m for m in MODULES}["fellowship_nas.alerts"]
+        for name in ("ALERT_LOG", "ALERT_LOCK"):
+            patcher = mock.patch.object(self.alerts_module, name, os.path.join(directory.name, name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_dismiss_hides_from_the_widget_and_clear_empties_the_record(self):
+        self.alerts_module.send_alert("critical", "Pool tank is degraded", "a disk is gone")
+        self.alerts_module.send_alert("info", "Network change rolled back", "the old settings are back")
+        when = self.alerts_module.list_alerts()[0]["time"]
+        self.alerts_module.dismiss(when, "Pool tank is degraded")
+        self.assertEqual([a["title"] for a in self.alerts_module.list_alerts()],
+                         ["Network change rolled back"])
+        everything = self.alerts_module.list_alerts(everything=True)
+        self.assertEqual(len(everything), 2)
+        self.assertTrue(everything[0]["dismissed"])
+        self.alerts_module.clear()
+        self.assertEqual(self.alerts_module.list_alerts(everything=True), [])
+
+    def test_clearing_the_record_leaves_current_findings_alone(self):
+        self.alerts_module.send_alert("critical", "Pool tank is degraded", "a disk is gone")
+        pools = [{"name": "tank", "engine": "mdadm", "health": "DEGRADED"}]
+        engine = SimpleNamespace(pool_status=lambda name: {},
+                                 member_disks=lambda status: [{"state": "FAULTED", "path": "/dev/sdb"}])
+        with mock.patch.object(fnas.pools, "ENGINES", {"mdadm": engine}), \
+                mock.patch.object(fnas.disks, "bays", lambda: {}):
+            before = fnas.health_findings(pools)
+            self.alerts_module.clear()
+            self.assertEqual(fnas.health_findings(pools), before)
+        self.assertTrue(before)
+
+
+class SshExpectation(unittest.TestCase):
+    """The shared SSH daemon is meant to run while SFTP or root SSH is on; with
+    both off, stopped is intended and Health must not call it a failure."""
+
+    def setUp(self):
+        by_module = {m.__name__: m for m in MODULES}
+        self.services = by_module["fellowship_nas.services"]
+
+    def shown(self, sftp, root_ssh, separated, state):
+        with mock.patch.object(self.services.ssh, "settings", lambda: {"enabled": sftp, "passwords": True}), \
+                mock.patch.object(self.services.ssh, "root_ssh", lambda: root_ssh), \
+                mock.patch.object(self.services.accounts, "is_separated", lambda: separated), \
+                mock.patch.object(self.services, "unit_state", lambda unit: state), \
+                mock.patch.object(self.services.shares, "list_shares",
+                                  lambda: [{"name": "docs", "sftp": True, "smb": True}]):
+            return self.services.system_services(), self.services.protocols(), fnas.service_findings()
+
+    def entry(self, services, unit):
+        return next(s for s in services if s["unit"] == unit)
+
+    def test_both_off_means_stopped_is_intended(self):
+        services, protocols, findings = self.shown(False, False, True, "stopped")
+        self.assertEqual(self.entry(services, "ssh.service")["state"], "off")
+        self.assertEqual(next(p for p in protocols if p["name"] == "sftp")["state"], "off")
+        self.assertFalse([f for f in findings if f["key"] in ("service-ssh.service", "service-sftp")])
+
+    def test_root_ssh_alone_keeps_the_daemon_expected(self):
+        services, protocols, findings = self.shown(False, True, True, "running")
+        self.assertEqual(self.entry(services, "ssh.service")["state"], "running")
+        # SFTP itself is off even though the daemon is up for root
+        self.assertEqual(next(p for p in protocols if p["name"] == "sftp")["state"], "off")
+        self.assertFalse([f for f in findings if f["key"] in ("service-ssh.service", "service-sftp")])
+
+    def test_sftp_on_with_the_daemon_down_is_a_failure(self):
+        services, protocols, findings = self.shown(True, False, True, "stopped")
+        self.assertEqual(self.entry(services, "ssh.service")["state"], "stopped")
+        self.assertIn("service-ssh.service", [f["key"] for f in findings])
+        self.assertIn("service-sftp", [f["key"] for f in findings])
+
+    def test_the_old_model_ignores_root_ssh(self):
+        services, _, findings = self.shown(False, True, False, "stopped")
+        self.assertEqual(self.entry(services, "ssh.service")["state"], "off")
+        self.assertFalse([f for f in findings if f["key"] == "service-ssh.service"])

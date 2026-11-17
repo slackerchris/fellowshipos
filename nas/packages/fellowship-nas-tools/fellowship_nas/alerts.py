@@ -97,6 +97,32 @@ def send_alert(severity, title, body):
     return failures
 
 
+def list_alerts(limit=20, everything=False):
+    """The history, newest last. Dismissed notices stay in the record, but the
+    desktop's widget leaves them out unless it asks for everything."""
+    found = read_json(ALERT_LOG, [])
+    if not everything:
+        found = [alert for alert in found if not alert.get("dismissed")]
+    return found[-limit:]
+
+
+def clear():
+    """Empty the history. Health's findings are worked out live from the checks,
+    so clearing the record hides nothing that is wrong now."""
+    with locked(ALERT_LOCK):
+        write_json(ALERT_LOG, [])
+
+
+def dismiss(when, title):
+    """Stop the desktop showing one notice again; the record keeps it."""
+    with locked(ALERT_LOCK):
+        found = read_json(ALERT_LOG, [])
+        for alert in found:
+            if alert["time"] == when and alert["title"] == title:
+                alert["dismissed"] = True
+        write_json(ALERT_LOG, found)
+
+
 def retry_alerts(now):
     """Try again on the channels that failed. A disk can fail before the network is up."""
     retried = {}

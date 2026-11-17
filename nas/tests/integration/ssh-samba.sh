@@ -44,6 +44,8 @@ printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fellowship-nas-tools fellowship-nas-web \
     fellowship-nas-smb smbclient openssh-server curl rsyslog > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
 rsyslogd; sleep 1
+# fnas health reads the kernel's module directory; a container has none
+mkdir -p "/lib/modules/$(uname -r)"
 # Debian's own PAM files, to prove the old model keeps them
 cp /etc/pam.d/sshd /tmp/sshd.pam.debian
 cp /etc/pam.d/samba /tmp/samba.pam.debian
@@ -192,6 +194,20 @@ expect "SFTP turns back on with the directory gone" fnas ssh set --enabled on
 [ -d /run/sshd ] && pass "the settings check remade /run/sshd" || fail "the settings check remade /run/sshd"
 reload_sshd
 expect "SFTP works after the round trip" sftp_pw kim 'admin password 1'
+
+echo "== Health expects the daemon only while SFTP or root SSH is on"
+fnas ssh set --enabled off > /dev/null
+fellowship-root-ssh off > /dev/null
+fnas --json health | python3 -c 'import json,sys
+problems = json.load(sys.stdin)["problems"]
+sys.exit(0 if not [p for p in problems if p["key"] in ("service-ssh.service", "service-sftp")] else 1)' \
+    && pass "both off: no SSH or SFTP finding" || fail "both off: no SSH or SFTP finding"
+fnas --json health | python3 -c 'import json,sys
+services = json.load(sys.stdin)["services"]
+sys.exit(0 if next(s for s in services if s["unit"] == "ssh.service")["state"] == "off" else 1)' \
+    && pass "both off: the daemon reads as turned off" || fail "both off: the daemon reads as turned off"
+fnas ssh set --enabled on > /dev/null
+reload_sshd
 
 echo "== a Windows password change is refused, and nothing drifts (ruling 1)"
 printf 'admin password 1\nwindows try 88\nwindows try 88\n' | smbpasswd -r 127.0.0.1 -U kim > /dev/null 2>&1 \

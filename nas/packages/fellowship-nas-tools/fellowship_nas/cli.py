@@ -612,6 +612,11 @@ def build_parser():
         dest="action", required=True)
     alert_list = alert.add_parser("list", help="show recent alerts")
     alert_list.add_argument("--limit", type=int, default=20)
+    alert_list.add_argument("--all", action="store_true", help="include notices dismissed on the desktop")
+    alert.add_parser("clear", help="empty the alert history; current Health findings stay")
+    dismiss = alert.add_parser("dismiss", help="stop the desktop showing one notice again")
+    dismiss.add_argument("--time", type=int, required=True, help="the alert's timestamp")
+    dismiss.add_argument("--title", required=True)
     alert.add_parser("show", help="show where alerts go")
     send = alert.add_parser("send", help="send an alert")
     send.add_argument("--severity", choices=alerts.SEVERITIES + tuple(alerts.OLD_SEVERITIES), default="medium",
@@ -1109,7 +1114,13 @@ def read_secret(wanted):
 
 def dispatch_alert(args, show):
     if args.action == "list":
-        show(read_json(alerts.ALERT_LOG, [])[-args.limit:], print_alerts)
+        show(alerts.list_alerts(args.limit, args.all), print_alerts)
+    elif args.action == "clear":
+        alerts.clear()
+        print("Cleared the alert history. Health still shows what is wrong now.")
+    elif args.action == "dismiss":
+        alerts.dismiss(args.time, args.title)
+        print("Dismissed")
     elif args.action == "show":
         show(alerts.alert_channels(), print_channels)
     elif args.action == "send":

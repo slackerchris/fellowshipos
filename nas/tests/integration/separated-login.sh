@@ -41,6 +41,8 @@ dpkg-divert --quiet --local --rename --add /usr/bin/systemctl
 printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fellowship-nas-tools fellowship-nas-web \
     fellowship-nas-smb smbclient openssh-server sshpass curl > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
+# fnas health reads the kernel's module directory; a container has none
+mkdir -p "/lib/modules/$(uname -r)"
 
 echo "== making the NAS separated, and two people"
 python3 -c 'from fellowship_nas import accounts; accounts.create_store()'
@@ -165,3 +167,35 @@ refuse "a short password is refused" bash -c 'printf "short\nshort\n" | fellowsh
 refuse "an unknown name is refused before asking" bash -c 'printf "x long one\nx long one\n" | fellowship-reset-password nobody'
 refuse "not root is refused" runuser -u nobody -- fellowship-reset-password ann
 expect "the refusals changed nothing" smbclient //127.0.0.1/t -U 'ann%root reset 66' -c ls
+
+echo "== clearing and dismissing the alert record"
+fnas alert send --severity info "Tour notice" "a notice to dismiss" > /dev/null
+r=$(api "$K" POST /api/fnas '{"args":["--json","alert","list","--limit","50","--all"]}')
+body "$r" | python3 -c 'import json,sys
+sys.exit(0 if any(a["title"] == "Tour notice" for a in json.loads(json.load(sys.stdin)["output"])) else 1)' \
+    && pass "the notice is in the record" || fail "the notice is in the record: $r"
+t=$(body "$r" | python3 -c 'import json,sys
+print(next(a["time"] for a in json.loads(json.load(sys.stdin)["output"]) if a["title"] == "Tour notice"))')
+r=$(api "$K" POST /api/fnas "{\"args\":[\"alert\",\"dismiss\",\"--time\",\"$t\",\"--title\",\"Tour notice\"]}")
+[ "$(code "$r")" = 200 ] && pass "an admin dismisses a notice" || fail "an admin dismisses a notice: $r"
+r=$(api "$K" POST /api/fnas '{"args":["--json","alert","list","--limit","50"]}')
+body "$r" | python3 -c 'import json,sys
+sys.exit(0 if not any(a["title"] == "Tour notice" for a in json.loads(json.load(sys.stdin)["output"])) else 1)' \
+    && pass "the widget's list leaves it out" || fail "the widget's list leaves it out: $r"
+r=$(api "$K" POST /api/fnas '{"args":["--json","alert","list","--limit","50","--all"]}')
+body "$r" | python3 -c 'import json,sys
+sys.exit(0 if any(a["title"] == "Tour notice" and a.get("dismissed")
+                  for a in json.loads(json.load(sys.stdin)["output"])) else 1)' \
+    && pass "the full record keeps it, marked" || fail "the full record keeps it, marked: $r"
+before=$(fnas --json health | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["problems"]))')
+r=$(api "$K" POST /api/fnas '{"args":["alert","clear"]}')
+[ "$(code "$r")" = 200 ] && pass "an admin clears the history" || fail "an admin clears the history: $r"
+after=$(fnas --json health | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["problems"]))')
+[ "$before" = "$after" ] && pass "clearing leaves Health's findings alone" || fail "clearing leaves Health's findings alone: $before -> $after"
+r=$(api "$K" POST /api/fnas '{"args":["--json","alert","list","--limit","50","--all"]}')
+body "$r" | python3 -c 'import json,sys; sys.exit(0 if json.loads(json.load(sys.stdin)["output"]) == [] else 1)' \
+    && pass "the record is empty" || fail "the record is empty: $r"
+NA=$(mktemp)
+login "$NA" ann 'root reset 66' > /dev/null
+r=$(api "$NA" POST /api/fnas '{"args":["alert","clear"]}')
+[ "$(code "$r")" = 403 ] && pass "a non-admin cannot clear" || fail "a non-admin cannot clear: $r"

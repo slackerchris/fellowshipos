@@ -379,6 +379,8 @@ button.banner { cursor: pointer; }
 .mini-pool { display: grid; grid-template-columns: auto minmax(30px, 1fr) auto; align-items: center; gap: 8px; }
 .mini-pool-name { font-weight: 600; font-size: 0.95rem; }
 .mini-pool .chip { font-size: 0.78rem; }
+.dismiss { margin-left: auto; cursor: pointer; color: var(--muted); font-size: 1rem; line-height: 1; padding: 0 2px; }
+.dismiss:hover { color: var(--bad); }
 
 /* The Disks widget: a drive bay map, one slot per drive */
 .disks-widget { gap: 10px; }

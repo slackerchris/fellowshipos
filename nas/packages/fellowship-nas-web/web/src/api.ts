@@ -619,6 +619,8 @@ export interface Alert {
     title: string;
     message: string;
     undelivered: string[];
+    // Dismissed on the desktop: kept in the record, left out of the widget
+    dismissed?: boolean;
 }
 
 export interface Channels {

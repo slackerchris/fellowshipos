@@ -1,7 +1,7 @@
 """Every way to share files and every service the NAS runs, with whether each
 is running, so the desktop can show them all, built or not."""
 from .common import run
-from . import shares, ssh
+from . import accounts, shares, ssh
 
 
 # Ways to share, in the order the desktop lists them: name, title, what it's
@@ -31,6 +31,12 @@ SYSTEM_SERVICES = [
     ("smartmontools.service", "Disk health", "Watches each disk's SMART data"),
     ("ssh.service", "SSH", "Logins over SSH, for accounts set to Shares and SSH or Files over SFTP"),
 ]
+
+
+def ssh_expected():
+    """The shared SSH daemon is meant to run while SFTP is on or root's own SSH
+    is on. With both off, stopped is the intended state, not a failure."""
+    return ssh.settings()["enabled"] or (accounts.is_separated() and ssh.root_ssh())
 
 
 def unit_state(unit):
@@ -63,6 +69,9 @@ def protocols():
                                               "missing": "Not installed"}[state])
             if name == "webdav" and state == "running":
                 entry["detail"] = f"Running, read-only for now, {used}"
+            # The daemon may be up for root's SSH while SFTP itself is off
+            if name == "sftp" and not ssh.settings()["enabled"]:
+                entry.update(state="off", detail="Turned off in Settings")
         shown.append(entry)
     return shown
 
@@ -75,7 +84,7 @@ def system_services():
         # smartd stops by itself when no disk reports SMART data, as in most VMs
         if unit == "smartmontools.service" and state == "stopped":
             detail = "Not running. It stops by itself when no disk reports SMART data"
-        if unit == ssh.UNIT and not ssh.settings()["enabled"]:
-            state, detail = "off", "Turned off in Settings"
+        if unit == ssh.UNIT and not ssh_expected():
+            state, detail = "off", "Turned off in Settings: SFTP and root SSH are both off"
         shown.append({"unit": unit, "title": title, "does": does, "state": state, "detail": detail})
     return shown
