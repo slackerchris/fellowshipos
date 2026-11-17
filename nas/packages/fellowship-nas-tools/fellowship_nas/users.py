@@ -29,8 +29,16 @@ KINDS = {"shares": "/usr/sbin/nologin", "sftp": SFTP_SHELL, "ssh": "/bin/bash"}
 # On a separated NAS shell access is root's alone
 SEPARATED_KINDS = ("shares", "sftp")
 FULL_NAME = re.compile(r"^[^:,\n\x00]{0,64}$")
-# Accounts in the people range that belong to the NAS itself
-SERVICE_ACCOUNTS = {"nas-share"}
+# Accounts in the people range that belong to the NAS itself; nas-share is the
+# share account's old name, in case a rename hasn't happened yet
+SERVICE_ACCOUNTS = {"file-share", "nas-share"}
+# The share account's group: being in it is what lets a person use shares for
+# everyone in Files. Everybody joins once; taking someone out stays that way.
+EVERYONE_GROUP = "file-share"
+# Who has been put in it already, so a refresh adds newcomers and leaves alone
+# the people an administrator took out
+EVERYONE_FILE = os.path.join(STATE_DIR, "everyone-shares.json")
+EVERYONE_LOCK = os.path.join(STATE_DIR, "everyone-shares.lock")
 
 
 def is_person(account):
@@ -284,6 +292,43 @@ def set_groups(name, wanted):
         run("gpasswd", "-a", name, group)
     for group in current - set(wanted):
         run("gpasswd", "-d", name, group)
+    if EVERYONE_GROUP in set(wanted) ^ current:
+        # Chosen by hand, so a refresh mustn't undo it
+        join_everyone([name], join=False)
+
+
+def _everyone_group_exists():
+    try:
+        grp.getgrnam(EVERYONE_GROUP)
+        return True
+    except KeyError:
+        return False
+
+
+def offered_everyone():
+    return set(read_json(EVERYONE_FILE, {}).get("offered", []))
+
+
+def join_everyone(names, join=True):
+    """Put people in the group for shares for everyone, or note that they were
+    left out on purpose, so a refresh never puts them back."""
+    with locked(EVERYONE_LOCK):
+        offered = offered_everyone()
+        for name in names:
+            if join:
+                run("gpasswd", "-a", name, EVERYONE_GROUP)
+            offered.add(name)
+        write_json(EVERYONE_FILE, {"offered": sorted(offered)})
+
+
+def offer_everyone():
+    """Every person not yet offered shares for everyone joins: everybody on a NAS
+    that predates the group, and anyone made without fnas. Run at every refresh."""
+    if not _everyone_group_exists():
+        return
+    waiting = [a.pw_name for a in pwd.getpwall() if is_person(a) and a.pw_name not in offered_everyone()]
+    if waiting:
+        join_everyone(waiting)
 
 
 def check_kind(kind):
@@ -292,7 +337,7 @@ def check_kind(kind):
                         "Use shares, or allow SFTP for file access")
 
 
-def create_user(name, full_name, kind, admin, groups, password):
+def create_user(name, full_name, kind, admin, groups, password, everyone=True):
     check_new_name(name, "user")
     check_full_name(full_name)
     check_password(password)
@@ -310,8 +355,9 @@ def create_user(name, full_name, kind, admin, groups, password):
     else:
         run("useradd", "--create-home", "--shell", KINDS[kind], "--comment", full_name or "", name)
     set_password(name, password)
-    set_groups(name, groups)
+    set_groups(name, [g for g in groups if g != EVERYONE_GROUP])
     set_admin(name, admin)
+    join_everyone([name], join=everyone and _everyone_group_exists())
 
 
 def change_user(name, full_name=None, kind=None, admin=None, groups=None, enabled=None):

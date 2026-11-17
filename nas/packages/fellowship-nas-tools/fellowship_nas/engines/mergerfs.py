@@ -40,6 +40,9 @@ PRESENTATION = {
                   "the largest data disk",
     },
     "expand_text": "",
+    "delete_button": "Delete pool…",
+    "delete_text": ("This takes the pool apart and wipes every disk's filesystem, parity disks included. "
+                    "Everything on {pool} is gone, and these disks read as empty so they can build a new pool:"),
     "check_button": "Check for damage",
     "check_name": "check for damage",
     "check_text": ("Check for damage (a SnapRAID scrub) reads files on {pool} and checks them against their "
@@ -817,6 +820,47 @@ def export_pool(name):
     for disk in found["disks"]:
         run("umount", disk["mount"], check=False)
     forget(found)
+
+
+def delete_pool(name, confirm):
+    """Take the pool apart and wipe each disk's filesystem, so they read as
+    empty and can build a new pool. Shares must go first, as on an array."""
+    found = record(name)
+    pools.find_pool(name)
+    using = [s["name"] for s in shares.list_shares() if s.get("pool") == name]
+    if using:
+        raise FnasError(f"{name} still holds {len(using)} share" + ("" if len(using) == 1 else "s")
+                        + ": " + ", ".join(using) + ". Remove them in Shares first.")
+    if running_job(name):
+        raise FnasError(f"{name} is busy: wait for its job to finish")
+    wiped = [disk["by_id"] for disk in found["disks"]]
+    if confirm != name:
+        raise FnasError(f"deleting {name} wipes " + ", ".join(wiped)
+                        + f'\nconfirm by passing --confirm "{name}"')
+    # NFS and Samba hold the shares open, so they let go first
+    shares.write_config(leaving=name)
+    result = run("umount", pools.mountpoint(name), check=False)
+    if result.returncode != 0:
+        shares.write_config()
+        raise FnasError(f"{result.stderr.strip()}: disconnect any clients and try again")
+    for disk in found["disks"]:
+        run("umount", disk["mount"], check=False)
+    forget(found)
+    for disk in found["disks"]:
+        run("wipefs", "-a", disk["by_id"], check=False)
+        try:
+            os.rmdir(disk["mount"])
+        except OSError:
+            pass
+    if os.path.exists(content_path(name)):
+        os.remove(content_path(name))
+    everything = read_json(STATE_FILE, {})
+    if everything.pop(name, None) is not None:
+        write_json(STATE_FILE, everything)
+    try:
+        os.rmdir(pools.mountpoint(name))
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------- spin-down

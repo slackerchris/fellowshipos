@@ -43,6 +43,10 @@ function whyNot(entry: FileEntry | undefined, what = "it"): string {
     const [owner, group, others] = [entry.mode[1], entry.mode[4], entry.mode[7]].map(bit => bit === "w");
     if (entry.acl) return `An access list on ${what} decides who can change it, and it doesn't let you.`;
     if (!owner && !group && !others) return `Nobody can change ${what}: it's read only for everyone.`;
+    if (group && entry.group === "file-share") {
+        return `This share is for everyone, but you've been taken out of the file-share group. `
+            + "An administrator can put you back in Users.";
+    }
     if (group) return `The ${entry.group} group can change ${what}, and you aren't in it.`;
     return `Only ${what === "it" ? "its" : "the"} owner, ${entry.owner}, can change ${what}.`;
 }

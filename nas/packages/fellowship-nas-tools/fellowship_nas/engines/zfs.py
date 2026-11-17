@@ -39,6 +39,10 @@ PRESENTATION = {
     "grow": ["group", "expand", "mirror", "spare"],
     "grow_text": {},
     "expand_text": "Add one disk to {group}",
+    "delete_button": "Delete pool…",
+    "delete_text": ("This destroys the pool and clears its disks' labels. Everything on {pool} is gone, its "
+                    "snapshots and any backups of other pools kept on it too, and these disks read as empty "
+                    "so they can build a new pool:"),
     "check_button": "Check for damage",
     "check_name": "check for damage",
     "check_text": ("Check for damage (a scrub) reads every block on {pool} and checks it against its checksum. "
@@ -559,6 +563,48 @@ def export_pool(name):
     if result.returncode != 0:
         shares.write_config()
         raise FnasError(f"{result.stderr.strip()}: disconnect any clients and try again")
+
+
+def kept_backups(name):
+    """The pools whose backups this pool holds, which go with it when it's deleted."""
+    result = run("zfs", "list", "-H", "-o", "name", "-d", "1", f"{name}/{BACKUP_DATASET}", check=False)
+    return [line.split("/")[-1] for line in result.stdout.splitlines()[1:] if line.strip()] \
+        if result.returncode == 0 else []
+
+
+def delete_pool(name, confirm):
+    """Destroy the pool and clear its disks' labels, so they read as empty and
+    can build a new pool. Shares must go first, as on an array."""
+    pools.find_pool(name)
+    using = [s["name"] for s in shares.list_shares() if s.get("pool") == name]
+    if using:
+        raise FnasError(f"{name} still holds {len(using)} share" + ("" if len(using) == 1 else "s")
+                        + ": " + ", ".join(using) + ". Remove them in Shares first.")
+    status = pool_status(name)
+    wiped = [d["path"] for d in member_disks(status) + status["spares"] if d["path"]]
+    if confirm != name:
+        backups = kept_backups(name)
+        raise FnasError(f"deleting {name} wipes " + ", ".join(wiped)
+                        + (f", and the backups it holds of {', '.join(backups)}" if backups else "")
+                        + f'\nconfirm by passing --confirm "{name}"')
+    # NFS and Samba hold the shares open, so they let go first
+    shares.write_config(leaving=name)
+    result = run("zpool", "destroy", name, check=False)
+    if result.returncode != 0:
+        shares.write_config()
+        raise FnasError(f"{result.stderr.strip()}: disconnect any clients and try again")
+    # A destroyed pool's labels stay behind and could bring it back with zpool
+    # import -D; clearing them is what makes the disks empty
+    for path in wiped:
+        run("zpool", "labelclear", "-f", path, check=False)
+        run("wipefs", "-a", path, check=False)
+        whole = disks.whole_disk(path)
+        if whole != os.path.realpath(path):
+            run("wipefs", "-a", whole, check=False)
+    try:
+        os.rmdir(pools.mountpoint(name))
+    except OSError:
+        pass
 
 
 def created_at(dataset):

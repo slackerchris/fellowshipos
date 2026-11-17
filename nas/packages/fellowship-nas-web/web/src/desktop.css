@@ -194,6 +194,31 @@
 }
 .count.bad { background: #d87667; }
 .clock { padding: 0 10px; font-variant-numeric: tabular-nums; color: var(--bar-text); }
+.menu-last { display: flex; gap: 4px; align-items: center; }
+.menu-last .menu-item { flex: 1; }
+.menu-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid transparent;
+             border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+.menu-icon:hover, .menu-icon:focus-visible { border-color: var(--border); color: var(--danger, inherit); }
+.power-overlay { position: fixed; z-index: 1100; }
+.calendar { width: min(300px, calc(100vw - 16px)); }
+.calendar-time { font-family: var(--serif); font-size: 1.8rem; font-variant-numeric: tabular-nums; }
+.calendar-head { display: flex; align-items: center; justify-content: space-between; }
+.calendar-step { width: 32px; height: 32px; border: 1px solid transparent; border-radius: 8px; background: none;
+                 color: inherit; font: inherit; font-size: 1.2rem; cursor: pointer; }
+.calendar-step:hover { border-color: var(--border); }
+.calendar-grid { width: 100%; border-collapse: collapse; text-align: center; font-variant-numeric: tabular-nums; }
+.calendar-grid th { font-size: 0.75rem; font-weight: 600; color: var(--muted); padding-bottom: 4px; }
+.calendar-grid th, .calendar-grid td { border: 0; padding: 0; text-align: center; }
+.calendar-grid td span { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; }
+.calendar-grid td.outside { color: var(--muted); opacity: 0.6; }
+.calendar-grid td.today span { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.calendar-today { justify-content: center; }
+.clock time { display: flex; gap: 8px; align-items: baseline; }
+.clock-date { opacity: 0.8; }
+.clock-doubt { color: var(--warning, var(--gold)); font-weight: 700; }
+.clock-notes { display: grid; gap: 2px; margin-top: 4px; }
+.clock-warning { color: var(--warning, var(--gold)); }
+.clock-choices .segmented button { padding: 5px 8px; white-space: nowrap; }
 
 .panel {
     position: fixed;

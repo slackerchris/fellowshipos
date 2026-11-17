@@ -379,7 +379,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                             jobStarted(await fnas(["pool", "scrub", pool.name])))}>{engine.check_button}</Button>
                     )}
                     <Button onClick={() => setExporting(true)}>Export</Button>
-                    {engine.name === "mdadm" && <Button onClick={() => setDeleting(true)}>Delete array…</Button>}
+                    {engine.delete_button && <Button onClick={() => setDeleting(true)}>{engine.delete_button}</Button>}
                 </div>
                 {!pool.readonly && <p class="muted small">{fill(engine.check_text, { pool: pool.name })}</p>}
                 {repairing && (
@@ -407,7 +407,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                 </Confirm>
             )}
             {deleting && (
-                <Confirm title="Delete array" phrase={pool.name} busy={deleteAction.busy} outcome={deleteAction.outcome}
+                <Confirm title={(engine.delete_button || "Delete").replace("…", "")} phrase={pool.name} busy={deleteAction.busy} outcome={deleteAction.outcome}
                          onCancel={() => { setDeleting(false); deleteAction.clear(); }}
                          onConfirm={typed => deleteAction.run(async () => {
                              const output = await fnas(["pool", "delete", pool.name, "--confirm", typed]);
@@ -422,8 +422,7 @@ function PoolCard({ pool, engine, disks, reload, details }: {
                         </div>
                     ) : (
                         <div class="stack">
-                            <p>This stops the array and wipes its superblocks. Everything on {pool.name} is gone, and these
-                                disks read as empty so they can build a new array:</p>
+                            <p>{fill(engine.delete_text || "", { pool: pool.name })}</p>
                             <ul class="small mono">
                                 {[...(status.data?.groups || []).flatMap(group => group.disks || []),
                                   ...(status.data?.spares || [])].map(member => <li key={member.path}>{member.path}</li>)}
@@ -526,8 +525,9 @@ export function Storage() {
     const pools = useLoad(() => fnasJson<Pool[]>(["pool", "list"]));
     const disks = useLoad(() => fnasJson<Disk[]>(["disk", "list", "--all"]));
     const engines = useLoad(loadEngines);
-    const [tab, setTab] = useState<"pools" | "disks" | "attached">("pools");
+    const [tab, setTab] = useState<"pools" | "disks">("pools");
     const [creating, setCreating] = useState(false);
+    const [importing, setImporting] = useState(false);
     const [created, setCreated] = useState("");
     const [viewing, setViewing] = useState<string | null>(null);
     const reload = () => { pools.reload(); disks.reload(); };
@@ -541,7 +541,7 @@ export function Storage() {
             <RunningJobs jobs={jobs} />
             <div class="row storage-bar">
                 <div class="segmented page-tabs" role="tablist">
-                    {([["pools", "Pools"], ["disks", "Disks"], ["attached", "Attached pools"]] as const).map(
+                    {([["pools", "Pools"], ["disks", "Disks"]] as const).map(
                         ([key, title]) => (
                             <button key={key} type="button" role="tab" aria-selected={tab === key}
                                     class={tab === key ? "current" : ""} onClick={() => setTab(key)}>{title}</button>
@@ -553,23 +553,27 @@ export function Storage() {
                 <Loading loaded={pools}>{() => <Loading loaded={disks}>{() => <Loading loaded={engines}>{() => (
                     <div class="stack">
                         {!pools.data!.length && (
-                            <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from
-                                attached disks.</p></Card>
+                            <Card title="Pools"><p class="muted">No pools yet. Create one below, or import one from disks
+                                that already hold a pool, such as after a reinstall or from another NAS.</p></Card>
                         )}
                         {pools.data!.map(pool => <PoolCard key={pool.name} pool={pool} engine={engines.data![pool.engine]}
                                                            disks={disks.data!} reload={reload} details={() => setViewing(pool.name)} />)}
                     </div>
                 )}</Loading>}</Loading>}</Loading>
                 {created && <Result outcome={{ kind: "done", text: `Created pool ${created}` }} />}
-                {creating
-                    ? <CreatePool taken={(pools.data || []).map(pool => pool.name)}
-                                  onCreated={name => { setCreating(false); setCreated(name); reload(); }} />
-                    : <div class="row"><Button kind="primary" onClick={() => { setCreating(true); setCreated(""); }}>Create a pool</Button></div>}
+                {creating && <CreatePool taken={(pools.data || []).map(pool => pool.name)}
+                                         onCreated={name => { setCreating(false); setCreated(name); reload(); }} />}
+                {importing && <ImportPools onChange={reload} onClose={() => setImporting(false)} />}
+                {!creating && !importing && (
+                    <div class="row">
+                        <Button kind="primary" onClick={() => { setCreating(true); setCreated(""); }}>Create a pool</Button>
+                        <Button onClick={() => setImporting(true)}>Import a pool…</Button>
+                    </div>
+                )}
             </>}
             {tab === "disks" && (
                 <Loading loaded={disks}>{() => <PhysicalDisks disks={disks.data!} openPool={setViewing} />}</Loading>
             )}
-            {tab === "attached" && <ImportPools onChange={reload} />}
         </Page>
     );
 }

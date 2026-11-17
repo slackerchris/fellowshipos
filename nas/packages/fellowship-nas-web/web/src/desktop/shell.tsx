@@ -2,9 +2,10 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnas, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, measureLevel, severityOf } from "../health";
-import { MODES, useAppearance } from "../appearance";
+import { ClockFormat, MODES, formatTaskbarDate, formatTime, useAppearance, useClockFormat } from "../appearance";
 import { useJobs } from "../jobs";
-import { SessionContext } from "../settings";
+import { dayIn, useNasTime } from "../nas-clock";
+import { ClockChoices, PowerChoice, SessionContext } from "../settings";
 import { Badge, Usage } from "../ui";
 import { ArcGauge, Gauge, MetricIcon } from "../charts";
 import { APPS, AppId, appsFor, iconsFor } from "./apps";
@@ -71,16 +72,121 @@ function problems(status: Status): Problem[] {
     return status.health?.problems || [];
 }
 
-function Clock() {
-    const [now, setNow] = useState(new Date());
-    useEffect(() => {
-        const timer = setInterval(() => setNow(new Date()), 15_000);
-        return () => clearInterval(timer);
-    }, []);
+function Clock({ pressed, onClick }: { pressed: boolean; onClick: () => void }) {
+    const { format } = useClockFormat();
+    const { now, zone, read, known, synced } = useNasTime(format.seconds ? 1_000 : 15_000);
+    const date = formatTaskbarDate(now, format, zone);
+    const doubt = read && known && !synced;
     return (
-        <time class="clock" dateTime={now.toISOString()} title={now.toLocaleDateString(undefined, { dateStyle: "full" })}>
-            {now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-        </time>
+        <button type="button" class={`taskbar-button clock ${pressed ? "pressed" : ""}`} aria-label="Calendar"
+                aria-expanded={pressed} onClick={onClick}
+                title={now.toLocaleDateString(undefined, { dateStyle: "full", timeZone: zone }) + ` · NAS time, ${zone}`
+                       + (doubt ? " · not synchronised" : "")}>
+            <time dateTime={now.toISOString()}>
+                {date && <span class="clock-date hide-narrow">{date}</span>}
+                {formatTime(now, format, format.seconds, zone)}
+                {doubt && <span class="clock-doubt" aria-label="The NAS clock isn't synchronised">!</span>}
+            </time>
+        </button>
+    );
+}
+
+/** The first day of the week where the viewer lives: 1 is Monday, 7 Sunday. */
+function firstWeekday() {
+    try {
+        const locale = new Intl.Locale(navigator.language) as Intl.Locale & {
+            getWeekInfo?: () => { firstDay: number }; weekInfo?: { firstDay: number } };
+        return locale.getWeekInfo?.().firstDay ?? locale.weekInfo?.firstDay ?? 7;
+    } catch {
+        return 7;
+    }
+}
+
+const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/** Which clock this is, and anything that makes it differ from the device's:
+    another time zone, a clock that has drifted, or a NAS that couldn't be asked. */
+function ClockNotes({ nas, format }: { nas: ReturnType<typeof useNasTime>; format: ClockFormat }) {
+    if (!nas.read) {
+        return <p class="small muted">Showing this device's time: the NAS's clock couldn't be read.</p>;
+    }
+    const minutes = Math.round(Math.abs(nas.offset) / 60_000);
+    const sameWall = formatTime(nas.now, format, false, nas.zone) === formatTime(nas.device, format, false, nas.deviceZone);
+    return (
+        <div class="small clock-notes">
+            <p class="muted">NAS time · {nas.zone.replace(/_/g, " ")}</p>
+            {nas.known && !nas.synced && (
+                <p class="clock-warning">The NAS clock isn't synchronised with a time server, so it may be wrong.</p>
+            )}
+            {minutes >= 2 && (
+                <p class="clock-warning">This device's clock is {minutes} minute{minutes === 1 ? "" : "s"}
+                    {nas.offset > 0 ? " behind" : " ahead of"} the NAS{nas.offset > 0 ? "'s" : ""}.</p>
+            )}
+            {!sameWall && minutes < 2 && (
+                <p class="muted">On this device: {formatTime(nas.device, format, false, nas.deviceZone)}
+                    {" "}({nas.deviceZone.replace(/_/g, " ")})</p>
+            )}
+        </div>
+    );
+}
+
+/** Today in full, and a month to page through, on the NAS's clock. */
+function CalendarPanel() {
+    const nas = useNasTime(1_000);
+    const { format } = useClockFormat();
+    const [choosing, setChoosing] = useState(false);
+    // Today as it is where the NAS is, which near midnight can be another day than the device's
+    const now = dayIn(nas.now, nas.zone);
+    const [shown, setShown] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
+    const first = firstWeekday() % 7;
+    const lead = (shown.getDay() - first + 7) % 7;
+    const start = new Date(shown.getFullYear(), shown.getMonth(), 1 - lead);
+    const days = Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+    const weeks = Array.from({ length: 6 }, (_, w) => days.slice(w * 7, w * 7 + 7));
+    const step = (months: number) => setShown(new Date(shown.getFullYear(), shown.getMonth() + months, 1));
+    const thisMonth = shown.getFullYear() === now.getFullYear() && shown.getMonth() === now.getMonth();
+    return (
+        <div class="panel panel-right calendar" role="dialog" aria-label="Calendar">
+            <div>
+                <div class="calendar-time">{formatTime(nas.now, format, true, nas.zone)}</div>
+                <div class="muted">{nas.now.toLocaleDateString(undefined, { dateStyle: "full", timeZone: nas.zone })}</div>
+                <ClockNotes nas={nas} format={format} />
+            </div>
+            <div class="calendar-head">
+                <button type="button" class="calendar-step" aria-label="Previous month" onClick={() => step(-1)}>‹</button>
+                <strong>{shown.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
+                <button type="button" class="calendar-step" aria-label="Next month" onClick={() => step(1)}>›</button>
+            </div>
+            <table class="calendar-grid">
+                <thead>
+                    <tr>{weeks[0].map(day => (
+                        <th key={day.getDay()} scope="col" abbr={day.toLocaleDateString(undefined, { weekday: "long" })}>
+                            {day.toLocaleDateString(undefined, { weekday: "narrow" })}</th>
+                    ))}</tr>
+                </thead>
+                <tbody>
+                    {weeks.map(week => (
+                        <tr key={week[0].toDateString()}>
+                            {week.map(day => (
+                                <td key={day.toDateString()}
+                                    class={`${day.getMonth() !== shown.getMonth() ? "outside" : ""} ${sameDay(day, now) ? "today" : ""}`}
+                                    aria-current={sameDay(day, now) ? "date" : undefined}>
+                                    <span>{day.getDate()}</span>
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+            {!thisMonth && (
+                <button type="button" class="menu-item calendar-today"
+                        onClick={() => setShown(new Date(now.getFullYear(), now.getMonth(), 1))}>Back to today</button>
+            )}
+            <button type="button" class="menu-item calendar-today" aria-expanded={choosing}
+                    onClick={() => setChoosing(!choosing)}>{choosing ? "Done" : "Time format…"}</button>
+            {choosing && <ClockChoices />}
+        </div>
     );
 }
 
@@ -285,7 +391,7 @@ function JobsIndicator({ open }: { open: (app: AppId) => void }) {
     );
 }
 
-type Panel = "launcher" | "notifications" | "user" | null;
+type Panel = "launcher" | "notifications" | "calendar" | "user" | null;
 
 function Notifications({ status, open }: { status: Status; open: (app: AppId) => void }) {
     const found = problems(status);
@@ -310,7 +416,9 @@ function Notifications({ status, open }: { status: Status; open: (app: AppId) =>
     );
 }
 
-function UserMenu({ open, onSignOut }: { open: (app: AppId) => void; onSignOut: () => void }) {
+function UserMenu({ open, onSignOut, onPower }: {
+    open: (app: AppId) => void; onSignOut: () => void; onPower: () => void;
+}) {
     const { user, admin } = useContext(SessionContext);
     const look = useAppearance();
     return (
@@ -323,7 +431,13 @@ function UserMenu({ open, onSignOut }: { open: (app: AppId) => void; onSignOut: 
                 ))}
             </div>
             <button type="button" class="menu-item" role="menuitem" onClick={() => open("settings")}>Settings</button>
-            <button type="button" class="menu-item" role="menuitem" onClick={onSignOut}>Sign out</button>
+            <div class="menu-last">
+                <button type="button" class="menu-item" role="menuitem" onClick={onSignOut}>Sign out</button>
+                {admin && (
+                    <button type="button" class="menu-icon" role="menuitem" title="Restart or shut down the NAS"
+                            aria-label="Restart or shut down the NAS" onClick={onPower}><Glyph name="power" /></button>
+                )}
+            </div>
         </div>
     );
 }
@@ -410,6 +524,9 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
     const visible = windows.windows.filter(win => !win.minimized);
     const front = visible.reduce<Win | null>((best, win) => !best || win.z > best.z ? win : best, null)?.id;
 
+    // Asked from the account menu, and shown over the whole desktop rather than inside it
+    const [power, setPower] = useState(false);
+
     const signOut = async () => {
         try {
             await logout();
@@ -462,7 +579,10 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
             </main>
             {panel === "launcher" && <Launcher apps={apps} open={open} />}
             {panel === "notifications" && <Notifications status={status} open={open} />}
-            {panel === "user" && <UserMenu open={open} onSignOut={signOut} />}
+            {panel === "calendar" && <CalendarPanel />}
+            {panel === "user" && <UserMenu open={open} onSignOut={signOut}
+                                           onPower={() => { setPanel(null); setPower(true); }} />}
+            {power && <PowerChoice onCancel={() => setPower(false)} />}
             {contextMenu && (
                 <div class="panel desktop-context-menu" ref={menuRef} role="group" aria-label="Desktop actions">
                     <button type="button" class="menu-item" onClick={() => open(contextMenu.app ?? "files")}>
@@ -504,7 +624,7 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
                             {found.length}</span>}
                     </button>
                 )}
-                <Clock />
+                <Clock pressed={panel === "calendar"} onClick={() => toggle("calendar")} />
                 <button type="button" class={`taskbar-button user ${panel === "user" ? "pressed" : ""}`} title={session.user}
                         aria-label="Account" aria-expanded={panel === "user"} onClick={() => toggle("user")}>
                     <Glyph name="user" /><span class="hide-narrow">{session.user}</span>

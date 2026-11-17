@@ -423,7 +423,7 @@ def build_parser():
                          help="the engine whose scan didn't list it; the one that did is used instead")
     export = pool.add_parser("export", help="export a pool")
     export.add_argument("name")
-    delete = pool.add_parser("delete", help="stop an array and wipe its disks; its shares must go first")
+    delete = pool.add_parser("delete", help="delete a pool and wipe its disks; its shares must go first")
     delete.add_argument("name")
     delete.add_argument("--confirm", default="", help="type the pool's name")
     pool.add_parser("scrub", help="check every block on a pool now").add_argument("name")
@@ -527,6 +527,8 @@ def build_parser():
                              help="shares: shares only, no SSH; ssh: shares and SSH")
     user_create.add_argument("--admin", action="store_true", help="can manage the NAS")
     user_create.add_argument("--groups", default="", help="comma-separated")
+    user_create.add_argument("--no-everyone-shares", action="store_true",
+                             help="leave them out of the file-share group, so shares for everyone are closed to them")
     user_create.add_argument("--password-stdin", action="store_true", required=True)
     user_set = user.add_parser("set", help="change an account")
     user_set.add_argument("name")
@@ -563,7 +565,7 @@ def build_parser():
         found = service.add_parser(action, help=f"{action} one service")
         found.add_argument("name", choices=tuple(services.CONTROLLED))
 
-    look_ = area.add_parser("look", help="how a person likes the desktop: light, dark and the theme"
+    look_ = area.add_parser("look", help="how a person likes the desktop: light, dark, the theme and the clock"
                             ).add_subparsers(dest="action", required=True)
     look_.add_parser("show", help="a person's light or dark and theme").add_argument("user")
     look_set = look_.add_parser("set", help="remember a person's light or dark and theme")
@@ -571,6 +573,9 @@ def build_parser():
     look_set.add_argument("--mode", choices=look.MODES,
                           help="light, dark, or system to follow the device")
     look_set.add_argument("--palette", help="a theme's name, such as fellowship or highwatch")
+    look_set.add_argument("--hours", choices=look.HOURS, help="12- or 24-hour clock, or auto to follow the device")
+    look_set.add_argument("--seconds", choices=("on", "off"), help="seconds on the taskbar clock")
+    look_set.add_argument("--date", choices=look.DATES, help="the date beside the taskbar clock")
 
     group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
     group_list = group.add_parser("list", help="list groups and their members")
@@ -984,7 +989,8 @@ def dispatch_user_action(args, show):
         show(shares.shares_of(args.name), lambda found: print("\n".join(
             f"{s['name']}: {s['level']} ({s['through']})" for s in found) or "No shares"))
     elif args.action == "create":
-        users.create_user(args.name, args.full_name, args.kind, args.admin, names(args.groups), read_secret(True))
+        users.create_user(args.name, args.full_name, args.kind, args.admin, names(args.groups), read_secret(True),
+                          everyone=not args.no_everyone_shares)
         print(f"Added {args.name}")
     elif args.action == "set":
         users.change_user(args.name, args.full_name, args.kind, switch(args.admin),
@@ -1010,14 +1016,17 @@ def dispatch_user_action(args, show):
 
 
 def print_look(chosen):
-    print(f"{chosen['user']}: {chosen['mode']}, {chosen['palette']} theme")
+    hours = "auto" if chosen["hours"] == "auto" else chosen["hours"] + "-hour"
+    print(f"{chosen['user']}: {chosen['mode']}, {chosen['palette']} theme; clock {hours}"
+          + (", seconds" if chosen["seconds"] else "") + ("" if chosen["date"] == "off" else f", {chosen['date']} date"))
 
 
 def dispatch_look(args, show):
     if args.action == "show":
         show(look.show(args.user), print_look)
     else:
-        show(look.set_look(args.user, args.mode, args.palette), print_look)
+        seconds = None if args.seconds is None else args.seconds == "on"
+        show(look.set_look(args.user, args.mode, args.palette, args.hours, seconds, args.date), print_look)
 
 
 def print_ssh(status):
@@ -1097,6 +1106,7 @@ def dispatch_share(args, show):
         print(f"Updated share {args.name}")
     elif args.action == "refresh":
         shares.migrate()
+        users.offer_everyone()
         shares.write_config()
     elif args.action == "services":
         show(services.protocols(), print_protocols)

@@ -77,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/fnas", s.withSession(true, s.fnas))
 	mux.HandleFunc("GET /api/users", s.withSession(false, s.users))
 	mux.HandleFunc("GET /api/sessions", s.withSession(false, s.sessions))
+	mux.HandleFunc("GET /api/time", s.withSession(false, s.clock))
 	mux.HandleFunc("POST /api/sessions/end", s.withSession(true, s.endSession))
 	mux.HandleFunc("GET /api/jobs/events", s.withSession(false, s.jobEvents))
 	mux.HandleFunc("GET /api/files", s.withSession(false, s.files))
@@ -290,7 +291,7 @@ func (s *Server) fnas(w http.ResponseWriter, r *http.Request, session *protocol.
 }
 
 // People reports the accounts people log in with, leaving out system and
-// service accounts such as nas-share
+// service accounts such as file-share
 func People(passwd io.Reader) []string {
 	people := []string{}
 	scanner := bufio.NewScanner(passwd)
@@ -332,6 +333,19 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, session *proto
 			response.Sessions = []protocol.Session{}
 		}
 		writeJSON(w, http.StatusOK, response.Sessions)
+	}
+}
+
+// clock is the NAS's time and zone, which every signed-in person's desktop
+// shows, so schedules and alerts read against the clock they run on.
+func (s *Server) clock(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	response, ok := s.call(w, protocol.Request{Op: protocol.OpClock, Session: token})
+	if ok {
+		if response.Clock == nil {
+			writeError(w, http.StatusBadGateway, "the NAS didn't say what time it is")
+			return
+		}
+		writeJSON(w, http.StatusOK, response.Clock)
 	}
 }
 

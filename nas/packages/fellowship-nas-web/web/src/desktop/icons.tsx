@@ -64,6 +64,7 @@ const UI = {
     launcher: <path d="M5 5h4v4H5zM10 5h4v4h-4zM15 5h4v4h-4zM5 10h4v4H5zM10 10h4v4h-4zM15 10h4v4h-4zM5 15h4v4H5zM10 15h4v4h-4zM15 15h4v4h-4z" />,
     bell: <path d="M8 16v-5a4 4 0 0 1 8 0v5l1.5 2h-11zM10.5 21h3" />,
     user: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20c1-3.5 3.8-5.5 7-5.5s6 2 7 5.5" />,
+    power: <path d="M12 3.5v8M7 6.6a7.5 7.5 0 1 0 10 0" />,
 };
 
 export function Glyph({ name }: { name: keyof typeof UI }): JSX.Element {

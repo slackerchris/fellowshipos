@@ -66,6 +66,9 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
 
 export const login = (user: string, password: string) => request<Session>("POST", "/api/login", { user, password });
 export const logout = () => request<unknown>("POST", "/api/logout");
+/** The NAS's clock: now in milliseconds, its time zone, and whether it's synchronised. */
+export const nasTime = () => request<{ now: number; zone: string; synced: boolean; known: boolean }>(
+    "GET", "/api/time", undefined, true);
 export const currentSession = () => request<Session>("GET", "/api/session", undefined, true);
 export const sessions = () => request<SessionInfo[]>("GET", "/api/sessions");
 export const endSession = (id: string) => request<unknown>("POST", "/api/sessions/end", { id });
@@ -121,7 +124,7 @@ export async function fnasJson<T>(args: string[], background = false): Promise<T
     return JSON.parse(output) as T;
 }
 
-/** People's accounts. Service accounts like nas-share can't log in, so they aren't listed. */
+/** People's accounts. Service accounts like file-share can't log in, so they aren't listed. */
 export const localUsers = () => request<string[]>("GET", "/api/users");
 
 export interface Disk {
@@ -543,6 +546,9 @@ export interface Engine {
     expand_text?: string;
     repair_notice?: string;
     repair_text?: string;
+    delete_button?: string;
+    // Holds {pool}; the disks it wipes are listed after it
+    delete_text?: string;
     check_button?: string;
     check_name?: string;
     check_text?: string;

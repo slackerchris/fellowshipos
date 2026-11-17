@@ -280,7 +280,7 @@ export function CreatePool({ onCreated, taken = [] }: { onCreated: (name: string
 const FOREIGN = "last accessed by another system";
 
 /** Pools on attached disks that aren't imported, with a restore offer for saved settings. */
-export function ImportPools({ onChange }: { onChange: () => void }) {
+export function ImportPools({ onChange, onClose }: { onChange: () => void; onClose?: () => void }) {
     const scan = useLoad(() => fnasJson<ImportablePool[]>(["pool", "scan"]));
     const [offSwitch, setOffSwitch] = useState<Record<string, boolean>>({});
     const [saved, setSaved] = useState<Record<string, SavedConfig>>({});
@@ -307,9 +307,14 @@ export function ImportPools({ onChange }: { onChange: () => void }) {
     const pending = Object.entries(saved);
 
     return (
-        <Card title="Pools on attached disks" actions={<Button onClick={scan.reload}>Scan again</Button>}>
+        <Card title="Import a pool" actions={<div class="row">
+            <Button onClick={scan.reload}>Scan again</Button>
+            {onClose && <Button onClick={onClose}>Close</Button>}
+        </div>}>
             <Loading loaded={scan}>{() => (
                 <div class="stack">
+                    <p class="muted small">Pools already on attached disks, such as after a reinstall or disks moved from
+                        another NAS. Importing brings them back with their files; nothing is erased.</p>
                     {!scan.data!.length && <p class="muted">No other pools found on the attached disks.</p>}
                     {scan.data!.map(pool => {
                         const foreign = (pool.status || "").includes(FOREIGN);

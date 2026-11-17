@@ -7,8 +7,9 @@ import {
     humanSize, jobStarted,
     onOff, sessions, when,
 } from "./api";
-import { MODES, PALETTES, useAppearance } from "./appearance";
+import { DATES, HOURS, MODES, PALETTES, formatTaskbarDate, formatTime, useAppearance, useClockFormat } from "./appearance";
 import { DesktopContext } from "./desktop/context";
+import { useNasTime } from "./nas-clock";
 import { Badge, Button, Card, Confirm, Field, Loading, Notice, Page, Result, Usage, useAction, useLoad } from "./ui";
 
 export const SessionContext = createContext<Session>({ id: "", user: "", admin: false, csrf: "" });
@@ -224,27 +225,53 @@ const POWER = {
     shutdown: { label: "Shut down", phrase: "shut down the NAS", text: "Everything stops until someone switches the NAS on again." },
 } as const;
 
+/** Asks before restarting or shutting down, and does it. Used here and in the
+    desktop's account menu. */
+export function PowerConfirm({ which, onCancel }: { which: keyof typeof POWER; onCancel: () => void }) {
+    const action = useAction();
+    return (
+        <Confirm title={POWER[which].label} phrase={POWER[which].phrase} busy={action.busy} outcome={action.outcome}
+                 onCancel={() => { action.clear(); onCancel(); }}
+                 onConfirm={typed => action.run(() => fnas(["system", which, "--confirm", typed]))}>
+            <p>{POWER[which].text}</p>
+        </Confirm>
+    );
+}
+
+/** One question for both: restart or shut down. The desktop's power button opens it. */
+export function PowerChoice({ onCancel }: { onCancel: () => void }) {
+    const action = useAction();
+    const cancel = useRef<HTMLButtonElement>(null);
+    useEffect(() => cancel.current?.focus(), []);
+    const go = (which: keyof typeof POWER) =>
+        action.run(() => fnas(["system", which, "--confirm", POWER[which].phrase]));
+    return (
+        <div class="overlay power-overlay" role="dialog" aria-modal="true" aria-label="Restart or shut down">
+            <div class="dialog">
+                <h2>Restart or shut down the NAS?</h2>
+                <p><strong>Restart:</strong> {POWER.restart.text}</p>
+                <p><strong>Shut down:</strong> {POWER.shutdown.text}</p>
+                <Result outcome={action.outcome} />
+                <div class="row row-end">
+                    <button ref={cancel} class="button button-plain" type="button"
+                            onClick={() => { action.clear(); onCancel(); }}>Cancel</button>
+                    <Button busy={action.busy} onClick={() => go("restart")}>Restart</Button>
+                    <Button kind="danger" busy={action.busy} onClick={() => go("shutdown")}>Shut down</Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function Power() {
     const [asking, setAsking] = useState<keyof typeof POWER | null>(null);
-    const action = useAction();
     return (
         <Card title="Power">
             <div class="row">
                 <Button onClick={() => setAsking("restart")}>Restart</Button>
                 <Button kind="danger" onClick={() => setAsking("shutdown")}>Shut down</Button>
             </div>
-            {!asking && <Result outcome={action.outcome} />}
-            {asking && (
-                <Confirm title={POWER[asking].label} phrase={POWER[asking].phrase} busy={action.busy} outcome={action.outcome}
-                         onCancel={() => { setAsking(null); action.clear(); }}
-                         onConfirm={typed => action.run(async () => {
-                             const output = await fnas(["system", asking, "--confirm", typed]);
-                             setAsking(null);
-                             return output;
-                         })}>
-                    <p>{POWER[asking].text}</p>
-                </Confirm>
-            )}
+            {asking && <PowerConfirm which={asking} onCancel={() => setAsking(null)} />}
         </Card>
     );
 }
@@ -785,8 +812,38 @@ const SECTIONS = [
     { id: "setup", label: "Setup", admin: true },
 ] as const;
 
-/** Light, dark or the system's own, and which of the themes to draw with. Both are
-    kept in this browser, not on the NAS. */
+/** How the clock reads, each choice shown as it would look right now. Used here
+    and in the taskbar's calendar. */
+export function ClockChoices() {
+    const { format, setClock } = useClockFormat();
+    const { now, zone } = useNasTime(30_000);
+    const segmented = <T extends string | boolean>(label: string, options: readonly T[], current: T,
+                                                    title: (option: T) => string, pick: (option: T) => void) => (
+        <Field label={label}>
+            <div class="segmented" role="group" aria-label={label}>
+                {options.map(option => (
+                    <button key={String(option)} type="button" class={current === option ? "current" : ""}
+                            aria-pressed={current === option} onClick={() => pick(option)}>{title(option)}</button>
+                ))}
+            </div>
+        </Field>
+    );
+    return (
+        <div class="stack clock-choices">
+            {segmented("Hours", HOURS, format.hours,
+                       hours => hours === "auto" ? "Auto" : formatTime(now, { ...format, hours }, false, zone),
+                       hours => setClock({ hours }))}
+            {segmented("Seconds on the taskbar", [false, true] as const, format.seconds,
+                       seconds => seconds ? "Show" : "Hide", seconds => setClock({ seconds }))}
+            {segmented("Date on the taskbar", DATES, format.date,
+                       date => date === "off" ? "None" : formatTaskbarDate(now, { ...format, date }, zone),
+                       date => setClock({ date }))}
+        </div>
+    );
+}
+
+/** Light, dark or the system's own, which of the themes to draw with, and the
+    clock. Kept with the person's account on the NAS. */
 function Look() {
     const look = useAppearance();
     return (
@@ -815,6 +872,10 @@ function Look() {
                     </button>
                 ))}
             </div>
+            <h3>Clock</h3>
+            <p class="muted small">The clock shows the NAS's time, in its time zone. Auto writes it this device's
+                usual way.</p>
+            <ClockChoices />
         </Card>
     );
 }

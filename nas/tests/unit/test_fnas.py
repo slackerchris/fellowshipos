@@ -1081,7 +1081,9 @@ class Sharing(Base):
         media = self.smb_file("shares", "media.conf")
         self.assertIn("[media]\npath = /tank/shares/media\n", media)
         self.assertIn("hosts allow = 192.168.1.0/24 127.0.0.1\n", media)
-        self.assertIn("force user = nas-share\n", media)
+        self.assertIn("force user = file-share\n", media)
+        # Someone taken out of the group is out over SMB too
+        self.assertIn("valid users = @file-share\n", media)
         self.assertIn("shadow:snapdir = .zfs/snapshot\n", media)
         self.assertNotIn("shadow:localtime", media)
         self.assertNotIn("force user", self.smb_file("shares", "chris.conf"))
@@ -2237,6 +2239,8 @@ class SmbPassword(unittest.TestCase):
     def test_only_peoples_accounts(self):
         with self.account(0), self.assertRaisesRegex(fnas.FnasError, "isn't a person's account"):
             fnas.set_smb_password("root", "x")
+        with self.account(3000, "/usr/sbin/nologin"), self.assertRaisesRegex(fnas.FnasError, "isn't a person's"):
+            fnas.set_smb_password("file-share", "x")
         with self.account(3000, "/usr/sbin/nologin"), self.assertRaisesRegex(fnas.FnasError, "isn't a person's"):
             fnas.set_smb_password("nas-share", "x")
         with mock.patch.object(fnas.pwd, "getpwnam", side_effect=KeyError), \
@@ -3710,8 +3714,8 @@ class Users(unittest.TestCase):
             pw_name=name, pw_uid=uid, pw_gid=uid, pw_gecos=f"{name.title()},,,", pw_shell=shell)
         group = lambda name, gid, members=(): SimpleNamespace(gr_name=name, gr_gid=gid, gr_mem=list(members))
         self.accounts = [account("root", 0), account("tester", 1000), account("kim", 1001, "/usr/sbin/nologin"),
-                         account("nas-share", 3000, "/usr/sbin/nologin")]
-        self.groups = [group("tester", 1000), group("kim", 1001), group("nas-share", 3000),
+                         account("file-share", 3000, "/usr/sbin/nologin")]
+        self.groups = [group("tester", 1000), group("kim", 1001), group("file-share", 3000),
                        group("family", 1002, ["kim"]), group("nas-admins", 999, ["tester"]),
                        # What Debian and its packages leave behind
                        group("video", 44, ["kim"]), group("wheel", 998, ["tester"]),
@@ -3751,6 +3755,8 @@ class Users(unittest.TestCase):
         for patcher in (patch("run", run), patch("SHADOW", shadow),
                         patch("SIGNED_OUT_FILE", signed_out),
                         patch("SIGNED_OUT_LOCK", signed_out + ".lock"),
+                        patch("EVERYONE_FILE", signed_out + ".everyone"),
+                        patch("EVERYONE_LOCK", signed_out + ".everyone.lock"),
                         mock.patch.object(fnas.pwd, "getpwall", lambda: self.accounts),
                         mock.patch.object(fnas.grp, "getgrall", lambda: self.groups),
                         mock.patch.object(fnas.grp, "getgrnam", by_name),
@@ -3781,6 +3787,50 @@ class Users(unittest.TestCase):
         self.assertIn((("chpasswd",), "sam:long enough\n"), self.calls)
         self.assertIn((("smbpasswd", "-s", "-a", "sam"), "long enough\nlong enough\n"), self.calls)
         self.assertIn(("gpasswd", "-a", "sam", "family"), commands)
+
+    def test_a_new_person_can_use_shares_for_everyone_unless_left_out(self):
+        with mock.patch.object(fnas.os.path, "isdir", return_value=True):
+            fnas.create_user("sam", "Sam", "shares", False, [], "long enough")
+            fnas.create_user("ann", "Ann", "shares", False, [], "long enough", everyone=False)
+        self.assertIn(("gpasswd", "-a", "sam", "file-share"), self.commands())
+        self.assertNotIn(("gpasswd", "-a", "ann", "file-share"), self.commands())
+        # Left out on purpose, so a refresh leaves her out
+        self.calls.clear()
+        users = {m.__name__: m for m in MODULES}["fellowship_nas.users"]
+        with mock.patch.object(users, "is_person", lambda a: a.pw_name in ("sam", "ann")):
+            users.offer_everyone()
+        self.assertEqual(self.commands(), [])
+
+    def test_a_refresh_adds_everyone_once_and_leaves_removals_alone(self):
+        users = {m.__name__: m for m in MODULES}["fellowship_nas.users"]
+        users.offer_everyone()
+        self.assertIn(("gpasswd", "-a", "kim", "file-share"), self.commands())
+        self.assertIn(("gpasswd", "-a", "tester", "file-share"), self.commands())
+        self.assertNotIn(("gpasswd", "-a", "root", "file-share"), self.commands())
+        # Kim taken out by hand stays out at the next refresh
+        self.calls.clear()
+        users.set_groups("kim", ["family", "video"])
+        users.offer_everyone()
+        self.assertFalse(any(c[:2] == ("gpasswd", "-a") and c[-1] == "file-share" for c in self.commands()))
+
+    def test_taking_someone_out_by_hand_is_remembered_before_any_refresh(self):
+        users = {m.__name__: m for m in MODULES}["fellowship_nas.users"]
+        file_share = next(g for g in self.groups if g.gr_name == "file-share")
+        file_share.gr_mem.append("kim")
+        users.set_groups("kim", ["family", "video"])
+        self.assertIn(("gpasswd", "-d", "kim", "file-share"), self.commands())
+        file_share.gr_mem.remove("kim")
+        self.calls.clear()
+        users.offer_everyone()
+        self.assertNotIn(("gpasswd", "-a", "kim", "file-share"), self.commands())
+
+    def test_shares_for_everyone_are_only_listed_for_the_people_in_the_group(self):
+        shares_module = {m.__name__: m for m in MODULES}["fellowship_nas.shares"]
+        known = [{"name": "media", "mode": "everyone"},
+                 {"name": "docs", "mode": "chosen", "access": {"users": {"kim": "read"}, "groups": {}}}]
+        next(g for g in self.groups if g.gr_name == "file-share").gr_mem.append("tester")
+        self.assertEqual([s["name"] for s in shares_module.shares_of("tester", known)], ["media"])
+        self.assertEqual([s["name"] for s in shares_module.shares_of("kim", known)], ["docs"])
 
     def test_changing_a_password_ends_every_session(self):
         with mock.patch.object(fnas.os.path, "isdir", return_value=True):
@@ -3844,7 +3894,7 @@ class Users(unittest.TestCase):
         # is filtered: every group on the machine can be chosen.
         found = {g["name"]: g for g in fnas.list_groups(include_system=True)}
         self.assertEqual(sorted(found),
-                         ["docker", "family", "kim", "nas-admins", "nas-share", "tester", "video", "wheel"])
+                         ["docker", "family", "file-share", "kim", "nas-admins", "tester", "video", "wheel"])
         self.assertEqual((found["video"]["system"], found["video"]["members"]), (True, ["kim"]))
         self.assertFalse(found["family"]["system"])
         # A group named after an account is flagged, since its members follow the account
@@ -4300,11 +4350,13 @@ class LookTests(unittest.TestCase):
 
     def test_a_person_who_has_not_chosen_gets_the_desktop_as_it_ships(self):
         self.assertEqual(self.look.show("kim"),
-                         {"user": "kim", "mode": "system", "palette": "fellowship"})
+                         {"user": "kim", "mode": "system", "palette": "fellowship",
+                          "hours": "auto", "seconds": False, "date": "off"})
 
     def test_one_change_keeps_the_other(self):
         self.look.set_look("kim", palette="highwatch")
-        expected = {"user": "kim", "mode": "system", "palette": "highwatch"}
+        expected = {"user": "kim", "mode": "system", "palette": "highwatch",
+                    "hours": "auto", "seconds": False, "date": "off"}
         self.assertEqual(self.look.show("kim"), expected)
         self.look.set_look("kim", mode="dark")
         self.assertEqual(self.look.show("kim"), {**expected, "mode": "dark"})
@@ -4321,6 +4373,23 @@ class LookTests(unittest.TestCase):
         for palette in ("../../etc/passwd", "High Watch", "", "-rf"):
             with self.subTest(palette), self.assertRaisesRegex(fnas.FnasError, "theme name"):
                 self.look.set_look("kim", palette=palette)
+
+    def test_the_clock_is_kept_with_the_rest(self):
+        self.look.set_look("kim", mode="dark")
+        self.look.set_look("kim", hours="24", seconds=True, date="short")
+        chosen = self.look.show("kim")
+        self.assertEqual((chosen["mode"], chosen["hours"], chosen["seconds"], chosen["date"]),
+                         ("dark", "24", True, "short"))
+        self.look.set_look("kim", seconds=False)
+        self.assertEqual(self.look.show("kim")["hours"], "24")
+
+    def test_only_a_real_clock_choice_is_kept(self):
+        with self.assertRaisesRegex(fnas.FnasError, "hours must be"):
+            self.look.set_look("kim", hours="13")
+        with self.assertRaisesRegex(fnas.FnasError, "date must be"):
+            self.look.set_look("kim", date="long")
+        with self.assertRaisesRegex(fnas.FnasError, "seconds is on or off"):
+            self.look.set_look("kim", seconds="yes")
 
     def test_nothing_to_change_is_refused(self):
         with self.assertRaisesRegex(fnas.FnasError, "nothing to change"):
@@ -4729,6 +4798,133 @@ class PoolDelete(unittest.TestCase):
         self.assertIn(("mdadm", "--zero-superblock", "/dev/sdb"), calls)
         self.assertIn(("mdadm", "--zero-superblock", "/dev/sdc"), calls)
         self.assertIn(("forget_mount", "tank"), calls)
+
+    def test_every_engine_offers_delete(self):
+        for module in ("mdadm", "zfs", "mergerfs"):
+            engine = {m.__name__: m for m in MODULES}[f"fellowship_nas.engines.{module}"]
+            self.assertTrue(hasattr(engine, "delete_pool"), module)
+            self.assertIn("{pool}", engine.PRESENTATION["delete_text"], module)
+
+
+class ZfsPoolDelete(unittest.TestCase):
+    """Deleting a ZFS pool destroys it and clears every member's labels, so a
+    destroyed pool can't come back and its disks read as empty."""
+
+    def setUp(self):
+        self.zfs = {m.__name__: m for m in MODULES}["fellowship_nas.engines.zfs"]
+        part = lambda n: {"path": f"/dev/disk/by-id/scsi-{n}-part1"}
+        self.status = {"groups": [{"disks": [part("a"), part("b")]}], "spares": [part("s")]}
+
+    def patches(self, shares, calls, destroy_code=0, backups=""):
+        def run(*command, **kw):
+            calls.append(command)
+            if command[:2] == ("zpool", "destroy"):
+                return SimpleNamespace(stdout="", stderr="pool is busy", returncode=destroy_code)
+            if command[:2] == ("zfs", "list"):
+                return SimpleNamespace(stdout=backups, stderr="", returncode=0 if backups else 1)
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+        return (mock.patch.object(self.zfs.pools, "find_pool", lambda name: {"name": name}),
+                mock.patch.object(self.zfs.shares, "list_shares", lambda: shares),
+                mock.patch.object(self.zfs.shares, "write_config", lambda **kw: calls.append(("write_config", kw))),
+                mock.patch.object(self.zfs, "pool_status", lambda name: self.status),
+                mock.patch.object(self.zfs.disks, "whole_disk", lambda path: path.replace("-part1", "")),
+                mock.patch.object(self.zfs, "run", run))
+
+    def delete(self, confirm, shares=(), **kw):
+        calls = []
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches(list(shares), calls, **kw):
+                stack.enter_context(patcher)
+            self.zfs.delete_pool("tank", confirm)
+        return calls
+
+    def test_refuses_while_shares_live_on_the_pool(self):
+        with self.assertRaisesRegex(fnas.FnasError, "still holds 1 share: pit. Remove them in Shares first"):
+            self.delete("tank", shares=[{"name": "pit", "pool": "tank"}])
+
+    def test_names_the_disks_and_the_backups_it_would_lose(self):
+        listing = "tank/fellowship-backup\ntank/fellowship-backup/photos\n"
+        with self.assertRaisesRegex(fnas.FnasError, r"wipes .*scsi-a-part1, .*scsi-b-part1, .*scsi-s-part1, "
+                                                    r"and the backups it holds of photos"):
+            self.delete("wrong", backups=listing)
+
+    def test_destroys_the_pool_and_clears_every_disk(self):
+        calls = self.delete("tank")
+        self.assertIn(("zpool", "destroy", "tank"), calls)
+        for name in ("a", "b", "s"):
+            self.assertIn(("zpool", "labelclear", "-f", f"/dev/disk/by-id/scsi-{name}-part1"), calls)
+            self.assertIn(("wipefs", "-a", f"/dev/disk/by-id/scsi-{name}"), calls)
+        self.assertLess(calls.index(("zpool", "destroy", "tank")),
+                        calls.index(("zpool", "labelclear", "-f", "/dev/disk/by-id/scsi-a-part1")))
+
+    def test_a_busy_pool_stays_and_its_shares_come_back(self):
+        calls = []
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches([], calls, destroy_code=1):
+                stack.enter_context(patcher)
+            with self.assertRaisesRegex(fnas.FnasError, "pool is busy: disconnect any clients"):
+                self.zfs.delete_pool("tank", "tank")
+        self.assertEqual(calls[-1], ("write_config", {}))
+        self.assertFalse(any(c[:2] == ("zpool", "labelclear") for c in calls))
+
+
+class UnraidPoolDelete(unittest.TestCase):
+    """Deleting an Unraid-style pool unmounts it, forgets it, and wipes every
+    disk's filesystem, parity disks included."""
+
+    def setUp(self):
+        self.engine = mergerfs
+        self.found = Unraid.pool(None)
+
+    def delete(self, confirm, shares=(), job=None, umount_code=0):
+        calls = []
+
+        def run(*command, **kw):
+            calls.append(command)
+            code = umount_code if command == ("umount", "/mnt/media") else 0
+            return SimpleNamespace(stdout="", stderr="target is busy", returncode=code)
+        patches = (mock.patch.object(self.engine, "record", lambda name: self.found),
+                   mock.patch.object(self.engine.pools, "find_pool", lambda name: {"name": name}),
+                   mock.patch.object(self.engine.shares, "list_shares", lambda: list(shares)),
+                   mock.patch.object(self.engine.shares, "write_config", lambda **kw: calls.append(("write_config", kw))),
+                   mock.patch.object(self.engine, "running_job", lambda name: job),
+                   mock.patch.object(self.engine, "forget", lambda found: calls.append(("forget", found["name"]))),
+                   mock.patch.object(self.engine, "read_json", lambda path, default=None: {"media": {}, "other": {}}),
+                   mock.patch.object(self.engine, "write_json", lambda path, data: calls.append(("state", data))),
+                   mock.patch.object(self.engine.os.path, "exists", lambda path: False),
+                   mock.patch.object(self.engine, "run", run))
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            self.engine.delete_pool("media", confirm)
+        return calls
+
+    def test_refuses_while_shares_live_on_the_pool(self):
+        with self.assertRaisesRegex(fnas.FnasError, "still holds 1 share: films"):
+            self.delete("media", shares=[{"name": "films", "pool": "media"}])
+
+    def test_refuses_while_a_sync_runs(self):
+        with self.assertRaisesRegex(fnas.FnasError, "media is busy"):
+            self.delete("media", job={"kind": "sync"})
+
+    def test_names_every_disk_including_parity(self):
+        with self.assertRaisesRegex(fnas.FnasError, "wipes /dev/disk/by-id/ata-A1, /dev/disk/by-id/ata-B2, "
+                                                    "/dev/disk/by-id/ata-P1"):
+            self.delete("wrong")
+
+    def test_unmounts_forgets_and_wipes_every_disk(self):
+        calls = self.delete("media")
+        self.assertIn(("umount", "/mnt/media"), calls)
+        self.assertIn(("forget", "media"), calls)
+        for serial in ("A1", "B2", "P1"):
+            self.assertIn(("umount", f"/srv/disks/{serial}"), calls)
+            self.assertIn(("wipefs", "-a", f"/dev/disk/by-id/ata-{serial}"), calls)
+        self.assertLess(calls.index(("forget", "media")), calls.index(("wipefs", "-a", "/dev/disk/by-id/ata-A1")))
+        self.assertIn(("state", {"other": {}}), calls)
+
+    def test_a_busy_pool_is_left_as_it_was(self):
+        with self.assertRaisesRegex(fnas.FnasError, "target is busy: disconnect any clients"):
+            self.delete("media", umount_code=32)
 
 
 class ServiceControl(unittest.TestCase):

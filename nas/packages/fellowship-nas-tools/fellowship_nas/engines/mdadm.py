@@ -39,6 +39,9 @@ PRESENTATION = {
     "grow_text": {},
     "expand_text": ("Add one disk to the array. Its data is spread onto the new disk (a reshape, which can "
                     "take many hours), and the space appears when that finishes"),
+    "delete_button": "Delete array…",
+    "delete_text": ("This stops the array and wipes its superblocks. Everything on {pool} is gone, and these "
+                    "disks read as empty so they can build a new array:"),
     "check_button": "Check array",
     "check_name": "array check",
     "check_text": ("Check array reads every block on {pool} and compares it with the parity or the other copy. "

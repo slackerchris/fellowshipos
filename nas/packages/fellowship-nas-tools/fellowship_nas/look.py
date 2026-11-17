@@ -1,5 +1,5 @@
-"""How each person likes the desktop: light, dark or the system's, and which
-theme. Kept on the NAS so a person's choice follows them to another computer
+"""How each person likes the desktop: light, dark or the system's, which
+theme, and how the clock reads. Kept on the NAS so a person's choice follows them to another computer
 or browser instead of staying in the one they first chose it in."""
 import os
 import pwd
@@ -12,9 +12,13 @@ LOOK_FILE = "/etc/fellowshipos/nas-look.json"
 LOOK_LOCK = os.path.join(STATE_DIR, "look.lock")
 
 MODES = ("system", "light", "dark")
+# auto follows the device's language, as the clock always has
+HOURS = ("auto", "12", "24")
+# What the taskbar shows beside the time
+DATES = ("off", "short", "numeric")
 
 # What someone sees before they choose. The desktop's own theme is the default.
-DEFAULTS = {"mode": "system", "palette": "fellowship"}
+DEFAULTS = {"mode": "system", "palette": "fellowship", "hours": "auto", "seconds": False, "date": "off"}
 
 # A theme's name as the desktop spells it. The themes themselves live in the
 # desktop's themes.mjs; fnas only keeps the name, so a theme added or removed
@@ -45,22 +49,23 @@ def show(user):
     return {"user": user, **DEFAULTS, **chosen_looks().get(user, {})}
 
 
-def set_look(user, mode=None, palette=None):
-    """Remember a person's light or dark and theme."""
+def set_look(user, mode=None, palette=None, hours=None, seconds=None, date=None):
+    """Remember a person's light or dark, theme and clock."""
     check_user(user)
-    if mode is None and palette is None:
-        raise FnasError("nothing to change: give --mode, --palette, or both")
-    if mode is not None and mode not in MODES:
-        raise FnasError(f"mode must be one of: {', '.join(MODES)}")
-    if palette is not None and not THEME_NAME.match(palette):
+    change = {"mode": mode, "palette": palette, "hours": hours, "seconds": seconds, "date": date}
+    change = {key: value for key, value in change.items() if value is not None}
+    if not change:
+        raise FnasError("nothing to change: give --mode, --palette, --hours, --seconds or --date")
+    for key, allowed in (("mode", MODES), ("hours", HOURS), ("date", DATES)):
+        if key in change and change[key] not in allowed:
+            raise FnasError(f"{key} must be one of: {', '.join(allowed)}")
+    if "palette" in change and not THEME_NAME.match(palette):
         raise FnasError(f"{palette} isn't a theme name")
+    if "seconds" in change and not isinstance(seconds, bool):
+        raise FnasError("seconds is on or off")
     with locked(LOOK_LOCK):
         saved = chosen_looks()
-        chosen = {**DEFAULTS, **saved.get(user, {})}
-        if mode is not None:
-            chosen["mode"] = mode
-        if palette is not None:
-            chosen["palette"] = palette
+        chosen = {**DEFAULTS, **saved.get(user, {}), **change}
         saved[user] = chosen
         write_json(LOOK_FILE, {"users": saved})
     return {"user": user, **chosen}

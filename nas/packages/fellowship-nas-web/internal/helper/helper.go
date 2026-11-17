@@ -215,6 +215,12 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 		return h.list(request)
 	case protocol.OpEndSession:
 		return h.end(request)
+	case protocol.OpClock:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			clock := ReadClock()
+			return protocol.Response{Clock: &clock}
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	}
 	return failure(protocol.CodeBadRequest, fmt.Sprintf("unknown request %q", request.Op))
 }

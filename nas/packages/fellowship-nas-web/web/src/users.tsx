@@ -41,11 +41,15 @@ export const passwordProblem = (password: string, again: string) =>
     password.length < 8 ? "The password needs at least 8 characters."
     : password !== again ? "The passwords don't match." : "";
 
+/** The group whose members can use shares set to everyone. */
+const EVERYONE_GROUP = "file-share";
+
 function GroupChoices({ groups, chosen, setChosen, own }: {
     groups: Group[]; chosen: string[]; setChosen: (names: string[]) => void; own?: string;
 }) {
     // A person's own group follows their account, so it isn't a choice here
-    const offered = groups.filter(group => !(own && group.private && group.name === own));
+    const offered = groups.filter(group => !(own && group.private && group.name === own) && group.name !== EVERYONE_GROUP);
+    const everyone = groups.some(group => group.name === EVERYONE_GROUP);
     const system = offered.filter(group => group.system);
     const managed = offered.filter(group => !group.system);
     const box = (group: Group) => (
@@ -61,6 +65,16 @@ function GroupChoices({ groups, chosen, setChosen, own }: {
     }
     return (
         <div class="stack">
+            {everyone && (
+                <label class="check">
+                    <input type="checkbox" checked={chosen.includes(EVERYONE_GROUP)}
+                           onChange={event => setChosen(event.currentTarget.checked ? [...chosen, EVERYONE_GROUP]
+                               : chosen.filter(name => name !== EVERYONE_GROUP))} />
+                    <span>Can use shares for everyone<br />
+                        <span class="muted small">Through the {EVERYONE_GROUP} group. Everybody is in it unless taken
+                            out here; someone taken out can't open those shares in Files or over SMB.</span></span>
+                </label>
+            )}
             {managed.length > 0 && <div class="row">{managed.map(box)}</div>}
             {system.length > 0 && (
                 <details class="system-groups">
@@ -108,7 +122,8 @@ export function AddUser({ onAdded }: { onAdded: () => void }) {
     const [fullName, setFullName] = useState("");
     const [kind, setKind] = useState<User["kind"]>("shares");
     const [admin, setAdmin] = useState(false);
-    const [chosen, setChosen] = useState<string[]>([]);
+    // Shares for everyone are open to a new person unless unticked
+    const [chosen, setChosen] = useState<string[]>([EVERYONE_GROUP]);
     const [password, setPassword] = useState("");
     const [again, setAgain] = useState("");
     const action = useAction(onAdded);
@@ -121,8 +136,9 @@ export function AddUser({ onAdded }: { onAdded: () => void }) {
                 action.run(async () => {
                     const output = await fnas(["user", "create", name, "--full-name", fullName, "--kind", kind,
                                                ...(admin ? ["--admin"] : []), "--groups", chosen.join(","),
+                                               ...(chosen.includes(EVERYONE_GROUP) ? [] : ["--no-everyone-shares"]),
                                                "--password-stdin"], password);
-                    setName(""); setFullName(""); setPassword(""); setAgain(""); setChosen([]); setAdmin(false);
+                    setName(""); setFullName(""); setPassword(""); setAgain(""); setChosen([EVERYONE_GROUP]); setAdmin(false);
                     return output;
                 });
             }}>

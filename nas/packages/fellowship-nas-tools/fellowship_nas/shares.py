@@ -29,8 +29,11 @@ SHARE_MODES = ("everyone", "chosen")
 # What shares.json said before Phase 9; a "matched" share belonged to its folder's owner
 OLD_MODES = {"shared": "everyone", "matched": "chosen"}
 ACCESS_LEVELS = ("read", "write")
-# Fixed so that files on a moved pool keep their owner
-SHARE_ACCOUNT = "nas-share"
+# Fixed so that files on a moved pool keep their owner. Its group is how people
+# reach shares for everyone in Files: every person is in it unless taken out.
+# It was called nas-share until 2026-11; the package renames it in place.
+SHARE_ACCOUNT = "file-share"
+OLD_SHARE_ACCOUNT = "nas-share"
 SHARE_ID = 3000
 SETTING_KEYS = ("mode", "access", "nfs", "smb", "webdav", "sftp", "policy", "smb_options", "nfs_options")
 DEFAULT_SMB = {"readonly": False, "hidden": False, "guest": False, "recycle": False, "recycle_days": 30,
@@ -166,7 +169,8 @@ def folder_owner(path):
         name = pwd.getpwuid(os.stat(path).st_uid).pw_name
     except (OSError, KeyError):
         return {"users": {}, "groups": {}}
-    return {"users": {name: "write"} if ACCOUNT_NAME.match(name) and name != SHARE_ACCOUNT else {}, "groups": {}}
+    return {"users": {name: "write"} if ACCOUNT_NAME.match(name) and name not in (SHARE_ACCOUNT, OLD_SHARE_ACCOUNT) else {},
+            "groups": {}}
 
 
 def saved_settings(pool):
@@ -373,6 +377,9 @@ def smb_share_config(share, subnet):
         if options["guest"]:
             # Guests read; the guest account isn't the share account, so it can't write
             lines += ["guest ok = yes", "read list = nobody"]
+        else:
+            # Someone taken out of the group is out over SMB too, as they are in Files
+            lines.append(f"valid users = @{SHARE_ACCOUNT}")
     else:
         lines += [f"valid users = {smb_names(share['access']) or SHARE_ACCOUNT}",
                   "inherit acls = yes"]
@@ -719,9 +726,12 @@ def shares_of(user, known=None):
     everyone. known is list_shares() when the caller already has it."""
     groups = {g.gr_name for g in grp.getgrall() if user in g.gr_mem}
     found = []
+    # Someone an administrator took out of the share account's group can't use them
+    everyone = SHARE_ACCOUNT in groups or not any(g.gr_name == SHARE_ACCOUNT for g in grp.getgrall())
     for share in (list_shares() if known is None else known):
         if share["mode"] == "everyone":
-            found.append({"name": share["name"], "level": "write", "through": "everyone"})
+            if everyone:
+                found.append({"name": share["name"], "level": "write", "through": "everyone"})
             continue
         levels = [(level, "own") for name, level in share["access"]["users"].items() if name == user]
         levels += [(level, f"group {name}") for name, level in share["access"]["groups"].items() if name in groups]
@@ -783,7 +793,8 @@ def set_smb_password(name, password):
         account = pwd.getpwnam(name)
     except KeyError:
         raise FnasError(f"no such user: {name}") from None
-    if not (ACCOUNT_NAME.match(name) and 1000 <= account.pw_uid < 60000 and name != SHARE_ACCOUNT):
+    if not (ACCOUNT_NAME.match(name) and 1000 <= account.pw_uid < 60000
+            and name not in (SHARE_ACCOUNT, OLD_SHARE_ACCOUNT)):
         raise FnasError(f"{name} isn't a person's account")
     if not password or "\n" in password:
         raise FnasError("the password can't be empty or span lines")

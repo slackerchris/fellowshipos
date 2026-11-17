@@ -8,15 +8,24 @@ if [ "$1" = "configure" ]; then
         update-grub
     fi
 
-    # Shared folders are owned by this account on every protocol. The ID is
-    # fixed so files on a moved pool keep their owner.
-    getent group nas-share > /dev/null || groupadd --system --gid 3000 nas-share
-    getent passwd nas-share > /dev/null || useradd --system --uid 3000 --gid 3000 \
-        --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin nas-share
+    # Shares for everyone are owned by this account on every protocol, and
+    # people reach them in Files through its group. The ID is fixed so files on
+    # a moved pool keep their owner. It was called nas-share; renaming keeps the
+    # ID, so no file changes owner.
+    if getent passwd nas-share > /dev/null && ! getent passwd file-share > /dev/null; then
+        usermod --login file-share nas-share
+    fi
+    if getent group nas-share > /dev/null && ! getent group file-share > /dev/null; then
+        groupmod --new-name file-share nas-share
+    fi
+    getent group file-share > /dev/null || groupadd --system --gid 3000 file-share
+    getent passwd file-share > /dev/null || useradd --system --uid 3000 --gid 3000 \
+        --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin file-share
 
     # Moves share settings an older fnas kept on ZFS properties into each
-    # pool, exports shares through /etc/exports.d, and writes the NFS server's
-    # settings (NFSv4 only unless changed), restarting it if they changed
+    # pool, puts every person not yet offered it in file-share, exports shares
+    # through /etc/exports.d, and writes the NFS server's settings (NFSv4 only
+    # unless changed), restarting it if they changed
     fnas share refresh || true
 
     # Lets only accounts set to Shares and SSH log in over SSH, and never root.

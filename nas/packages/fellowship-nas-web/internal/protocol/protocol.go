@@ -38,6 +38,8 @@ const (
 	OpFileSearch    = "file-search"
 	OpSessions      = "sessions"
 	OpEndSession    = "end-session"
+	// The NAS's own time, zone and whether its clock is synchronised, for the desktop's clock
+	OpClock = "clock"
 )
 
 // ToTheEnd is the Length of an answer whose bytes run until the helper closes the
@@ -108,6 +110,16 @@ type Session struct {
 	Current  bool      `json:"current,omitempty"`
 }
 
+// Clock is the NAS's time as the desktop shows it. Now is in milliseconds, so
+// the browser can tell how far its own clock is from the NAS's.
+type Clock struct {
+	Now  int64  `json:"now"`
+	Zone string `json:"zone"`
+	// Whether the kernel says the clock is synchronised, and whether it could say
+	Synced bool `json:"synced"`
+	Known  bool `json:"known"`
+}
+
 type Response struct {
 	Code       string    `json:"code,omitempty"`
 	Error      string    `json:"error,omitempty"`
@@ -116,6 +128,7 @@ type Response struct {
 	Session    *Session  `json:"session,omitempty"`
 	Sessions   []Session `json:"sessions,omitempty"`
 	Output     string    `json:"output,omitempty"`
+	Clock      *Clock    `json:"clock,omitempty"`
 	// A file's bytes follow this answer: Length of them, out of a file of Size, or
 	// to the end when Length is ToTheEnd, for a zip that is made as it is sent
 	Size   int64 `json:"size,omitempty"`
