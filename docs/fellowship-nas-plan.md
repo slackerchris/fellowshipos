@@ -2,6 +2,8 @@
 
 Nov 9, 2026 · @Chris
 
+Use the [release list](fellowship-nas-release.md) for current scope and priorities.
+
 Revision 4 comes from Chris testing the desktop in a VM on Nov 9. It corrects choices revision 3 made without him and fixes screens that hid what the system can do. The full list of his points is in [fellowship-nas-changes.md](fellowship-nas-changes.md).
 
 Phases 0–7 were built before this revision and stay. Since then, Phases 8 to 11 are built, Phase 12's slices are built with its gate left for real hardware, and Phase 13 has WebDAV and SFTP built with FTP left (see the phase table).

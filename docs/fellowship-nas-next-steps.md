@@ -1,5 +1,8 @@
 # FellowshipNAS next steps
 
+Use the [release list](fellowship-nas-release.md) for current priorities. The
+handoff below records the state as of November 11.
+
 Working note, written November 9, 2026 against `nas-edition` at `3610577`,
 brought up to date against `059a150` when Phase 12 started, again on
 November 10 against `c29fe37` when the SFTP work landed, again the same day

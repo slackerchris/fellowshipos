@@ -11,9 +11,11 @@ The product map and the build, branch and push rules are in
 
 | Document | What it answers |
 | --- | --- |
-| [fellowship-nas-plan.md](fellowship-nas-plan.md) | The architecture plan (revision 4): scope, phases and verification gates |
+| [fellowship-nas-release.md](fellowship-nas-release.md) | First-release scope, current milestone, and how new work is approved |
+| [fellowship-nas-phone-app.md](fellowship-nas-phone-app.md) | Draft requirements and design for phone backup and Android file access |
+| [fellowship-nas-plan.md](fellowship-nas-plan.md) | Architecture, phase history, and verification gates |
 | [fellowship-nas-overview.md](fellowship-nas-overview.md) | What is built and verified, as a baseline |
-| [fellowship-nas-next-steps.md](fellowship-nas-next-steps.md) | The working note of what comes next |
+| [fellowship-nas-next-steps.md](fellowship-nas-next-steps.md) | Historical handoff from November 11 |
 | [fellowship-nas-files-plan.md](fellowship-nas-files-plan.md) | What the Files app still needs, slice by slice |
 | [fellowship-nas-changes.md](fellowship-nas-changes.md) | Changes from the November 9 review |
 | [fellowship-nas-account-separation.md](fellowship-nas-account-separation.md) | Separating NAS accounts from Linux logins: decisions and phases |
