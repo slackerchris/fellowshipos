@@ -135,23 +135,6 @@ func NewRecoveryKey() string {
 	return strings.Join(groups, "-")
 }
 
-// keyEnding is what the page has someone type back: the key's last two groups,
-// read however they were typed
-func keyEnding(key string) string {
-	groups := strings.Split(key, "-")
-	return strings.Join(groups[len(groups)-2:], "")
-}
-
-func typedEnding(typed string) string {
-	var kept []rune
-	for _, r := range strings.ToUpper(typed) {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			kept = append(kept, r)
-		}
-	}
-	return string(kept)
-}
-
 // Code is the current pairing code, for the console
 func (s *Server) Code() string {
 	s.mu.Lock()
@@ -410,8 +393,6 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		engine.Settings
 		Confirm string `json:"confirm"`
-		// The recovery key's last two groups, typed back to show it was saved
-		RecoveryConfirm string `json:"recovery_confirm"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -448,11 +429,9 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		if typedEnding(body.RecoveryConfirm) != keyEnding(s.recoveryKey) {
-			fail(w, http.StatusUnprocessableEntity,
-				"Type the last two groups of your recovery key, to show it is saved somewhere other than this machine.")
-			return
-		}
+		// The key is shown once and saving it is the owner's act; typing back a
+		// fragment of a key still on the screen proved nothing, so the erase
+		// phrase above is the only confirmation the install asks for
 		body.RecoveryKey = s.recoveryKey
 	}
 

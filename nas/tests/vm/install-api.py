@@ -72,7 +72,7 @@ def main():
                            "recovery-key.txt"), "w") as file:
         file.write(key + "\n")
     print("recovery key saved", flush=True)
-    body = dict(SETTINGS, confirm="erase vda", recovery_confirm=key.split("-")[-2] + key.split("-")[-1])
+    body = dict(SETTINGS, confirm="erase vda")
     print("installing:", call("POST", "/api/install", body), flush=True)
     for _ in range(600):
         state = call("GET", "/api/progress")

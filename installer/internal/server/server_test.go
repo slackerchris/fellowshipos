@@ -173,12 +173,12 @@ func TestOtherSitesAreRefused(t *testing.T) {
 	}
 }
 
-// A separated NAS also needs root's own password and the recovery key's last two
-// groups typed back; the multi-purpose image ignores both
+// A separated NAS also needs root's own password; the multi-purpose image
+// ignores it. The recovery key is shown once and never typed back.
 const good = `"hostname":"vault","timezone":"UTC","user":"chris","full_name":"Chris","password":"correct horse","system":34359738368,` +
-	`"root_password":"root's own one","recovery_confirm":"ggggg-hhhhh"`
+	`"root_password":"root's own one"`
 
-// testKey stands in for the key the server makes, so tests can type it back
+// testKey stands in for the key the server makes in tests
 const testKey = "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH"
 
 func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
@@ -308,7 +308,7 @@ func TestTheNASWontInstallWithSecureBootOn(t *testing.T) {
 	}
 }
 
-func TestTheRecoveryKeyIsShownAndTypedBack(t *testing.T) {
+func TestTheRecoveryKeyIsShownOnceAndInstallNeedsNoTypeBack(t *testing.T) {
 	s, f := setup()
 	got := send(s, req{method: "GET", path: "/api/recovery-key", remote: screen})
 	if got.Code != 200 || !strings.Contains(got.Body.String(), testKey) || got.Header().Get("Cache-Control") != "no-store" {
@@ -319,8 +319,6 @@ func TestTheRecoveryKeyIsShownAndTypedBack(t *testing.T) {
 		t.Fatal("an unpaired browser got the recovery key")
 	}
 	for _, c := range []struct{ body, want string }{
-		{strings.Replace(good, `"recovery_confirm":"ggggg-hhhhh"`, `"recovery_confirm":"FFFFF-GGGGG"`, 1), "last two groups"},
-		{strings.Replace(good, `"recovery_confirm":"ggggg-hhhhh"`, `"recovery_confirm":""`, 1), "last two groups"},
 		{strings.Replace(good, `"root_password":"root's own one"`, `"root_password":"correct horse"`, 1), "different"},
 	} {
 		response := send(s, req{method: "POST", path: "/api/install", remote: screen,

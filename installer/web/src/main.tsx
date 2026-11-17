@@ -299,9 +299,7 @@ function RootPassword({ settings, rootAgain, onChange, onRootAgain }: {
 
 /** The recovery key, shown once to be saved: it is the one way back in if both
     root's password and the NAS admin's are lost. */
-function RecoveryKey({ local, typed, onTyped, keyText }: {
-    local: boolean; typed: string; onTyped: (typed: string) => void; keyText: string;
-}) {
+function RecoveryKey({ local, keyText }: { local: boolean; keyText: string }) {
     const save = () => {
         const blob = new Blob([`FellowshipOS NAS recovery key\n\n${keyText}\n\nKeep this somewhere other than the NAS. `
             + `At the boot menu, FellowshipOS recovery asks for it.\n`], { type: "text/plain" });
@@ -316,39 +314,25 @@ function RecoveryKey({ local, typed, onTyped, keyText }: {
             <p class="small"><strong>Your recovery key.</strong> If root's password and yours are both lost, FellowshipOS
                 recovery in the boot menu asks for this, and nothing else gets you back in. It is shown only now.</p>
             <p class="mono recovery-key-text">{keyText || "…"}</p>
-            {local
-                ? <p class="small muted">Write it down or photograph it, and keep it away from the NAS.</p>
-                : <div class="row"><button class="button" type="button" onClick={save}>Save as text file</button></div>}
-            <Field label="Type its last two groups" hint="To show it is saved somewhere">
-                <input value={typed} autoComplete="off" spellcheck={false}
-                       onInput={event => onTyped(event.currentTarget.value)} />
-            </Field>
+            <div class="row"><button class="button" type="button" onClick={save}>Save as text file</button></div>
+            {local && <p class="small muted">Or write it down or photograph it. Keep it away from the NAS: a copy
+                saved on the NAS itself is lost with it.</p>}
         </div>
     );
 }
 
-function keyEnding(text: string) {
-    return text.split("-").slice(-2).join("").toUpperCase();
-}
-
-function typedEnding(text: string) {
-    return text.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 function Confirm({ disk, layout, settings, edition, separated, local, onInstall }: {
     disk: Disk; layout: Layout; settings: Settings; edition?: string; separated: boolean; local: boolean;
-    onInstall: (typed: string, recoveryConfirm: string) => Promise<void>;
+    onInstall: (typed: string) => Promise<void>;
 }) {
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
     const [keyText, setKeyText] = useState("");
-    const [typed, setTyped] = useState("");
     useEffect(() => {
         if (separated) {
             recoveryKey().then(found => setKeyText(found.key), failure => setError((failure as Error).message));
         }
     }, [separated]);
-    const keySaved = !separated || (!!keyText && typedEnding(typed) === keyEnding(keyText));
     return (
         <form class="stack" onSubmit={async event => {
             event.preventDefault();
@@ -357,7 +341,7 @@ function Confirm({ disk, layout, settings, edition, separated, local, onInstall 
             try {
                 // The server asks for the phrase naming the disk, so the request
                 // itself says which one it erases
-                await onInstall(`erase ${shortName(disk.path)}`, typed);
+                await onInstall(`erase ${shortName(disk.path)}`);
             } catch (failure) {
                 setError((failure as Error).message);
                 setBusy(false);
@@ -379,9 +363,9 @@ function Confirm({ disk, layout, settings, edition, separated, local, onInstall 
             </table>
             {edition === "nas" && <p class="muted small">Everything the NAS needs is on this disk once it's installed:
                 the first start needs no network and asks nothing.</p>}
-            {separated && <RecoveryKey local={local} typed={typed} onTyped={setTyped} keyText={keyText} />}
+            {separated && <RecoveryKey local={local} keyText={keyText} />}
             {error && <Notice kind="error">{error}</Notice>}
-            <div class="row"><button class="button button-danger" type="submit" disabled={busy || !keySaved}>
+            <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
         </form>
     );
@@ -537,8 +521,8 @@ function Installer({ greeting }: { greeting: Hello }) {
             )}
             {step === 3 && canInstall && disk && layout && (
                 <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition}
-                         separated={!!info.separated} local={!!greeting.local} onInstall={async (typed, recoveryConfirm) => {
-                    await install({ ...settings, disk: disk.path, system: layout.system }, typed, recoveryConfirm);
+                         separated={!!info.separated} local={!!greeting.local} onInstall={async (typed) => {
+                    await install({ ...settings, disk: disk.path, system: layout.system }, typed);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />
             )}

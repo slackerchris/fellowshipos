@@ -91,8 +91,8 @@ export const hello = () => call<Hello>("GET", "/api/hello");
 export const pair = (code: string) => call<Hello>("POST", "/api/pair", { code });
 export const machine = () => call<Machine>("GET", "/api/machine");
 export const layoutFor = (size: number, system: number) => call<Layout>("POST", "/api/layout", { size, system });
-export const install = (settings: Settings, confirm: string, recoveryConfirm = "") =>
-    call<unknown>("POST", "/api/install", { ...settings, confirm, recovery_confirm: recoveryConfirm });
+export const install = (settings: Settings, confirm: string) =>
+    call<unknown>("POST", "/api/install", { ...settings, confirm });
 export const recoveryKey = () => call<{ key: string }>("GET", "/api/recovery-key");
 export const progress = () => call<Progress>("GET", "/api/progress");
 export const reboot = () => call<unknown>("POST", "/api/reboot");

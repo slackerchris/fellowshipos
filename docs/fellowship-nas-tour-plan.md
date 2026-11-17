@@ -146,8 +146,21 @@ own switch; Health stays quiet for a stop the owner asked for and still flags a
 crash; the web server and helper are not controllable from the desktop. Unit
 tests cover the remembered stop, its clearing on start, and the crash case.
 
+## The recovery-key type-back gate — removed, 2026-11-16
+
+Chris met it again on the Proxmox install and ordered it gone. It was never
+removed earlier: it had been audited, condemned against precedent (every real
+product hides the secret while confirming it), and left deferred — a gap in
+follow-through, not a decision to keep it. Now removed on both sides: the page
+shows the key once with **Save as text file** in every context (including the
+machine's own screen, with a note that a copy kept on the NAS is lost with it),
+and the install's only confirmation is the typed erase phrase naming the disk.
+The server no longer accepts or checks `recovery_confirm`; the key it made is
+still stored and still shown once, never typed back. Installer Go tests and the
+page's `tsc --noEmit` pass; a full install through the installer API without any
+type-back is proven by `nas/tests/vm/vm-delete-proof.sh`.
+
 ## Out of scope here
 
-The CPU gauge (diagnosed, awaiting go-ahead), green-in-every-theme, the black
-rectangles, and the installer recovery-key gate (deferred with forced password
-changes).
+The CPU gauge (diagnosed, awaiting go-ahead), green-in-every-theme, and the black
+rectangles.
