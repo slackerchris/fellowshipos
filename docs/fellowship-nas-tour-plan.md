@@ -74,6 +74,21 @@ the whole arc in `mdadm-building.sh`: start a check on a finished array, watch
 reason. A restart mid-check must still say *stopped before it finished* — that
 message is honest when the watcher really was killed.
 
+**Gate B result, 2026-11-16:** built and tested. `array_device()` already raised
+a named `FnasError`, so the silent-loss class was the uncaught-exception path:
+`run_job` now records any exception as the job's error, and a kernel-refused
+`sync_action` write becomes a named refusal at the click instead of a traceback.
+On a real four-disk array: a check started while building is refused with
+"already busy with a resilver" (no traceback); once protected, the check reaches
+`done` and `last_scrub` is recorded on the pool; a failed disk still reads
+DEGRADED and critical. Unit **376/376** (2 new); `mdadm-building.sh` **15/15**;
+`separated-login.sh` 53/53, `ssh-samba.sh` 71/71, `maintenance.sh` 26/26.
+The container has no systemd, so the harness launches the job watcher the way
+`systemd-run` would (a stub, like the existing systemctl one) — the job logic
+and the kernel's check are what get tested. Chris's exact click on the old image
+was not reproducible here; the completion path is proved and the silent-loss
+class is closed, and a future watcher death carries its reason.
+
 ## Gate C — delete array
 
 Export keeps the array; there is no delete. Add `fnas pool delete NAME` with the
@@ -86,10 +101,11 @@ Traditional RAID one the tour hit, and the confirmation lists what each engine
 would destroy. Proven on the test VM's four disks: build `tank`, delete it, build
 again from the same four.
 
-**Decision for Chris:** should delete also remove the shares that lived on the
-pool, or leave them defined but homeless (as export does)? Recommendation:
-remove them, listed in the confirmation, because a share pointing at a wiped
-pool is a broken promise in every list.
+**Chris's ruling (2026-11-16):** delete does **not** remove shares and does not
+leave them homeless. While any share lives on the pool, delete is **refused**:
+the answer names those shares and offers a button that opens them in Shares, so
+the owner removes them first and then deletes. With no shares left, the typed
+confirmation names the disks about to be wiped.
 
 ## Gate D — service controls
 

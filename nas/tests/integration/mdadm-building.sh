@@ -31,6 +31,11 @@ apt-get update -qq > /dev/null
 printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d
 dpkg-divert --quiet --local --rename --add /usr/bin/systemctl
 printf '#!/bin/sh\nexit 0\n' > /usr/bin/systemctl && chmod +x /usr/bin/systemctl
+# No systemd here: launch the job watcher the way systemd-run would, in the
+# background, so the job logic and the kernel's check are what get tested
+dpkg-divert --quiet --local --rename --add /usr/bin/systemd-run
+printf '#!/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in --*) shift ;; *) break ;; esac; done\n"$@" > /tmp/job.log 2>&1 &\nexit 0\n' \
+    > /usr/bin/systemd-run && chmod +x /usr/bin/systemd-run
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fellowship-nas-tools mdadm e2fsprogs > /tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; exit 1; }
 # fnas health reads the kernel's module directory; a container has none
 mkdir -p "/lib/modules/$(uname -r)"
@@ -80,6 +85,9 @@ sys.exit(0 if not [p for p in json.load(sys.stdin)["problems"] if p["key"].start
     && pass "Health raises no pool finding while building" || fail "Health raises no pool finding while building"
 /usr/lib/fellowship-nas/md-alert DegradedArray /dev/md0
 [ "$(alert_severity "is building")" = info ] && pass "mdadm's DegradedArray during the build is info" || fail "mdadm's DegradedArray during the build is info: $(alert_severity "is building")"
+out=$(fnas pool scrub tank 2>&1) && fail "a check during the build is refused" || pass "a check during the build is refused"
+grep -q "already busy" <<< "$out" && pass "the refusal names what the array is doing" || fail "the refusal names what the array is doing: $out"
+grep -q Traceback <<< "$out" && fail "the refusal is a message, not a traceback" || pass "the refusal is a message, not a traceback"
 
 echo "== when the parity is written: online"
 echo 200000 > /proc/sys/dev/raid/speed_limit_max
@@ -88,6 +96,19 @@ for _ in $(seq 60); do grep -qE 'resync|recovery|reshape' /proc/mdstat || break;
 sleep 1
 grep -qE 'resync|recovery|reshape' /proc/mdstat && fail "the initial sync finished" || pass "the initial sync finished"
 [ "$(pool_health)" = ONLINE ] && pass "pool list says ONLINE once protected" || fail "pool list says ONLINE once protected: $(pool_health)"
+
+echo "== a check runs to completion and says so"
+job=$(fnas pool scrub tank | grep -o 'job show [0-9a-f]*' | awk '{print $3}')
+[ -n "$job" ] && pass "the check starts and names its job" || fail "the check starts and names its job"
+state=running
+for _ in $(seq 90); do
+    state=$(fnas --json job show "$job" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
+    [ "$state" != running ] && break
+    sleep 1
+done
+[ "$state" = done ] && pass "the check finishes and the job says done" || fail "the check finishes and the job says done: $state $(fnas --json job show "$job")"
+fnas --json pool details tank | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["last_scrub"] else 1)' \
+    && pass "the completion is recorded on the pool" || fail "the completion is recorded on the pool"
 
 echo "== a disk really gone: still degraded, still critical"
 mdadm --manage /dev/md0 --fail "$first" --remove "$first" > /tmp/fail.log 2>&1 \

@@ -4629,3 +4629,33 @@ class SshExpectation(unittest.TestCase):
         services, _, findings = self.shown(False, True, False, "stopped")
         self.assertEqual(self.entry(services, "ssh.service")["state"], "off")
         self.assertFalse([f for f in findings if f["key"] == "service-ssh.service"])
+
+
+class JobReasons(unittest.TestCase):
+    """A job that dies must say why, and a check the kernel refuses must say so
+    at the click, not as a traceback or a silent "stopped"."""
+
+    def setUp(self):
+        by_module = {m.__name__: m for m in MODULES}
+        self.jobs = by_module["fellowship_nas.jobs"]
+        self.mdadm = by_module["fellowship_nas.engines.mdadm"]
+
+    def test_an_unexpected_error_is_recorded_as_the_jobs_reason(self):
+        job = {"id": "abc", "kind": "scrub", "title": "Checking tank", "pool": "tank",
+               "state": self.jobs.RUNNING, "progress": 0.2, "started": 1, "ended": None, "error": None}
+        saved = []
+        with mock.patch.object(self.jobs, "load", lambda job_id: dict(job)), \
+                mock.patch.object(self.jobs, "save", lambda found: saved.append(dict(found))), \
+                mock.patch.object(self.jobs, "work", side_effect=TypeError("bad device")), \
+                mock.patch.object(self.jobs.alerts, "send_alert", lambda *args: None):
+            self.jobs.run_job("abc")
+        self.assertEqual(saved[-1]["state"], "failed")
+        self.assertIn("TypeError: bad device", saved[-1]["error"])
+
+    def test_a_refused_check_raises_with_the_kernels_reason(self):
+        with mock.patch.object(self.mdadm, "array_device", lambda name: "/dev/md0"), \
+                mock.patch.object(self.mdadm, "sync_from", lambda device: None), \
+                mock.patch.object(self.mdadm, "kernel_name", lambda name: "md0"), \
+                mock.patch("builtins.open", side_effect=OSError(22, "Invalid argument")):
+            with self.assertRaisesRegex(fnas.FnasError, "kernel refused to start the check on tank"):
+                self.mdadm.scrub_pool("tank")

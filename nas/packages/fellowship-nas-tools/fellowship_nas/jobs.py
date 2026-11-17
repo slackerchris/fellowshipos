@@ -109,6 +109,10 @@ def run_job(job_id):
             outcome, progress = work(job)
         except FnasError as error:
             outcome, progress = str(error), job["progress"]
+        except Exception as error:
+            # A watcher that dies silently would read as "stopped before it
+            # finished" with no reason; keep what actually happened
+            outcome, progress = f"{type(error).__name__}: {error}", job["progress"]
         job["progress"] = progress
         if outcome != RUNNING:
             break

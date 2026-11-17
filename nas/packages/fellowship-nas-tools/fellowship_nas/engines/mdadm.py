@@ -768,8 +768,12 @@ def start_sync(name, action, title):
     sync = sync_from(device)
     if sync and sync["function"] in SYNC_ACTIONS:
         raise FnasError(f"{name} is already busy with a {SYNC_ACTIONS[sync['function']]}")
-    with open(os.path.join(SYS_BLOCK, kernel_name(name), "md", "sync_action"), "w") as file:
-        file.write(action)
+    try:
+        with open(os.path.join(SYS_BLOCK, kernel_name(name), "md", "sync_action"), "w") as file:
+            file.write(action)
+    except OSError as error:
+        raise FnasError(f"the kernel refused to start the {action} on {name}: "
+                        f"{error.strerror or error}") from None
     return jobs.start("scrub", title.format(name=name), pool=name)
 
 
