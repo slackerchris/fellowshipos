@@ -6,7 +6,8 @@ cd "$(dirname "$0")"
 LOG="$(pwd)/build.log"
 IMAGE="debian:trixie"
 WORKDIR="/build"
-VERSION="1.0"
+# The one release version, prerelease 0.major.minor; see docs/versioning.md
+VERSION="$(cat VERSION)"
 TEMPLATE_NAME="fellowshipos-trixie-amd64-${VERSION}"
 # Both images are the same live system, built twice. FELLOWSHIP_EDITIONS picks
 # which to build; the LXC template comes from the multi-purpose one. Add

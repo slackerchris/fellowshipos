@@ -14,12 +14,12 @@ On a Linux host with Docker, internet access, and at least 10 GB of free space, 
 
 | Output | Use |
 | --- | --- |
-| `fellowshipos-nas-amd64-1.0.hybrid.iso` | Install FellowshipNAS, or try it live |
-| `fellowshipos-multi-amd64-1.0.hybrid.iso` | Install a general FellowshipOS machine, or try it live |
-| `fellowshipos-desktop-amd64-1.0.hybrid.iso` | Boot into the Fellowship desktop, or install it |
-| `fellowshipos-trixie-amd64-1.0_lxc.tar.gz` | Create a general-purpose Proxmox container |
+| `fellowshipos-nas-amd64-0.1.0.hybrid.iso` | Install FellowshipNAS, or try it live |
+| `fellowshipos-multi-amd64-0.1.0.hybrid.iso` | Install a general FellowshipOS machine, or try it live |
+| `fellowshipos-desktop-amd64-0.1.0.hybrid.iso` | Boot into the Fellowship desktop, or install it |
+| `fellowshipos-trixie-amd64-0.1.0_lxc.tar.gz` | Create a general-purpose Proxmox container |
 
-The NAS and multi-purpose images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The template version is set in [build.sh](build.sh). If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) as well.
+The NAS and multi-purpose images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The release version lives in the [VERSION](VERSION) file — prerelease `0.major.minor`, see [docs/versioning.md](docs/versioning.md). `build.sh` names the ISOs and template from it, and the package builds stamp their changelogs from it. If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) or pass `FELLOWSHIP_TEMPLATE`.
 
 ### The desktop image
 
@@ -35,7 +35,7 @@ Booting it live autologins as `user` on the console the kernel shows, and the de
 
 ```bash
 qemu-system-x86_64 -enable-kvm -m 4G -smp 2 \
-    -drive file=fellowshipos-desktop-amd64-1.0.hybrid.iso,media=cdrom,readonly=on \
+    -drive file=fellowshipos-desktop-amd64-0.1.0.hybrid.iso,media=cdrom,readonly=on \
     -device virtio-gpu-pci -device qemu-xhci -device usb-kbd -device usb-tablet \
     -display gtk
 ```

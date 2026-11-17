@@ -6,11 +6,14 @@ set -e
 cd "$(dirname "$0")"
 # The shared theme files, which the page's build reads from outside its copy
 export FELLOWSHIP_THEMES_DIR="$(pwd)/../themes"
+# The release version stamps the copy, never the checkout
+VERSION="$(cat "$(pwd)/../VERSION")"
 
 OUT="$(pwd)/../config/packages.chroot"
 WORK="$(mktemp -d)"
 
 cp -r . "$WORK/fellowship-installer"
+sed -i "1s/([^)]*)/(${VERSION})/" "$WORK/fellowship-installer/debian/changelog"
 cd "$WORK/fellowship-installer"
 rm -rf web/node_modules web/dist
 # The page borrows the desktop's stylesheet and wallpapers

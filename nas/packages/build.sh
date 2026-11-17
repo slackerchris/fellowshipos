@@ -7,10 +7,13 @@ cd "$(dirname "$0")"
 REPO="$(pwd)/../../config/includes.chroot/usr/share/fellowshipos/nas-repo"
 # The shared theme files, which the desktop build reads from outside its copy
 export FELLOWSHIP_THEMES_DIR="$(pwd)/../../themes"
+# The release version stamps the copies, never the checkout
+VERSION="$(cat "$(pwd)/../../VERSION")"
 WORK="$(mktemp -d)"
 
 for package in fellowship-nas-tools fellowship-nas fellowship-nas-smb fellowship-nas-web; do
     cp -r "$package" "$WORK/"
+    sed -i "1s/([^)]*)/(${VERSION})/" "$WORK/$package/debian/changelog"
     if [ -d "$WORK/$package/web" ]; then
         # Bundled here, so the .deb needs no Node and the checkout gets no build files
         rm -rf "$WORK/$package/web/node_modules" "$WORK/$package/web/dist"

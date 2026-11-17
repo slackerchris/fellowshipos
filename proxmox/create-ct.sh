@@ -10,7 +10,7 @@
 
 set -e
 
-TEMPLATE="/var/lib/vz/template/cache/fellowshipos-trixie-amd64-1.0_lxc.tar.gz"
+TEMPLATE="${FELLOWSHIP_TEMPLATE:-/var/lib/vz/template/cache/fellowshipos-trixie-amd64-0.1.0_lxc.tar.gz}"
 BRIDGE="vmbr0"
 STORAGE="local-lvm"
 NAMESERVER="1.1.1.1"
