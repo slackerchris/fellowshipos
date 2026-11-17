@@ -28,6 +28,10 @@ PAM_SSHD = "/etc/pam.d/sshd"
 ROOT_SSH_FILE = "/etc/fellowshipos/root-ssh.json"
 ROOT_KEYS = "/root/.ssh/authorized_keys"
 UNIT = "ssh.service"
+# sshd's privilege separation directory. ssh.service's RuntimeDirectory keeps it
+# only while the service runs, so with SFTP off it is gone and `sshd -t` refuses
+# every later settings check until something makes it again.
+PRIVSEP_DIR = "/run/sshd"
 DEFAULTS = {"enabled": True, "passwords": True}
 KEY_TYPES = ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
              "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")
@@ -266,6 +270,7 @@ def refresh():
     write_file(DROP_IN, drop_in(current))
     if separated:
         write_file(PAM_SSHD, pam_stack())
+    os.makedirs(PRIVSEP_DIR, mode=0o755, exist_ok=True)
     checked = run("sshd", "-t", check=False)
     if checked.returncode != 0:
         # A setting sshd won't take would stop it starting, so the old files go back

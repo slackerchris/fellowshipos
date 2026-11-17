@@ -183,6 +183,16 @@ expect "key SFTP still works" sftp_key ann /tmp/kimkey2
 fnas ssh set --passwords on > /dev/null
 reload_sshd
 
+echo "== the SFTP switch survives the service having stopped"
+fnas ssh set --enabled off > /dev/null
+# What ssh.service's RuntimeDirectory does when it stops: the privsep dir goes,
+# and sshd -t then refuses every settings check until something remakes it
+rmdir /run/sshd
+expect "SFTP turns back on with the directory gone" fnas ssh set --enabled on
+[ -d /run/sshd ] && pass "the settings check remade /run/sshd" || fail "the settings check remade /run/sshd"
+reload_sshd
+expect "SFTP works after the round trip" sftp_pw kim 'admin password 1'
+
 echo "== a Windows password change is refused, and nothing drifts (ruling 1)"
 printf 'admin password 1\nwindows try 88\nwindows try 88\n' | smbpasswd -r 127.0.0.1 -U kim > /dev/null 2>&1 \
     && fail "the Windows change was accepted" || pass "the Windows change is refused"

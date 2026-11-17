@@ -4045,6 +4045,18 @@ class SeparatedSsh(unittest.TestCase):
         self.assertIn("DenyGroups *\n", text)
         self.assertNotIn("AllowGroups", text)
 
+    def test_the_settings_check_remakes_the_privsep_dir_the_service_took_away(self):
+        # ssh.service's RuntimeDirectory removes /run/sshd when it stops, and
+        # sshd -t refuses without it: the switch must still turn SFTP back on
+        privsep = os.path.join(self.dir, "run-sshd")
+        with mock.patch.object(self.ssh_module, "PRIVSEP_DIR", privsep):
+            self.ssh_module.refresh()
+            self.assertEqual(os.stat(privsep).st_mode & 0o777, 0o755)
+            os.rmdir(privsep)
+            self.ssh_module.refresh()
+            self.assertTrue(os.path.isdir(privsep))
+            self.assertIn(("sshd", "-t"), self.calls)
+
     def test_root_ssh_keeps_the_service_up_with_sftp_off(self):
         self.root_on()
         with open(self.settings_file, "w") as file:

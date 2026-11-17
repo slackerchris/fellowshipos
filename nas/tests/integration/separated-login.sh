@@ -145,3 +145,23 @@ refuse "SMB refuses them" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
 fnas user set ann --enabled on > /dev/null
 expect "turned back on, SMB takes them again" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
 [ "$(getent shadow ann | cut -d: -f2)" = "!" ] && pass "and their Linux password is still locked" || fail "and their Linux password is still locked"
+
+echo "== root resets a password at the console"
+J=$(mktemp)
+r=$(login "$J" ann 'set by kim 44')
+[ "$(code "$r")" = 200 ] && pass "ann is signed in before the reset" || fail "ann is signed in before the reset: $r"
+printf 'root reset 66\nroot reset 66\n' | fellowship-reset-password ann > /tmp/reset.log 2>&1
+grep -q "password is set" /tmp/reset.log && pass "the console script sets one password for both" || fail "the console script sets one password for both: $(cat /tmp/reset.log)"
+r=$(login "$(mktemp)" ann 'root reset 66')
+[ "$(code "$r")" = 200 ] && pass "the reset password logs in to the desktop" || fail "the reset password logs in to the desktop: $r"
+expect "SMB takes the reset password" smbclient //127.0.0.1/t -U 'ann%root reset 66' -c ls
+refuse "SMB refuses the old one" smbclient //127.0.0.1/t -U 'ann%set by kim 44' -c ls
+# The helper rereads who was signed out at most once a second
+sleep 1.2
+r=$(api "$J" GET /api/session)
+[ "$(code "$r")" != 200 ] && pass "the reset ended ann's open session" || fail "the reset ended ann's open session: $r"
+refuse "a mismatched pair is refused" bash -c 'printf "one long one\ntwo long two\n" | fellowship-reset-password ann'
+refuse "a short password is refused" bash -c 'printf "short\nshort\n" | fellowship-reset-password ann'
+refuse "an unknown name is refused before asking" bash -c 'printf "x long one\nx long one\n" | fellowship-reset-password nobody'
+refuse "not root is refused" runuser -u nobody -- fellowship-reset-password ann
+expect "the refusals changed nothing" smbclient //127.0.0.1/t -U 'ann%root reset 66' -c ls
