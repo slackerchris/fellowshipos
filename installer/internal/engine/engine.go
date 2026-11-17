@@ -42,7 +42,7 @@ var (
 	userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	zoneName = regexp.MustCompile(`^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$`)
 	reserved = map[string]bool{"root": true, "daemon": true, "bin": true, "sys": true, "nobody": true,
-		"nas-share": true, "fnas-web": true}
+		"nas-share": true, "file-share": true, "fnas-web": true}
 )
 
 // Check refuses settings that would install something broken
