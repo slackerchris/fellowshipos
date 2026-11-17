@@ -128,3 +128,51 @@ screenshot was taken while the install was running, the busiest moment.
 - Check whether the blocks appear while idle on the Disk step.
 - Try the VM with Display set to VirtIO-GPU.
 - Grab a recording of the noVNC session if possible.
+
+## Update, 2026-11-16: a new array is building, not degraded
+
+Chris created a RAID5 pool on the Proxmox tour and got a **critical "Pool tank is
+degraded"** at the moment of creation, while `fnas pool status tank` a minute
+later said `clean`. Both were true at different moments, and the alarm was wrong
+to fire at all.
+
+Measured on a real four-disk RAID5 (`nas/tests/integration/mdadm-building.sh`):
+while a new array writes its initial parity the kernel shows `[4/3] [UUU_]`,
+`mdadm --detail` says `State : clean, degraded, recovering`, and mdadm's monitor
+emits `DegradedArray` — with every disk present and none failed. mdadm's word
+describes protection, not membership: until parity is consistent a disk loss
+would lose data. It is still not a missing disk, and waking someone for it is
+wrong. Chris's ruling: while it is building, wait; no critical.
+
+Fixed:
+
+- `engines/mdadm.py health()` returns **BUILDING** while a resync, recovery or
+  reshape runs with every disk present, and ONLINE when it finishes. A disk
+  actually gone or failed is still DEGRADED.
+- `health.py health_findings()` raises nothing for BUILDING, so no critical
+  finding and no alert from the checks.
+- `md-alert` on `DegradedArray` now reads `mdadm --detail` and only raises
+  critical when working devices are fewer than raid devices or a device has
+  failed; otherwise it sends info "Pool … is building".
+- The desktop shows BUILDING as an amber "Building" badge/chip (Storage, Health,
+  the widgets), not a red degraded one.
+- A second bug in the same window: `mdadm --detail --scan` prints **no name**
+  while the array is building (it counts the disk being written as a spare), so
+  the pool could not be matched to its mount and vanished from `pool list`.
+  `scan_arrays()` now falls back to the name in `mdadm --detail`, which always
+  has it.
+
+`mdadm-building.sh` proves the whole arc on real loop disks: BUILDING and no
+critical mid-sync, info from the monitor hook, ONLINE once protected, and still
+DEGRADED plus critical when a disk is really failed out. It takes only free loop
+devices and gives them and the array back at the end.
+
+Also fixed the same day: the Network settings panel kept "The NAS didn't answer"
+and the "open the new address" notice over a NAS that had already rolled back and
+was answering again. It now keeps asking while an apply went unanswered, and
+when the NAS answers with nothing waiting it clears the stale failure and shows
+the settings it actually has.
+
+**Still open, unchanged:** the CPU gauge (the 0.12 s in-request sample above),
+green in every theme, and the black rectangles. The CPU fix waits for Chris's
+go-ahead.

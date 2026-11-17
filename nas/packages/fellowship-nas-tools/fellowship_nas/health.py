@@ -56,7 +56,9 @@ def health_findings(found_pools):
     found = []
     slots = disks.bays()
     for pool in found_pools:
-        if pool["health"] == "ONLINE":
+        # BUILDING is a new array writing its parity, or a rebuild onto a disk
+        # that is already there: nothing to replace, so nothing to alarm about
+        if pool["health"] in ("ONLINE", "BUILDING"):
             continue
         status = pools.ENGINES[pool["engine"]].pool_status(pool["name"])
         bad = [disk for disk in pools.ENGINES[pool["engine"]].member_disks(status)

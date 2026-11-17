@@ -10,8 +10,9 @@ import { Badge, Button, Card, Confirm, Loading, Notice, Page, Result, Usage, use
 
 function healthBadge(health: string) {
     const kind = health === "ONLINE" || health === "AVAIL" ? "good"
-        : health === "DEGRADED" || health === "INUSE" ? "warning" : "bad";
-    const text = { ONLINE: "Healthy", AVAIL: "Ready", INUSE: "Standing in" }[health] || health.toLowerCase();
+        : health === "DEGRADED" || health === "INUSE" || health === "BUILDING" ? "warning" : "bad";
+    const text = { ONLINE: "Healthy", AVAIL: "Ready", INUSE: "Standing in", BUILDING: "Building" }[health]
+        || health.toLowerCase();
     return <Badge kind={kind}>{text}</Badge>;
 }
 

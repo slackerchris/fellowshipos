@@ -128,13 +128,14 @@ function HealthWidget({ status, open }: { status: Status; open: (app: AppId) => 
                 {pools.map(pool => {
                     const fill = pool.size ? Math.round((pool.allocated * 100) / pool.size) : 0;
                     const healthy = pool.health === "ONLINE";
+                    const building = pool.health === "BUILDING";
                     return (
                         <span class="mini-pool" key={pool.name}>
                             <span class="mini-pool-name">{pool.name}</span>
                             <span class="bar"><span class={`fill ${level(fill)}`} style={{ width: `${fill}%` }} /></span>
-                            <span class={`chip ${healthy ? "good" : "bad"}`}>
+                            <span class={`chip ${healthy ? "good" : building ? "warning" : "bad"}`}>
                                 {healthy && <MetricIcon name="check" size={13} />}
-                                {healthy ? "Healthy" : pool.health.toLowerCase()}
+                                {healthy ? "Healthy" : building ? "Building" : pool.health.toLowerCase()}
                             </span>
                         </span>
                     );
@@ -226,7 +227,8 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                     <div key={pool.name} class="widget-row">
                         <div class="row">
                             <strong>{pool.name}</strong>
-                            <Badge kind={pool.health === "ONLINE" ? "good" : pool.health === "DEGRADED" ? "warning" : "bad"}>
+                            <Badge kind={pool.health === "ONLINE" ? "good"
+                                : pool.health === "DEGRADED" || pool.health === "BUILDING" ? "warning" : "bad"}>
                                 {pool.health === "ONLINE" ? "healthy" : pool.health.toLowerCase()}</Badge>
                         </div>
                         <Usage used={pool.allocated} total={pool.size} />

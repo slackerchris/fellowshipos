@@ -291,7 +291,8 @@ function PoolCard({ pool, range }: { pool: PoolDetail; range: "hourly" | "daily"
             : `to ${pool.backup.target}, last ${pool.backup.last ? when(pool.backup.last) : "not run yet"}`);
     return (
         <Card title={pool.name} actions={
-            <Badge kind={pool.health === "ONLINE" ? "good" : pool.health === "DEGRADED" ? "warning" : "bad"}>
+            <Badge kind={pool.health === "ONLINE" ? "good"
+                : pool.health === "DEGRADED" || pool.health === "BUILDING" ? "warning" : "bad"}>
                 {pool.health === "ONLINE" ? "healthy" : pool.health.toLowerCase()}</Badge>}>
             <div class="stats">
                 <div class="stat"><span class="small muted">Full</span><strong>{fill}%</strong>
@@ -447,9 +448,11 @@ function Overview({ health, open }: { health: HealthData; open: (view: View) => 
                                 <span class="bar"><span class={`fill ${level(fill)}`}
                                                         style={{ width: `${fill}%` }} /></span>
                                 <span class="small muted">{humanSize(pool.allocated)} / {humanSize(pool.size)}</span>
-                                <span class={`chip ${pool.health === "ONLINE" ? "good" : "bad"}`}>
+                                <span class={`chip ${pool.health === "ONLINE" ? "good"
+                                    : pool.health === "BUILDING" ? "warning" : "bad"}`}>
                                     {pool.health === "ONLINE" && <MetricIcon name="check" size={14} />}
-                                    {pool.health === "ONLINE" ? "Healthy" : pool.health.toLowerCase()}
+                                    {pool.health === "ONLINE" ? "Healthy"
+                                        : pool.health === "BUILDING" ? "Building" : pool.health.toLowerCase()}
                                 </span>
                             </div>
                         );

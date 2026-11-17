@@ -342,6 +342,7 @@ button.banner { cursor: pointer; }
 .bar .fill.bad { background: var(--bad); }
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
 .chip.good { color: var(--good); }
+.chip.warning { color: var(--warning); }
 .chip.bad { color: var(--bad); }
 .service-line { display: flex; align-items: center; gap: 9px; padding: 6px 0; }
 .service-line .state { margin-left: auto; color: var(--muted); }

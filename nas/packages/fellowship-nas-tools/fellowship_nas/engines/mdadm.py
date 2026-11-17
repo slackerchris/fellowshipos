@@ -160,6 +160,17 @@ def arrays():
     return found
 
 
+def detail_name(device):
+    """The name mdadm --detail gives an array. --detail --scan leaves the name
+    out while a new array is still writing parity -- it counts the disk being
+    written as a spare -- and a pool without its name can't be found."""
+    for line in run("mdadm", "--detail", device, check=False).stdout.splitlines():
+        if line.strip().startswith("Name :"):
+            value = line.partition("Name :")[2].split("(")[0].strip()
+            return value.split(":")[-1].strip()
+    return ""
+
+
 def scan_arrays():
     """Every array mdadm knows the parts of, with the name it was made under."""
     found = []
@@ -173,7 +184,8 @@ def scan_arrays():
             if key.lower() in ("metadata", "name", "uuid"):
                 array[key.lower()] = value
         # mdadm writes the name it was given as host:name
-        array["name"] = array["name"].split(":", 1)[-1] or os.path.basename(array["device"])
+        array["name"] = (array["name"] or detail_name(array["device"])).split(":", 1)[-1] \
+            or os.path.basename(array["device"])
         found.append(array)
     return found
 
@@ -211,14 +223,18 @@ def readonly(path):
 
 
 def health(array):
-    """The word every engine uses for a pool's state."""
+    """The word every engine uses for a pool's state.
+
+    A new array writes its parity before it is protected, and mdadm calls that
+    degraded and counts the disk it is still writing as not in sync. No disk is
+    missing, so that is BUILDING, not a failure to alarm anyone about; it becomes
+    ONLINE when the work finishes. A disk actually gone or failed is DEGRADED."""
     if array["state"] != "active" or any(m["state"] == "failed" for m in array["members"]):
         return "DEGRADED"
+    building = bool(array["sync"]) and array["sync"]["function"] in ("recovery", "resync", "reshape")
     if array.get("working") is not None and array["working"] < array["wanted"]:
-        return "DEGRADED"
-    if array["sync"] and array["sync"]["function"] in ("recovery", "resync"):
-        return "DEGRADED"
-    return "ONLINE"
+        return "BUILDING" if building else "DEGRADED"
+    return "BUILDING" if building else "ONLINE"
 
 
 def list_pools():

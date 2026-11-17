@@ -2746,8 +2746,8 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
         self.assertEqual([m["slot"] for m in raid["members"]], [3, 1, 0])
         self.assertEqual(raid["sync"]["function"], "recovery")
         self.assertAlmostEqual(raid["sync"]["progress"], 0.083)
-        # A recovery is a degraded array, and a failed disk certainly is
-        self.assertEqual(self.engine.health(raid), "DEGRADED")
+        # A recovery with every disk present is building; a failed disk is degraded
+        self.assertEqual(self.engine.health(raid), "BUILDING")
         self.assertEqual(found["/dev/md0"]["members"][0]["state"], "failed")
         self.assertIsNone(found["/dev/md0"]["sync"])
         self.assertEqual(self.engine.health(found["/dev/md0"]), "DEGRADED")
@@ -2758,12 +2758,58 @@ ARRAY /dev/md/old metadata=1.2 name=gandolf:old UUID=5e6f:7a8b
             raid = self.engine.arrays()["/dev/md0"]
         self.assertEqual(self.engine.health(raid), "ONLINE")
 
+    def test_a_new_array_writing_parity_is_building_not_degraded(self):
+        # What the kernel shows for a freshly created raid5: [4/3] while it
+        # writes parity, every disk present, none failed. mdadm calls that
+        # degraded and its monitor says DegradedArray; nobody should be woken.
+        mdstat = ("md127 : active raid5 sde[4] sdd[2] sdc[1] sdb[0]\n"
+                  "      6282240 blocks super 1.2 level 5, 512k chunk, algorithm 2 [4/3] [UUU_]\n"
+                  "      [=>...................]  resync = 8.3% (522/6282) finish=1.2min speed=1024K/sec\n")
+        with mock.patch.object(self.engine, "read", lambda path: mdstat):
+            array = self.engine.arrays()["/dev/md127"]
+        self.assertEqual((array["wanted"], array["working"]), (4, 3))
+        self.assertEqual(self.engine.health(array), "BUILDING")
+        done = "\n".join(line for line in mdstat.replace("[4/3] [UUU_]", "[4/4] [UUUU]").splitlines()
+                         if "resync =" not in line)
+        with mock.patch.object(self.engine, "read", lambda path: done):
+            self.assertEqual(self.engine.health(self.engine.arrays()["/dev/md127"]), "ONLINE")
+
+    def test_a_check_running_leaves_a_healthy_array_online(self):
+        mdstat = ("md0 : active raid5 sdc[2] sdb[1] sda[0]\n"
+                  "      1953382464 blocks super 1.2 level 5, 512k chunk, algorithm 2 [3/3] [UUU]\n"
+                  "      [==>..................]  check = 12.0% (234/1953) finish=2.0min speed=2048K/sec\n")
+        with mock.patch.object(self.engine, "read", lambda path: mdstat):
+            self.assertEqual(self.engine.health(self.engine.arrays()["/dev/md0"]), "ONLINE")
+
+    def test_building_raises_no_finding_but_a_lost_disk_raises_critical(self):
+        self.assertEqual(fnas.health_findings([{"name": "tank", "engine": "mdadm", "health": "BUILDING"}]), [])
+        engine = SimpleNamespace(pool_status=lambda name: {},
+                                 member_disks=lambda status: [{"state": "FAULTED", "path": "/dev/sdb"}])
+        with mock.patch.object(fnas.pools, "ENGINES", {"mdadm": engine}), \
+                mock.patch.object(fnas.disks, "bays", lambda: {}):
+            found = fnas.health_findings([{"name": "tank", "engine": "mdadm", "health": "DEGRADED"}])
+        self.assertEqual([(f["severity"], f["title"]) for f in found],
+                         [("critical", "Pool tank is degraded")])
+
     def test_reading_what_mdadm_can_assemble(self):
         output = SimpleNamespace(stdout=self.SCAN, stderr="", returncode=0)
         with mock.patch.object(self.engine, "run", lambda *command, check=True: output):
             found = self.engine.scan_arrays()
         self.assertEqual([(a["name"], a["device"], a["uuid"]) for a in found],
                          [("tank", "/dev/md/tank", "1a2b:3c4d"), ("old", "/dev/md/old", "5e6f:7a8b")])
+
+    def test_a_building_array_keeps_its_name_when_scan_leaves_it_out(self):
+        # While a new array writes parity, --detail --scan counts the disk being
+        # written as a spare and prints no name; --detail still has it
+        scan = "ARRAY /dev/md0 metadata=1.2 spares=1 UUID=1a2b:3c4d\n"
+        detail = ("/dev/md0:\n   Name : fellowship:tank (local to host fellowship)\n"
+                  "   State : clean, degraded, recovering\n")
+
+        def run(*command, check=True, stdin=None):
+            return SimpleNamespace(stdout=scan if "--scan" in command else detail, stderr="", returncode=0)
+        with mock.patch.object(self.engine, "run", run):
+            found = self.engine.scan_arrays()
+        self.assertEqual([(a["name"], a["device"]) for a in found], [("tank", "/dev/md0")])
 
     def test_each_disk_is_mapped_to_its_array(self):
         links = {"/dev/sdb1": "/dev/disk/by-id/ata-B_1-part1"}

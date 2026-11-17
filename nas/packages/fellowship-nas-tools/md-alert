@@ -13,8 +13,20 @@ case "$event" in
             "$disk has failed. Replace it from Storage in the desktop. See: sudo fnas pool status $name"
         ;;
     DegradedArray)
-        "$notify" --severity critical "Pool $name is degraded" \
-            "The array is missing a disk and has less protection until it is replaced. See: sudo fnas pool status $name"
+        # mdadm also says DegradedArray while a new array writes its parity or a
+        # rebuild runs onto a disk that is already there. No disk is missing
+        # then, so that is progress, not a failure to wake anyone for.
+        detail=$(mdadm --detail "$array" 2>/dev/null)
+        raid=$(printf '%s\n' "$detail" | awk '/Raid Devices/ {print $NF}')
+        working=$(printf '%s\n' "$detail" | awk '/Working Devices/ {print $NF}')
+        failed=$(printf '%s\n' "$detail" | awk '/Failed Devices/ {print $NF}')
+        if [ "${working:-0}" -ge "${raid:-0}" ] && [ "${failed:-0}" -eq 0 ]; then
+            "$notify" --severity info "Pool $name is building" \
+                "The array is writing parity or rebuilding, with every disk present. It is fully protected when that finishes. See: sudo fnas pool status $name"
+        else
+            "$notify" --severity critical "Pool $name is degraded" \
+                "The array is missing a disk and has less protection until it is replaced. See: sudo fnas pool status $name"
+        fi
         ;;
     DeviceDisappeared)
         "$notify" --severity critical "Pool $name has disappeared" \

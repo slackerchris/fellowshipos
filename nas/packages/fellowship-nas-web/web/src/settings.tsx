@@ -1,5 +1,5 @@
 import { createContext } from "preact";
-import { useContext, useEffect, useState } from "preact/hooks";
+import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import {
     CheckSchedule, NetworkState, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus,
     changeOwnPassword, endSession,
@@ -577,13 +577,32 @@ function Network() {
     }, [state.data, seeded]);
 
     // While a change waits, the countdown ticks and the state is asked for
-    // again, so a rollback or a confirm from another browser shows up here
+    // again, so a rollback or a confirm from another browser shows up here.
+    // While the last apply went unanswered, keep asking too: the page is still
+    // pointed at the old address, and only a rollback brings it back.
     useEffect(() => {
-        if (!pending) return;
+        if (!pending && apply.outcome?.kind !== "error") return;
         const tick = setInterval(() => setNow(Date.now() / 1000), 1000);
         const poll = setInterval(state.reload, 5000);
         return () => { clearInterval(tick); clearInterval(poll); };
-    }, [pending?.deadline, state.reload]);
+    }, [pending?.deadline, apply.outcome?.kind, state.reload]);
+
+    // The NAS answering again after going unreachable, with nothing waiting, is
+    // the news that the change is over: rolled back, or confirmed elsewhere.
+    // Drop the stale failure and show the settings it actually has now, instead
+    // of leaving "the NAS didn't answer" over a NAS that is answering.
+    const unreachable = useRef(false);
+    useEffect(() => {
+        if (state.error) {
+            unreachable.current = true;
+        } else if (unreachable.current && state.data && !state.data.pending) {
+            unreachable.current = false;
+            if (apply.outcome?.kind === "error") {
+                apply.clear();
+                setSeeded(false);
+            }
+        }
+    }, [state.data, state.error, apply.outcome]);
 
     const servers = dns.split(",").map(part => part.trim()).filter(Boolean).join(",");
     const ready = mode === "dhcp" || Boolean(address.trim() && gateway.trim() && servers);
