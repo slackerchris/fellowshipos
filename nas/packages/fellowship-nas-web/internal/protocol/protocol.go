@@ -36,8 +36,10 @@ const (
 	OpFileCopy      = "file-copy"
 	OpFileTree      = "file-tree"
 	OpFileSearch    = "file-search"
-	OpSessions      = "sessions"
-	OpEndSession    = "end-session"
+	// Out of the person's recycle bin, back to where it was
+	OpFilePutBack = "file-putback"
+	OpSessions    = "sessions"
+	OpEndSession  = "end-session"
 	// The NAS's own time, zone and whether its clock is synchronised, for the desktop's clock
 	OpClock = "clock"
 )

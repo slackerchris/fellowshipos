@@ -751,9 +751,13 @@ def roots_of(user):
         share = by_name.get(used["name"])
         if not share:
             continue
+        # Files puts what it deletes in the same bin SMB uses, where the share has one
+        options = share.get("smb_options") or DEFAULT_SMB
         found.append({"share": share["name"], "path": share["path"], "level": used["level"],
                       "through": used["through"], "snapshots": share["snapshots"],
-                      "webdav": share["webdav"], "sftp": share["sftp"]})
+                      "webdav": share["webdav"], "sftp": share["sftp"],
+                      "recycle": bool(options["recycle"]) and not share.get("readonly"),
+                      "recycle_days": options["recycle_days"]})
     return found
 
 

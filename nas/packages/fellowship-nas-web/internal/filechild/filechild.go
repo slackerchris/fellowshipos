@@ -210,6 +210,22 @@ func Run(args []string) int {
 			return 1
 		}
 		return 0
+	case "recycle":
+		// Into the person's recycle bin, rather than gone
+		if len(rest) < 1 {
+			return say(out, "the recycle bin needs a person's name")
+		}
+		if _, err := recycle(root, inside, rest[0]); err != nil {
+			return say(out, err.Error())
+		}
+	case "putback":
+		// Out of the person's recycle bin, to the path it had
+		if len(rest) < 2 {
+			return say(out, "putting back needs a person's name and where it goes")
+		}
+		if _, err := putBack(root, inside, rest[0], rest[1]); err != nil {
+			return say(out, err.Error())
+		}
 	case "copy":
 		if len(rest) < 1 {
 			return say(out, "a copy needs what to copy and where it goes")
@@ -739,7 +755,8 @@ func tree(root int, from string) (Tree, error) {
 			return nil
 		}
 		for _, name := range names {
-			if strings.HasPrefix(name, workingPrefix) {
+			// The recycle bin has its own place in Files, and nothing is moved into it by hand
+			if strings.HasPrefix(name, workingPrefix) || (inside == "" && name == RecycleDir) {
 				continue
 			}
 			child := path.Join(inside, name)
@@ -808,7 +825,8 @@ func search(root int, from, query string, started time.Time) Found {
 				return false
 			}
 			name := entry.Name()
-			if strings.HasPrefix(name, workingPrefix) || entry.Type()&fs.ModeSymlink != 0 {
+			if strings.HasPrefix(name, workingPrefix) || entry.Type()&fs.ModeSymlink != 0 ||
+				(inside == "" && name == RecycleDir) {
 				continue
 			}
 			child := path.Join(inside, name)

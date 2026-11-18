@@ -28,6 +28,9 @@ type rootResponse struct {
 	Through   string `json:"through"`
 	Snapshots bool   `json:"snapshots"`
 	Webdav    bool   `json:"webdav"`
+	// Whether Files puts what is deleted in the share's recycle bin, and for how long
+	Recycle     bool `json:"recycle"`
+	RecycleDays int  `json:"recycle_days"`
 }
 
 // RootsFor is how long a person's shares are remembered. A change to who may
@@ -92,11 +95,13 @@ func (h *Helper) fileRoots(user, share string) (files.Root, error) {
 // shareItem is what the desktop is told about a share: its name and what the
 // person may do with it. Where it is on disk stays on the NAS.
 type shareItem struct {
-	Share     string `json:"share"`
-	Level     string `json:"level"`
-	Through   string `json:"through"`
-	Snapshots bool   `json:"snapshots"`
-	Webdav    bool   `json:"webdav"`
+	Share       string `json:"share"`
+	Level       string `json:"level"`
+	Through     string `json:"through"`
+	Snapshots   bool   `json:"snapshots"`
+	Webdav      bool   `json:"webdav"`
+	Recycle     bool   `json:"recycle"`
+	RecycleDays int    `json:"recycle_days"`
 }
 
 // listShares answers what the person may browse, for the Files app's first
@@ -109,7 +114,8 @@ func (h *Helper) listShares(user string) protocol.Response {
 	items := make([]shareItem, 0, len(found))
 	for _, root := range found {
 		items = append(items, shareItem{Share: root.Share, Level: root.Level,
-			Through: root.Through, Snapshots: root.Snapshots, Webdav: root.Webdav})
+			Through: root.Through, Snapshots: root.Snapshots, Webdav: root.Webdav,
+			Recycle: root.Recycle, RecycleDays: root.RecycleDays})
 	}
 	out, err := json.Marshal(items)
 	if err != nil {
@@ -554,8 +560,16 @@ func (h *Helper) fileTree(user string, request protocol.Request) protocol.Respon
 }
 
 // fileDelete removes something, taking a folder's contents with it only when
-// that was asked for.
+// that was asked for. On a share whose recycle bin is on, it goes into the
+// person's bin instead, folder and all, unless it is already in the bin, where
+// deleting is for good.
 func (h *Helper) fileDelete(user string, request protocol.Request) protocol.Response {
+	if h.hasBin(user, request.Share) && !filechild.InBin(request.Path) {
+		return h.change(user, request, "that can't be moved to the recycle bin right now",
+			func(root files.Root) (string, error) {
+				return files.Resolve([]files.Root{root}, request.Share, request.Path)
+			}, []string{"recycle", user})
+	}
 	whole := "keep"
 	if request.Recursive {
 		whole = "tree"
@@ -563,6 +577,37 @@ func (h *Helper) fileDelete(user string, request protocol.Request) protocol.Resp
 	return h.change(user, request, "that can't be removed right now", func(root files.Root) (string, error) {
 		return files.Resolve([]files.Root{root}, request.Share, request.Path)
 	}, []string{"remove", whole})
+}
+
+// hasBin says whether Files puts what this person deletes in a share into its
+// recycle bin. A share it can't find has none, and the delete is refused later
+// for not being theirs.
+func (h *Helper) hasBin(user, share string) bool {
+	_, found, err := h.roots(user)
+	if err != nil {
+		return false
+	}
+	for _, root := range found {
+		if root.Share == share {
+			return root.Recycle
+		}
+	}
+	return false
+}
+
+// filePutBack moves something out of the person's own recycle bin to the path
+// it had there. The child makes any folder on the way that has gone, and keeps
+// whatever has the name now.
+func (h *Helper) filePutBack(user string, request protocol.Request) protocol.Response {
+	bin := path.Join(filechild.RecycleDir, user) + "/"
+	inside := strings.TrimPrefix(path.Clean("/"+request.Path), "/")
+	if !strings.HasPrefix(inside, bin) || inside == strings.TrimSuffix(bin, "/") {
+		return failure(protocol.CodeForbidden, "only what is in your own recycle bin can be put back")
+	}
+	to := strings.TrimPrefix(inside, bin)
+	return h.change(user, request, "that can't be put back right now", func(root files.Root) (string, error) {
+		return files.Resolve([]files.Root{root}, request.Share, request.Path)
+	}, []string{"putback", user, to})
 }
 
 // change is the shape mkdir and delete share: check the share can be written,

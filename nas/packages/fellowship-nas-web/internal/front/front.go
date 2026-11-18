@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/delete", s.withSession(true, s.remove))
 	mux.HandleFunc("GET /api/files/snapshots", s.withSession(false, s.snapshots))
 	mux.HandleFunc("POST /api/files/restore", s.withSession(true, s.restore))
+	mux.HandleFunc("POST /api/files/putback", s.withSession(true, s.putBack))
 	mux.HandleFunc("POST /api/files/copy", s.withSession(true, s.copyFile))
 	mux.HandleFunc("GET /api/files/tree", s.withSession(false, s.tree))
 	mux.HandleFunc("GET /api/files/search", s.withSession(false, s.search))
@@ -647,6 +648,18 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, session *protoco
 	}, func(body changeRequest) string {
 		if body.Path == "" {
 			return "say what to remove"
+		}
+		return ""
+	})
+}
+
+// putBack moves something out of the person's recycle bin to where it was.
+func (s *Server) putBack(w http.ResponseWriter, r *http.Request, session *protocol.Session, token string) {
+	s.filesChange(w, r, token, protocol.OpFilePutBack, func(body changeRequest) protocol.Request {
+		return protocol.Request{Share: body.Share, Path: body.Path}
+	}, func(body changeRequest) string {
+		if body.Path == "" {
+			return "say what to put back"
 		}
 		return ""
 	})

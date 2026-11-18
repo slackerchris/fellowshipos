@@ -700,6 +700,10 @@ export interface FileShare {
     through: string;
     snapshots: boolean;
     webdav: boolean;
+    // Whether Files puts what is deleted in the share's recycle bin, the folder
+    // SMB's bin uses, and how many days it stays there
+    recycle: boolean;
+    recycle_days: number;
 }
 
 export interface FileEntry {
@@ -751,6 +755,10 @@ export const folderTree = (share: string) =>
 
 export const deleteFile = (share: string, path: string, recursive = false) =>
     request<{ done: boolean }>("POST", "/api/files/delete", { share, path, recursive });
+
+/** Move something out of the person's recycle bin, back to where it was. */
+export const putBack = (share: string, path: string) =>
+    request<{ done: boolean }>("POST", "/api/files/putback", { share, path });
 
 /** One earlier version of a file, as fnas names it and what it looked like. */
 export interface EarlierVersion {

@@ -4430,7 +4430,8 @@ class FileRoots(unittest.TestCase):
 
     shares = [
         {"name": "media", "path": "/mnt/tank/shares/media", "snapshots": True, "mode": "chosen",
-         "webdav": True, "sftp": True, "access": {"users": {"kim": "write"}, "groups": {"family": "read"}}},
+         "webdav": True, "sftp": True, "access": {"users": {"kim": "write"}, "groups": {"family": "read"}},
+         "smb_options": {**fnas.shares.DEFAULT_SMB, "recycle": True, "recycle_days": 14}},
         {"name": "docs", "path": "/mnt/tank/shares/docs", "snapshots": False, "mode": "chosen",
          "webdav": False, "sftp": False, "access": {"users": {}, "groups": {"family": "read"}}},
         {"name": "private", "path": "/mnt/tank/shares/private", "snapshots": True, "mode": "chosen",
@@ -4447,10 +4448,17 @@ class FileRoots(unittest.TestCase):
     def test_a_person_gets_their_shares_with_where_each_one_is(self):
         self.assertEqual(fnas.roots_of("kim"), [
             {"share": "media", "path": "/mnt/tank/shares/media", "level": "write",
-             "through": "own", "snapshots": True, "webdav": True, "sftp": True},
+             "through": "own", "snapshots": True, "webdav": True, "sftp": True,
+             "recycle": True, "recycle_days": 14},
             {"share": "docs", "path": "/mnt/tank/shares/docs", "level": "read",
-             "through": "group family", "snapshots": False, "webdav": False, "sftp": False},
+             "through": "group family", "snapshots": False, "webdav": False, "sftp": False,
+             "recycle": False, "recycle_days": 30},
         ])
+
+    def test_a_read_only_pool_has_no_recycle_bin_for_files(self):
+        self.shares[0]["readonly"] = True
+        self.addCleanup(self.shares[0].pop, "readonly")
+        self.assertFalse(fnas.roots_of("kim")[0]["recycle"])
 
     def test_a_share_someone_cannot_use_is_not_a_root(self):
         self.assertEqual([root["share"] for root in fnas.roots_of("tester")], ["private"])

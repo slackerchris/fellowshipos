@@ -70,7 +70,7 @@ function SmbTab({ share, onDone }: { share: Share; onDone: () => void }) {
             {check("hidden", "Hidden: not listed when browsing the NAS, but still reachable by its name")}
             {check("guest", "Guests: anyone on the home network can read it without a password",
                    share.mode === "everyone" ? "" : "only for shares that are for everyone")}
-            {check("recycle", "Recycle bin: files deleted over SMB go to .recycle in the share first")}
+            {check("recycle", "Recycle bin: what is deleted over SMB, in Files or over WebDAV goes to .recycle in the share first")}
             {options.recycle && (
                 <Field label="Days the recycle bin keeps files">
                     <input type="number" min={1} max={3650} value={options.recycle_days}

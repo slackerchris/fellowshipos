@@ -499,3 +499,60 @@ func TestASearchNeedsAQueryAndAShareThePersonHas(t *testing.T) {
 		t.Errorf("the child was asked %v", f.childed)
 	}
 }
+
+func TestADeleteGoesToTheBinWhereTheShareHasOne(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true,"recycle":true,"recycle_days":30}]`
+	if err := os.MkdirAll(filepath.Join(dir, "photos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".recycle", "kim"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.body = `{}` + "\n"
+	token := login(t, h, "kim").Token
+	response := h.Handle(protocol.Request{Op: protocol.OpFileDelete, Session: token, Share: "media",
+		Path: "photos", Recursive: true})
+	if response.Code != "" {
+		t.Fatalf("delete: %s %s", response.Code, response.Error)
+	}
+	if got := f.childed[len(f.childed)-1]; got != "recycle photos kim" {
+		t.Errorf("a delete on a share with a bin asked the child for %q", got)
+	}
+	// In the bin, a delete is for good
+	h.Handle(protocol.Request{Op: protocol.OpFileDelete, Session: token, Share: "media",
+		Path: ".recycle/kim", Recursive: true})
+	if got := f.childed[len(f.childed)-1]; got != "remove .recycle/kim tree" {
+		t.Errorf("emptying the bin asked the child for %q", got)
+	}
+}
+
+func TestOnlyYourOwnBinCanBePutBack(t *testing.T) {
+	f, h, dir := newFileFake(t)
+	f.roots = `[{"share":"media","path":"` + dir + `","level":"write","through":"own","snapshots":true,"recycle":true}]`
+	for _, made := range []string{".recycle/kim/photos", ".recycle/sam"} {
+		if err := os.MkdirAll(filepath.Join(dir, made), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.body = `{}` + "\n"
+	token := login(t, h, "kim").Token
+	response := h.Handle(protocol.Request{Op: protocol.OpFilePutBack, Session: token, Share: "media",
+		Path: ".recycle/kim/photos"})
+	if response.Code != "" {
+		t.Fatalf("put back: %s %s", response.Code, response.Error)
+	}
+	if got := f.childed[len(f.childed)-1]; got != "putback .recycle/kim/photos kim photos" {
+		t.Errorf("putting back asked the child for %q", got)
+	}
+	ran := len(f.childed)
+	for _, path := range []string{".recycle/sam", ".recycle/kim", "photos", ".recycle/kimberly/x"} {
+		if response := h.Handle(protocol.Request{Op: protocol.OpFilePutBack, Session: token, Share: "media",
+			Path: path}); response.Code == "" {
+			t.Errorf("%s was put back", path)
+		}
+	}
+	if len(f.childed) != ran {
+		t.Errorf("a child was run for a refused put back: %v", f.childed[ran:])
+	}
+}

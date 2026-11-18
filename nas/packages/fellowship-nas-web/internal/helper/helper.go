@@ -197,6 +197,11 @@ func (h *Helper) Handle(request protocol.Request) protocol.Response {
 			return h.fileDelete(found.user, request)
 		}
 		return failure(protocol.CodeUnauthenticated, signedOut)
+	case protocol.OpFilePutBack:
+		if found := h.find(request.Session, request.Touch); found != nil {
+			return h.filePutBack(found.user, request)
+		}
+		return failure(protocol.CodeUnauthenticated, signedOut)
 	case protocol.OpFileCopy:
 		if found := h.find(request.Session, request.Touch); found != nil {
 			return h.fileCopy(found.user, request)
