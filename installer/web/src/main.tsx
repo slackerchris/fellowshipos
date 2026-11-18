@@ -292,33 +292,23 @@ function RootPassword({ settings, rootAgain, onChange, onRootAgain }: {
     );
 }
 
-/** The recovery key, shown once to be saved: it is the one way back in if both
-    root's password and the NAS admin's are lost. */
+/** The recovery key, shown once to be kept: it is the one way back in if both
+    root's password and the NAS admin's are lost. There is no save button: the
+    kiosk browser (cog) discards downloads without a trace, so on the machine's
+    own screen it never produced a file. */
 function RecoveryKey({ keyText }: { keyText: string }) {
-    const save = () => {
-        const blob = new Blob([`FellowshipOS NAS recovery key\n\n${keyText}\n\nKeep this file away from the NAS.\n`
-            + `You need it only if you forget both your password and root's: at the boot menu,\n`
-            + `FellowshipOS recovery asks for it and lets you set new passwords.\n`
-            + `Starting up and signing in normally never ask for it.\n`], { type: "text/plain" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "fellowship-recovery-key.txt";
-        link.click();
-        URL.revokeObjectURL(link.href);
-    };
     return (
         <div class="stack recovery-key">
             <p class="small"><strong>Save this key before you install.</strong> It is shown only on this screen.</p>
             <p class="mono recovery-key-text">{keyText || "…"}</p>
             <ol class="small recovery-steps">
-                <li><strong>Keep a copy off this NAS.</strong> Click “Save as text file” and keep the file on your
-                    computer, or write the key on paper. A copy saved on the NAS itself is lost with it.</li>
+                <li><strong>Keep a copy off this NAS.</strong> Write the key on paper, or copy it into a file on
+                    another computer. A copy saved on the NAS itself is lost with it.</li>
                 <li><strong>When you would need it:</strong> only if you forget both your password and root's. Then, at
                     the boot menu, “FellowshipOS recovery” asks for it and lets you set new passwords.</li>
                 <li><strong>Otherwise you never type it.</strong> Starting up and signing in don't ask for it. If the
                     key and both passwords are all lost, the NAS can only be reinstalled.</li>
             </ol>
-            <div class="row"><button class="button" type="button" onClick={save}>Save as text file</button></div>
         </div>
     );
 }

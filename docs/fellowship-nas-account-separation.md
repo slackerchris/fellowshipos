@@ -207,11 +207,13 @@ Physical access alone doesn't authorise anything. Recovery needs the
 **recovery key**.
 
 **Creating the key, at install:**
-- The installer generates a random key: 128 bits, shown as eight groups of
-  five letters and digits, e.g. `K7QPM-3XW9T-…`.
-- It's shown once, on its own step before Install. The step offers **Save as
-  text file** and **Print**, and can't be passed until the key is typed back
-  in, or its last two groups are.
+- The installer generates a random key: about 196 bits, shown as eight groups
+  of five letters and digits, e.g. `K7QPM-3XW9T-…`.
+- It's shown once, on the Install step before anything is erased. There is no
+  save button and nothing to type back: write it on paper, or copy it into a
+  file on another computer. (A save button was offered until 2026-11-17; the
+  machine's own kiosk browser, cog, discards downloads silently, so there it
+  never produced a file.)
 - The system keeps only a hash of it: yescrypt, in
   `/etc/fellowshipos/recovery-key.hash`, root, 0600. The key itself is never
   written to the disk or logs.
@@ -680,10 +682,12 @@ Run in VMs, from the image, against a real system:
    - **The recovery key:**
      - The installer makes the key, once per run.
      - It's shown on the Install step, not a step of its own. That's simpler,
-       and it's still before anything is erased: **Erase and install** stays
-       off until its last two groups are typed back.
-     - On the machine's own screen it says to write it down or photograph it.
-       From another computer it can also be saved as a text file.
+       and it's still before anything is erased. The only confirmation is the
+       typed erase phrase naming the disk.
+     - It says to write the key on paper, or copy it into a file on another
+       computer; a copy kept on the NAS is lost with it. There is no save
+       button: cog, the kiosk browser, discards downloads silently (removed
+       2026-11-17).
      - The page never sends the key back: the installer's server adds the one
        it made.
    - **`fellowship-recovery-key`** (root's tool, `fellowship_nas/recovery.py`):

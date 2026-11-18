@@ -182,6 +182,25 @@ figure lands near 2-of-N cores, the desktop and the CLI agree within 3 points,
 and it falls back at idle. The Proxmox eyeball check against `mpstat` and
 `stress-ng` is the remaining done-when from the 11-14 plan, for the next tour.
 
+## The Save-as-text-file button — removed, 2026-11-17
+
+Chris reported that he had clicked it on every install and nothing ever
+happened. He was on the machine's own screen: the kiosk browser is cog, which
+has no download-to-disk support at all (Igalia/cog#379, still open), so the
+blob download the button triggered was discarded without a file, a dialog or
+an error. In a paired browser on another computer the same button did work,
+but a button that is silently dead where it is most needed is worse than no
+button. Removed everywhere, by his decision: the key is still made by the
+server, stored as a hash and shown once; the page now says to write it on
+paper or copy it into a file on another computer, and warns that a copy kept
+on the NAS is lost with it. This supersedes the 11-16 note above that the page
+offers Save as text file in every context. For installs whose key was never
+actually saved, root can issue a replacement with `fellowship-recovery-key
+new`, which shows the new key once and invalidates the old. The page's
+`tsc --noEmit` and bundle pass; the built `dist/main.js` contains no save
+button, no `recovery-key.txt` and no `createObjectURL`; installer Go tests,
+vet and gofmt pass in a golang:1.24 container. Not yet on an ISO.
+
 ## Out of scope here
 
 Green-in-every-theme and the black rectangles.
