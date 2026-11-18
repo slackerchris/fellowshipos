@@ -233,17 +233,18 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
                 </Field>
                 <Field label="Password" hint="At least 8 characters">
-                    <div class="row">
-                        <input type={reveal ? "text" : "password"} value={settings.password} autoComplete="new-password"
-                               onInput={event => set({ password: event.currentTarget.value })} />
-                        <button class="button" type="button" onClick={() => setReveal(!reveal)}>
-                            {reveal ? "Hide" : "Show"}</button>
-                    </div>
+                    <input type={reveal ? "text" : "password"} value={settings.password} autoComplete="new-password"
+                           onInput={event => set({ password: event.currentTarget.value })} />
                 </Field>
                 <Field label="Password again">
                     <input type={reveal ? "text" : "password"} value={again} autoComplete="new-password"
                            onInput={event => onAgain(event.currentTarget.value)} />
                 </Field>
+            </div>
+            {/* Below both fields, so Tab goes from one password straight to the other */}
+            <div class="row">
+                <button class="button" type="button" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
+                    {reveal ? "Hide passwords" : "Show passwords"}</button>
             </div>
             {settings.hostname && !HOST.test(settings.hostname) && <p class="small">The name may use lowercase letters, numbers and -.</p>}
             {settings.user && !USER.test(settings.user) && <p class="small">The user name may use lowercase letters, numbers, - and _, starting with a letter.</p>}
