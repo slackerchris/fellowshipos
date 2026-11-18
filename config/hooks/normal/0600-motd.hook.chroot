@@ -4,8 +4,15 @@ set -e
 # Make our MOTD executable
 chmod +x /etc/update-motd.d/00-fellowshipos
 
+# Keep the running kernel in our banner instead of the verbose stock line.
+# Preserve any other text in the static message.
+if [ -f /etc/motd ]; then
+    sed -i '/^Linux /d' /etc/motd
+fi
+
 # Disable default Ubuntu MOTD scripts we don't want
 for f in \
+    /etc/update-motd.d/10-uname \
     /etc/update-motd.d/10-help-text \
     /etc/update-motd.d/50-motd-news \
     /etc/update-motd.d/80-livepatch \

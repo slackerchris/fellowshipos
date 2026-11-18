@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+# Binary hooks run inside binary/. Install the shared tree after live-build
+# has generated its stock splash, then stamp the theme for this edition.
+case "${FELLOWSHIP_EDITION:-multi}" in
+    nas) title="FellowshipOS NAS" ;;
+    desktop) title="FellowshipOS Desktop" ;;
+    multi) title="FellowshipOS Multi-purpose" ;;
+    *) echo "Unknown Fellowship edition" >&2; exit 1 ;;
+esac
+
+version=$(cat ../VERSION)
+mkdir -p boot/grub/live-theme
+cp ../themes/branding/fellowship-tree.png boot/grub/live-theme/fellowship-tree.png
+sed "s/text = \"FellowshipOS\"/text = \"$title $version\"/" \
+    ../config/bootloaders/grub-pc/live-theme/theme.txt \
+    > boot/grub/live-theme/theme.txt

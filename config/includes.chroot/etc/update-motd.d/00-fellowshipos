@@ -36,7 +36,7 @@ DISK=$(df -h / | awk 'NR==2 {print $3 " / " $2 " (" $5 " used)"}')
 IP=$(hostname -I | awk '{print $1}')
 
 echo -e "  ${CYAN}Hostname:${RESET}  $HOSTNAME"
-echo -e "  ${CYAN}Kernel:${RESET}    $KERNEL"
+echo -e "  ${CYAN}Linux:${RESET}     $KERNEL"
 echo -e "  ${CYAN}Uptime:${RESET}    $UPTIME"
 echo -e "  ${CYAN}Load:${RESET}      $LOAD"
 echo -e "  ${CYAN}Memory:${RESET}    $MEMORY"
