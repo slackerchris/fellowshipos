@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Docker is for the Multi-purpose image's Docker node, not the NAS: the NAS
+# image is the one that carries the NAS packages' repo, and it skips this
+[ -d /usr/share/fellowshipos/nas-repo ] && exit 0
+
 # Ensure ca-certificates is present before curl uses SSL
 apt-get install -y -qq ca-certificates
 

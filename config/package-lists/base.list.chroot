@@ -7,7 +7,6 @@ htop
 btop
 curl
 wget
-git
 unzip
 zip
 bash-completion
@@ -17,9 +16,7 @@ iproute2
 net-tools
 dnsutils
 traceroute
-mtr
 tcpdump
-nmap
 
 # Storage + Filesystem
 nfs-common

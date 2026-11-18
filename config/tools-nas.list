@@ -1,0 +1,4 @@
+# The NAS image's own tools. auto/config copies this into package-lists for the
+# NAS edition only. mtr-tiny is mtr without its GTK window, which pulled 31
+# packages and 63 MB of desktop libraries onto a machine without a desktop.
+mtr-tiny
