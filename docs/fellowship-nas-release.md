@@ -157,6 +157,36 @@ Chris is touring a ZFS install on Proxmox. Findings so far:
    what each does and offers Cancel, Restart and Shut down. Cancel has focus,
    so a stray Enter is safe. Family accounts don't see the icon. Settings →
    Power keeps its two buttons. Checked in a local preview.*
+8. **Choosing the time servers.** The NAS already followed pool.ntp.org through
+   chrony. Chris asked for a choice in Settings. *Built 2026-11-17, in
+   0.2.1: Settings → Name and time → Time servers offers
+   pool.ntp.org (the default, plus any your router offers), Google, Cloudflare
+   with NTS, or up to four of your own. Any choice other than the pool turns
+   off Debian's pool line and the router's servers in chrony.conf, so Google's
+   smeared leap seconds never mix with others. Choosing the pool again puts
+   those lines back. The card shows whether the clock is synced, with which
+   server and how far apart, and each server chrony hears. It's `fnas system
+   time` and `fnas system time-source --source … [--server …]`, and admins can
+   run it on a separated NAS. Unit tests pass (406), and Go vet, tests and
+   gofmt pass. Checked in a local preview. Not yet run against real chrony.*
+9. **Folding and hiding the desktop widgets.** Chris asked for a way to
+   dismiss or shrink them. *Built 2026-11-17, in 0.2.1: each widget has a
+   fold button in its corner that shrinks it to its title. Folded, it still
+   shows a badge when something needs attention ("tank degraded",
+   "1 problem"), or "All well", and a click opens its app. **Hide** above the
+   column, or the desktop's right-click menu, slides it away and leaves a
+   "‹ Status" tab with a count of what needs attention. Both are saved with the
+   person's look on the NAS (`fnas look set --widgets hidden --collapsed
+   storage,health`). Unit tests pass (407). Type-check passes. Checked in a
+   local preview with a degraded pool.*
+10. **The installer's screen tears when you click or something updates.**
+    Reproduced in a local QEMU VM on standard VGA, the same display Proxmox
+    uses by default. The page was reloaded 15 times, with 180 screen captures.
+    With cage drawing through OpenGL (Mesa's software renderer), 12 frames
+    showed half-drawn pages with black staircase streaks. With
+    `WLR_RENDERER=pixman`, none of 180 did, though 91 were caught mid-redraw.
+    *Fixed 2026-11-17, in 0.2.1: the installer's kiosk service now uses
+    pixman. Needs confirming on Proxmox.*
 
 ## Keeping the list current
 

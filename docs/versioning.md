@@ -6,13 +6,19 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.2.0** — the 2026-11-17 Proxmox tour batch: delete for ZFS and
+Current: **0.2.1** — fixes and asks from the same tour: a choice of time
+servers (pool.ntp.org, Google, Cloudflare or your own), desktop widgets that
+fold or hide, the installer screen drawn with pixman so it no longer tears in
+VMs, no recovery-key save button (cog drops downloads), and the Fellowship
+boot menu theme.
+
+Before it, **0.2.0** was the 2026-11-17 Proxmox tour batch: delete for ZFS and
 Unraid-style pools, shares for everyone open in Files through the renamed
 `file-share` group, the NAS's own time on the clock with a calendar and a time
 format per person, a power button in the account menu, Import a pool beside
 Create a pool, the tree logo, and the installer's LVM fix.
 
-Before it, **0.1.0** was the first tracked prerelease, covering the account
+Earlier, **0.1.0** was the first tracked prerelease, covering the account
 separation phases, the network rollback work, and the November 2026 tour fixes
 (CPU sampler, theme-following status colours, delete array, service controls,
 installer recovery-key gate removal).
