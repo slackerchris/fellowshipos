@@ -17,8 +17,12 @@ StandardOutput=journal
 StandardError=journal
 UtmpIdentifier=tty1
 Environment=XDG_SESSION_TYPE=wayland
-# Machines without a graphics driver, such as most VMs, draw in software
-Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
+# Drawn on the CPU with pixman rather than OpenGL. Without a graphics card, as
+# in most VMs, OpenGL is Mesa's software renderer, and on a virtual display
+# cage showed its frames before they were finished: half-drawn pages with
+# black streaks whenever something changed. Pixman finishes each frame before
+# it is shown, and an installer page needs nothing faster.
+Environment=WLR_RENDERER=pixman
 Environment=WLR_NO_HARDWARE_CURSORS=1
 ExecStart=/usr/bin/cage -s -- /usr/bin/cog http://127.0.0.1/
 Restart=always
