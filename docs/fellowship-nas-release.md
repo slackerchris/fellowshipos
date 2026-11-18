@@ -234,6 +234,16 @@ Chris is touring a ZFS install on Proxmox. Findings so far:
       build pass. Checked in a local preview against a pretend share. Not yet
       run on a NAS, where permissions and ZFS renames will get their real
       test.*
+13. **A slimmer NAS image.** Chris asked what the image doesn't need, and
+    chose to take out what nothing on a NAS uses. *Built 2026-11-18, in
+    0.2.3:* the NAS image skips Docker (its hook), git, nmap and the full
+    mtr, and carries mtr-tiny instead. The Multi-purpose and Desktop images keep
+    all of them. `auto/config` copies `config/tools-nas.list` or
+    `config/tools-general.list` into the package lists per edition. Measured on
+    the build: 479 MB less installed (1,905 → 1,426 MB, about 1.0 GB left on an
+    installed NAS once the installer removes itself), the compressed system
+    754 → 626 MB, and the ISO 1.14 → 1.01 GB. The ZFS build tools stay, since
+    a kernel update needs ZFS rebuilt. Not yet installed on a VM.
 
 ## Keeping the list current
 

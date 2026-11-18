@@ -6,12 +6,16 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.2.2** — Files feels like a file browser: right-click menus, a
+Current: **0.2.3** — a slimmer NAS image: no Docker, git, nmap or full mtr
+(mtr-tiny instead), 479 MB less installed and a 1.01 GB ISO. The other images
+keep them.
+
+Before it, **0.2.2** made Files feel like a file browser: right-click menus, a
 folder tree in the side, a selection line and Properties, and a recycle bin
 that follows each share's SMB bin switch. Also the installer's Tab order on the
 You step, and the appliance-first decision in the release list.
 
-Before it, **0.2.1** had fixes and asks from the same tour: a choice of time
+Then **0.2.1** had fixes and asks from the same tour: a choice of time
 servers (pool.ntp.org, Google, Cloudflare or your own), desktop widgets that
 fold or hide, the installer screen drawn with pixman so it no longer tears in
 VMs, no recovery-key save button (cog drops downloads), and the Fellowship
