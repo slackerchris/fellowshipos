@@ -209,8 +209,10 @@ Last, because it changes layout and input.
 
 - Multi-user editing, locking, or a conflict warning when two people write the
   same file. Last writer wins, as on any NAS share today; say so in the docs.
-- A recycle bin in Files. Deletes are permanent except where the share's SMB
-  recycle bin happens to catch them, which the delete confirmation says.
+- ~~A recycle bin in Files.~~ Built 2026-11-18 at Chris's request: where a
+  share's recycle bin is on, Files and WebDAV deletes go to the same
+  `.recycle/<person>` SMB uses, and Files can put them back. Elsewhere deletes
+  are still permanent, and the question says so.
 - Cross-share copy or move, sharing a single file by link, or a public URL.
 - Compression on download beyond the multi-file zip, and any thumbnail cache on
   disk; thumbnails are the browser's own lazy-loaded images.

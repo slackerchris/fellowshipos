@@ -25,6 +25,15 @@ Gate A, including migration of the old Linux password-change flag. Ordinary
 admin password resets and account disabling remain available. The
 [must-change plan](fellowship-nas-must-change-plan.md) records the work for reference.
 
+## Decided: appliance first (2026-11-18)
+
+FellowshipNAS ships as its own OS image. A version that installs on an
+existing Debian may come later, as the NAS core alone (pools, shares, users,
+Files, health). It would show SSH, network, time, boot recovery and the account
+split as managed by the system. It's not part of this release. Until then, keep
+those appliance parts separable from the core when touching them. Bring the
+package split itself to Chris before doing it.
+
 ## VM tour findings
 
 All six are built and proven on a VM as of 2026-11-16. The commits are not yet
@@ -186,7 +195,45 @@ Chris is touring a ZFS install on Proxmox. Findings so far:
     showed half-drawn pages with black staircase streaks. With
     `WLR_RENDERER=pixman`, none of 180 did, though 91 were caught mid-redraw.
     *Fixed 2026-11-17, in 0.2.1: the installer's kiosk service now uses
-    pixman. Needs confirming on Proxmox.*
+    pixman. Confirmed on Proxmox by Chris on 2026-11-18 with the 0.2.1 ISO: no tearing.*
+11. **Tab from Password skipped to Show.** On the installer's You step, Tab
+    went from Password to the Show button instead of Password again. *Fixed
+    2026-11-18, in 0.2.2: the button is now below both fields, labelled
+    Show passwords / Hide passwords. Type-check and build pass.*
+12. **Files should feel like a real file browser.** Chris picked four things:
+    right-click menus, a folder tree in the side, a selection line with
+    Properties, and a lighter delete with a recycle bin. For the bin he chose
+    to follow each share's existing SMB recycle-bin switch. *Built 2026-11-18,
+    in 0.2.2:*
+    - *Right-click on a file, a folder, or empty space opens a menu with Open
+      or Preview, Download, Copy, Cut, Paste into a folder, Rename (F2), Move
+      to…, Earlier versions…, Delete, and Properties (Alt+Enter). The ⋯ menu
+      lists the same actions. The menu key and Shift+F10 open it from the
+      keyboard.*
+    - *Each share in the side opens into a tree of its folders. Clicking one
+      goes there, the folders on the way to where you are open by themselves,
+      and you can drop files on any folder in the tree. Dropping onto another
+      share says that moving between shares isn't offered.*
+    - *The status line names what's picked, with its size. Properties shows the
+      kind, where it is, size, date, owner, group, permissions, and whether you
+      can change it, for a file, a folder, or the folder you're in.*
+    - *Delete asks a plain yes or no that says where things go. On a share with
+      its recycle bin on, Files and WebDAV move them to `.recycle/<you>`, the
+      folder SMB already uses, with the path they had. A name already in the
+      bin is kept, and the new one comes in as "Copy #1 of …", as Samba names
+      it. Times are set to the moment of deletion, so the nightly emptying
+      counts the share's days from then, as it does for SMB. On a share
+      without a bin, the question says so and where to turn one on.*
+    - *Recycle bin, under the share in the side, lists your deleted things.
+      You can put back one or several, recreating any folder that has since
+      gone, never replacing anything (a clash comes back as "name (put
+      back)"), delete things for good, or empty the bin. The `.recycle` folder
+      is hidden from the share's list, Move to…, and search.*
+    - *Go tests for the bin (recycle, put back, refusals, tree and search),
+      vet and gofmt pass in `golang:1.24`. Unit tests pass. Type-check and
+      build pass. Checked in a local preview against a pretend share. Not yet
+      run on a NAS, where permissions and ZFS renames will get their real
+      test.*
 
 ## Keeping the list current
 
