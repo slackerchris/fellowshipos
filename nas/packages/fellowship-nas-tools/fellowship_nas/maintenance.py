@@ -38,10 +38,12 @@ NAS = {
     "check": ("",),
 }
 # Looking at the system without changing it
-READ = {("system", "show"), ("system", "timezones"), ("system", "storage"), ("ssh", "show"), ("updates", "show"),
+READ = {("system", "show"), ("system", "timezones"), ("system", "time"), ("system", "storage"), ("ssh", "show"),
+        ("updates", "show"),
         ("network", "show")}
 # The maintenance interface: the only changes to the system a NAS admin can ask for
-MAINTENANCE = {("system", a) for a in ("hostname", "timezone", "certificate", "grow", "restart", "shutdown")} | \
+MAINTENANCE = {("system", a) for a in ("hostname", "timezone", "time-source", "certificate", "grow", "restart",
+                                       "shutdown")} | \
     {("ssh", "set"), ("updates", "check"), ("updates", "install"), ("network", "apply"), ("network", "confirm")}
 # Of those, the ones every NAS admin should hear about, not just the journal
 ANNOUNCED = {("system", "restart"), ("system", "shutdown"), ("system", "certificate"), ("updates", "install"),

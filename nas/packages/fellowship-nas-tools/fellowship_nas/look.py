@@ -1,5 +1,5 @@
 """How each person likes the desktop: light, dark or the system's, which
-theme, and how the clock reads. Kept on the NAS so a person's choice follows them to another computer
+theme, how the clock reads, and which status widgets are folded or hidden. Kept on the NAS so a person's choice follows them to another computer
 or browser instead of staying in the one they first chose it in."""
 import os
 import pwd
@@ -17,8 +17,14 @@ HOURS = ("auto", "12", "24")
 # What the taskbar shows beside the time
 DATES = ("off", "short", "numeric")
 
+# The status widgets on an administrator's desktop, which can each be folded
+# to their title, and all together hidden behind a tab
+WIDGETS = ("storage", "health", "disks", "alerts")
+WIDGETS_SHOWN = ("shown", "hidden")
+
 # What someone sees before they choose. The desktop's own theme is the default.
-DEFAULTS = {"mode": "system", "palette": "fellowship", "hours": "auto", "seconds": False, "date": "off"}
+DEFAULTS = {"mode": "system", "palette": "fellowship", "hours": "auto", "seconds": False, "date": "off",
+            "widgets": "shown", "collapsed": []}
 
 # A theme's name as the desktop spells it. The themes themselves live in the
 # desktop's themes.mjs; fnas only keeps the name, so a theme added or removed
@@ -49,14 +55,19 @@ def show(user):
     return {"user": user, **DEFAULTS, **chosen_looks().get(user, {})}
 
 
-def set_look(user, mode=None, palette=None, hours=None, seconds=None, date=None):
-    """Remember a person's light or dark, theme and clock."""
+def set_look(user, mode=None, palette=None, hours=None, seconds=None, date=None, widgets=None, collapsed=None):
+    """Remember a person's light or dark, theme, clock and widgets."""
     check_user(user)
-    change = {"mode": mode, "palette": palette, "hours": hours, "seconds": seconds, "date": date}
+    change = {"mode": mode, "palette": palette, "hours": hours, "seconds": seconds, "date": date,
+              "widgets": widgets, "collapsed": None if collapsed is None else sorted(set(collapsed))}
     change = {key: value for key, value in change.items() if value is not None}
     if not change:
-        raise FnasError("nothing to change: give --mode, --palette, --hours, --seconds or --date")
-    for key, allowed in (("mode", MODES), ("hours", HOURS), ("date", DATES)):
+        raise FnasError("nothing to change: give --mode, --palette, --hours, --seconds, --date, --widgets "
+                        "or --collapsed")
+    for name in change.get("collapsed", []):
+        if name not in WIDGETS:
+            raise FnasError(f"{name} isn't a widget: choose from {', '.join(WIDGETS)}")
+    for key, allowed in (("mode", MODES), ("hours", HOURS), ("date", DATES), ("widgets", WIDGETS_SHOWN)):
         if key in change and change[key] not in allowed:
             raise FnasError(f"{key} must be one of: {', '.join(allowed)}")
     if "palette" in change and not THEME_NAME.match(palette):

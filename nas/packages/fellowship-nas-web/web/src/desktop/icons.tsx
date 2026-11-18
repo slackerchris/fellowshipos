@@ -65,6 +65,10 @@ const UI = {
     bell: <path d="M8 16v-5a4 4 0 0 1 8 0v5l1.5 2h-11zM10.5 21h3" />,
     user: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 20c1-3.5 3.8-5.5 7-5.5s6 2 7 5.5" />,
     power: <path d="M12 3.5v8M7 6.6a7.5 7.5 0 1 0 10 0" />,
+    fold: <path d="M7 14l5-5 5 5" />,
+    unfold: <path d="M7 10l5 5 5-5" />,
+    hide: <path d="M10 7l5 5-5 5" />,
+    show: <path d="M14 7l-5 5 5 5" />,
 };
 
 export function Glyph({ name }: { name: keyof typeof UI }): JSX.Element {

@@ -1,7 +1,7 @@
 import { createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import {
-    CheckSchedule, NetworkState, ServiceEntry, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, UpdatesStatus,
+    CheckSchedule, NetworkState, ServiceEntry, Session, SessionInfo, SshStatus, SystemInfo, SystemStorage, TimeInfo, UpdatesStatus,
     changeOwnPassword, endSession,
     fnas, fnasJson,
     humanSize, jobStarted,
@@ -110,7 +110,7 @@ function ThisNas({ info, reload }: { info: SystemInfo; reload: () => void }) {
     return (
         <Card title="This NAS">
             <p class="small">Up for {uptime(info.uptime)}. The clock reads {when(info.time)}
-                {info.ntp ? ", kept right over the internet." : ", but isn't synchronised: check the internet connection."}</p>
+                {info.ntp ? ", kept right by the time servers below." : ", but isn't synchronised: see Time servers below."}</p>
             <form class="stack" onSubmit={event => { event.preventDefault(); rename.run(() => fnas(["system", "hostname", name])); }}>
                 <Field label="Name" hint="What computers on the network see, such as in \\NAME and NAME.local">
                     <input value={name} onInput={event => setName(event.currentTarget.value.toLowerCase())} />
@@ -129,6 +129,76 @@ function ThisNas({ info, reload }: { info: SystemInfo; reload: () => void }) {
                 <div class="row"><Button type="submit" busy={rezone.busy} disabled={zone === info.timezone}>Change time zone</Button></div>
                 <Result outcome={rezone.outcome} />
             </form>
+        </Card>
+    );
+}
+
+const TIME_HINTS: Record<TimeInfo["source"], string> = {
+    pool: "Volunteer servers worldwide, and any your router offers. The usual choice.",
+    google: "Google's servers alone. They spread a leap second over a day, so nothing else is mixed in.",
+    cloudflare: "Cloudflare's server alone, with NTS, which proves the time came from Cloudflare.",
+    custom: "Up to four servers you name, such as your router's address. Only these are used.",
+};
+
+/** Which time servers the clock follows, and whether it's keeping to them. */
+function TimeServers() {
+    const time = useLoad(() => fnasJson<TimeInfo>(["system", "time"]));
+    const action = useAction(time.reload);
+    const [source, setSource] = useState<TimeInfo["source"] | null>(null);
+    const [servers, setServers] = useState<string | null>(null);
+    return (
+        <Card title="Time servers">
+            <Loading loaded={time}>{() => {
+                const info = time.data!;
+                const chosen = source ?? info.source;
+                const typed = servers ?? info.servers.join(", ");
+                const list = typed.split(/[\s,]+/).filter(Boolean);
+                const changed = chosen !== info.source || (chosen === "custom" && list.join(",") !== info.servers.join(","));
+                return (
+                    <form class="stack" onSubmit={event => {
+                        event.preventDefault();
+                        action.run(() => fnas(["system", "time-source", "--source", chosen,
+                                               ...list.flatMap(server => chosen === "custom" ? ["--server", server] : [])]));
+                    }}>
+                        {info.synced ? (
+                            <p class="small">Synchronised{info.current ? ` with ${info.current}` : ""}
+                                {info.offset !== null ? `, ${Math.abs(info.offset * 1000).toFixed(1)} ms apart` : ""}.</p>
+                        ) : (
+                            <Notice kind="warning">The clock isn't synchronised yet. If it stays this way, check that the NAS
+                                can reach the internet, or a time server you named, on UDP port 123.</Notice>
+                        )}
+                        {info.choices.map(choice => (
+                            <label class="choice" key={choice.source}>
+                                <input type="radio" name="time-source" checked={chosen === choice.source}
+                                       onChange={() => setSource(choice.source)} />
+                                <span><strong>{choice.title}</strong><br />
+                                    <span class="muted small">{TIME_HINTS[choice.source]}</span></span>
+                            </label>
+                        ))}
+                        {chosen === "custom" && (
+                            <Field label="Servers" hint="Host names or addresses, separated by commas">
+                                <input value={typed} placeholder="192.168.1.1" onInput={event => setServers(event.currentTarget.value)} />
+                            </Field>
+                        )}
+                        <div class="row">
+                            <Button type="submit" busy={action.busy} disabled={!changed || (chosen === "custom" && !list.length)}>
+                                Use these servers</Button>
+                            <Button type="button" onClick={time.reload}>Check again</Button>
+                        </div>
+                        <Result outcome={action.outcome} />
+                        {info.sources.length > 0 && (
+                            <details>
+                                <summary class="small">What the clock hears ({info.sources.length})</summary>
+                                <ul class="small mono">
+                                    {info.sources.map(found => (
+                                        <li key={found.name}>{found.name}: {found.state}{found.reachable ? "" : ", no answer yet"}</li>
+                                    ))}
+                                </ul>
+                            </details>
+                        )}
+                    </form>
+                );
+            }}</Loading>
         </Card>
     );
 }
@@ -897,7 +967,10 @@ export function Settings() {
                 {section === "account" && <OwnPassword />}
                 {section === "look" && <Look />}
                 {section === "sessions" && <Sessions />}
-                {section === "nas" && <Loading loaded={info}>{() => <ThisNas info={info.data!} reload={info.reload} />}</Loading>}
+                {section === "nas" && <Loading loaded={info}>{() => <>
+                    <ThisNas info={info.data!} reload={info.reload} />
+                    <TimeServers />
+                </>}</Loading>}
                 {section === "certificate" && <Loading loaded={info}>{() => <Certificate info={info.data!} reload={info.reload} />}</Loading>}
                 {section === "space" && <SystemSpace />}
                 {section === "network" && <Network />}

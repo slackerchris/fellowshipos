@@ -133,23 +133,80 @@ export function formatTaskbarDate(date: Date, format: ClockFormat, timeZone?: st
     return format.date === "numeric" ? date.toLocaleDateString(undefined, { dateStyle: "short", timeZone }) : "";
 }
 
+/** Which status widgets are folded to their title, and whether the column is hidden. */
+export type WidgetId = "storage" | "health" | "disks" | "alerts";
+export interface WidgetPrefs {
+    widgets: "shown" | "hidden";
+    collapsed: WidgetId[];
+}
+
+const WIDGET_IDS: readonly WidgetId[] = ["storage", "health", "disks", "alerts"];
+const WIDGETS_KEY = "fellowship-widgets";
+
+function cleanWidgets(value: { widgets?: unknown; collapsed?: unknown }): WidgetPrefs {
+    return {
+        widgets: value.widgets === "hidden" ? "hidden" : "shown",
+        collapsed: Array.isArray(value.collapsed) ? value.collapsed.filter((id): id is WidgetId => WIDGET_IDS.includes(id)) : [],
+    };
+}
+
+let widgetPrefs: WidgetPrefs = (() => {
+    try {
+        return cleanWidgets(JSON.parse(localStorage.getItem(WIDGETS_KEY) || "{}"));
+    } catch {
+        return cleanWidgets({});
+    }
+})();
+const widgetListeners = new Set<(prefs: WidgetPrefs) => void>();
+
+function showWidgets(next: WidgetPrefs) {
+    widgetPrefs = next;
+    remember(WIDGETS_KEY, JSON.stringify(next));
+    widgetListeners.forEach(listener => listener(next));
+}
+
+/** The widget choices, kept current everywhere on the page, and setters that save them. */
+export function useWidgetPrefs() {
+    const [prefs, setPrefs] = useState(widgetPrefs);
+    useEffect(() => {
+        widgetListeners.add(setPrefs);
+        setPrefs(widgetPrefs);
+        return () => { widgetListeners.delete(setPrefs); };
+    }, []);
+    return {
+        prefs,
+        setHidden: (hidden: boolean) => {
+            const widgets = hidden ? "hidden" : "shown";
+            showWidgets({ ...widgetPrefs, widgets });
+            saveLook({ widgets });
+        },
+        setCollapsed: (id: WidgetId, folded: boolean) => {
+            const collapsed = folded ? [...new Set([...widgetPrefs.collapsed, id])]
+                : widgetPrefs.collapsed.filter(found => found !== id);
+            showWidgets({ ...widgetPrefs, collapsed });
+            saveLook({ collapsed });
+        },
+    };
+}
+
 /** Show the look the NAS remembers for this person. The browser's copy has
     already painted something, so this only puts it right. */
 export async function loadLook(user: string) {
     owner = user;
-    const saved = await fnasJson<{ mode?: string; palette?: string; hours?: unknown; seconds?: unknown; date?: unknown }>(
-        ["look", "show", user]);
+    const saved = await fnasJson<{ mode?: string; palette?: string; hours?: unknown; seconds?: unknown; date?: unknown;
+                                   widgets?: unknown; collapsed?: unknown }>(["look", "show", user]);
     const mode = known(saved.mode, MODES, "system");
     const palette = known(saved.palette, PALETTES.map(p => p.id), "fellowship");
     remember(MODE_KEY, mode);
     remember(PALETTE_KEY, palette);
     apply(mode, palette);
     showClock(cleanClock(saved));
+    showWidgets(cleanWidgets(saved));
 }
 
 /** Save a change for whoever is signed in. It is already on the page, so a NAS
     that can't keep it only means this browser remembers it alone. */
-function saveLook(change: { mode?: Mode; palette?: Palette } & Partial<ClockFormat>) {
+function saveLook(change: { mode?: Mode; palette?: Palette } & Partial<ClockFormat> & Partial<WidgetPrefs>) {
     if (!owner) {
         return;
     }
@@ -168,6 +225,12 @@ function saveLook(change: { mode?: Mode; palette?: Palette } & Partial<ClockForm
     }
     if (change.date) {
         args.push("--date", change.date);
+    }
+    if (change.widgets) {
+        args.push("--widgets", change.widgets);
+    }
+    if (change.collapsed) {
+        args.push("--collapsed", change.collapsed.join(","));
     }
     fnasJson(args).catch(() => {});
 }

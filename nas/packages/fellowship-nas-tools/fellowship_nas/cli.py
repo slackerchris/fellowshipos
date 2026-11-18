@@ -15,7 +15,7 @@ from .engines import mdadm
 
 # Actions that change nothing worth saving
 READ_ONLY_ACTIONS = {"list", "scan", "status", "show", "send", "test", "run", "scrub", "engines",
-                     "layouts", "identify", "storage", "timezones", "services", "shares", "details", "keys",
+                     "layouts", "identify", "storage", "timezones", "time", "services", "shares", "details", "keys",
                      "array-checks", "watch-events", "schedules",
                      "apply-schedules", "scrub-all", "sync-all", "sync"}
 ON_OFF = ("on", "off")
@@ -32,6 +32,12 @@ def dispatch_system(args, show):
     elif args.action == "timezone":
         system.set_timezone(args.zone)
         print(f"The time zone is now {args.zone}")
+    elif args.action == "time":
+        show(system.time_info(), print_time)
+    elif args.action == "time-source":
+        system.set_time_source(args.source, args.server)
+        print(f"The clock now follows {system.TIME_SOURCES[args.source]['title']}"
+              + (": " + ", ".join(args.server) if args.server else ""))
     elif args.action == "certificate":
         if args.if_missing:
             if not os.path.exists(system.WEB_CERT):
@@ -94,6 +100,14 @@ def print_network(found):
 def print_network_applied(found):
     print(f"The NAS is now at {found['address']}.")
     print(f"Confirm in the desktop by {when(found['deadline'])}, or the previous settings come back.")
+
+
+def print_time(info):
+    print(f"Time servers: {info['title']}" + (": " + ", ".join(info["servers"]) if info["servers"] else ""))
+    print("Synchronised" + (f" with {info['current']}" if info["current"] else "") if info["synced"]
+          else "Not synchronised")
+    for source in info["sources"]:
+        print(f"  {source['name']}: {source['state']}" + ("" if source["reachable"] else ", no answer yet"))
 
 
 def print_system(info):
@@ -576,6 +590,8 @@ def build_parser():
     look_set.add_argument("--hours", choices=look.HOURS, help="12- or 24-hour clock, or auto to follow the device")
     look_set.add_argument("--seconds", choices=("on", "off"), help="seconds on the taskbar clock")
     look_set.add_argument("--date", choices=look.DATES, help="the date beside the taskbar clock")
+    look_set.add_argument("--widgets", choices=look.WIDGETS_SHOWN, help="show the status widgets, or hide them")
+    look_set.add_argument("--collapsed", help="the widgets folded to their title, comma-separated; empty for none")
 
     group = area.add_parser("group", help="groups of people").add_subparsers(dest="action", required=True)
     group_list = group.add_parser("list", help="list groups and their members")
@@ -668,6 +684,11 @@ def build_parser():
     system_.add_parser("timezones", help="list time zones")
     system_.add_parser("hostname", help="rename this NAS").add_argument("name")
     system_.add_parser("timezone", help="change the time zone").add_argument("zone")
+    system_.add_parser("time", help="where the clock comes from, and whether it's synchronised")
+    time_source = system_.add_parser("time-source", help="choose the time servers the clock follows")
+    time_source.add_argument("--source", required=True, choices=tuple(system.TIME_SOURCES),
+                             help="pool for pool.ntp.org, google, cloudflare, or custom with --server")
+    time_source.add_argument("--server", action="append", default=[], help="a time server for custom; up to four")
     system_.add_parser("storage", help="show the system volume and its room to grow")
     system_.add_parser("grow", help="give the system volume more room").add_argument(
         "amount", help="bytes, 8G, 1T, or all")
@@ -1018,7 +1039,9 @@ def dispatch_user_action(args, show):
 def print_look(chosen):
     hours = "auto" if chosen["hours"] == "auto" else chosen["hours"] + "-hour"
     print(f"{chosen['user']}: {chosen['mode']}, {chosen['palette']} theme; clock {hours}"
-          + (", seconds" if chosen["seconds"] else "") + ("" if chosen["date"] == "off" else f", {chosen['date']} date"))
+          + (", seconds" if chosen["seconds"] else "") + ("" if chosen["date"] == "off" else f", {chosen['date']} date")
+          + ("; widgets hidden" if chosen["widgets"] == "hidden" else "")
+          + (f"; folded: {', '.join(chosen['collapsed'])}" if chosen["collapsed"] else ""))
 
 
 def dispatch_look(args, show):
@@ -1026,7 +1049,9 @@ def dispatch_look(args, show):
         show(look.show(args.user), print_look)
     else:
         seconds = None if args.seconds is None else args.seconds == "on"
-        show(look.set_look(args.user, args.mode, args.palette, args.hours, seconds, args.date), print_look)
+        collapsed = None if args.collapsed is None else [w for w in args.collapsed.split(",") if w]
+        show(look.set_look(args.user, args.mode, args.palette, args.hours, seconds, args.date, args.widgets, collapsed),
+             print_look)
 
 
 def print_ssh(status):

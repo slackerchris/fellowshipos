@@ -1,4 +1,4 @@
-"""The NAS's name, time zone, HTTPS certificate and power."""
+"""The NAS's name, time zone, time servers, HTTPS certificate and power."""
 import contextlib
 import datetime
 import grp
@@ -60,6 +60,110 @@ def set_timezone(zone):
     if zone not in timezones():
         raise FnasError(f"unknown time zone: {zone}")
     run("timedatectl", "set-timezone", zone)
+
+
+# --------------------------------------------------------------- time servers
+
+CHRONY_CONF = "/etc/chrony/chrony.conf"
+CHRONY_SOURCES = "/etc/chrony/sources.d/fellowship.sources"
+TIME_FILE = "/etc/fellowshipos/nas-time.json"
+# What fnas puts before a line of Debian's chrony.conf it turned off, so it can turn it back on
+OFF_MARK = "#fnas-off# "
+# Where chrony takes servers a router hands out; another choice turns it off,
+# so what was chosen is all the NAS listens to
+DHCP_SOURCES = "sourcedir /run/chrony-dhcp"
+# Each choice, with the lines it adds. pool keeps Debian's own line, which is
+# its share of pool.ntp.org, and the router's servers.
+TIME_SOURCES = {
+    "pool": {"title": "pool.ntp.org", "lines": []},
+    # Google smears leap seconds over a day, so it isn't mixed with anyone else's
+    "google": {"title": "Google", "lines": [f"server time{n}.google.com iburst" for n in range(1, 5)]},
+    "cloudflare": {"title": "Cloudflare, with NTS", "lines": ["server time.cloudflare.com iburst nts"]},
+    "custom": {"title": "Your own servers", "lines": []},
+}
+TIME_HOST = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$|^[0-9a-fA-F:.]+$")
+MAX_TIME_SERVERS = 4
+# chronyc's word for each source's state
+SOURCE_STATES = {"*": "in use", "+": "combined", "-": "not combined", "?": "unreachable", "x": "disagrees",
+                 "~": "too variable"}
+
+
+def chrony_conf(text, source):
+    """Debian's chrony.conf with its own pool and the router's servers on for
+    pool.ntp.org, and turned off for any other choice."""
+    found = []
+    for line in text.splitlines(keepends=True):
+        bare = line[len(OFF_MARK):] if line.startswith(OFF_MARK) else line
+        ours = bare.startswith(("pool ", "server ")) or bare.strip() == DHCP_SOURCES
+        if ours:
+            found.append(bare if source == "pool" else OFF_MARK + bare)
+        else:
+            found.append(line)
+    return "".join(found)
+
+
+def check_time_servers(servers):
+    if not servers:
+        raise FnasError("give at least one server for your own choice, such as your router's address")
+    if len(servers) > MAX_TIME_SERVERS:
+        raise FnasError(f"at most {MAX_TIME_SERVERS} servers")
+    for server in servers:
+        if not TIME_HOST.match(server):
+            raise FnasError(f"{server} isn't a host name or address")
+
+
+def time_choice():
+    saved = read_json(TIME_FILE, {}) or {}
+    source = saved.get("source") if saved.get("source") in TIME_SOURCES else "pool"
+    return {"source": source, "servers": list(saved.get("servers") or [])}
+
+
+def set_time_source(source, servers=()):
+    """Choose where the clock comes from, and have chrony use it straight away."""
+    if source not in TIME_SOURCES:
+        raise FnasError(f"source must be one of: {', '.join(TIME_SOURCES)}")
+    servers = [s.strip() for s in servers if s.strip()]
+    if source == "custom":
+        check_time_servers(servers)
+    elif servers:
+        raise FnasError("servers are only for your own choice: --source custom")
+    lines = TIME_SOURCES[source]["lines"] + [f"server {s} iburst" for s in servers]
+    os.makedirs(os.path.dirname(CHRONY_SOURCES), exist_ok=True)
+    write_file(CHRONY_SOURCES, "# Written by fnas from Settings → This NAS: changes here are overwritten\n"
+               + "".join(line + "\n" for line in lines))
+    with open(CHRONY_CONF) as file:
+        text = file.read()
+    wanted = chrony_conf(text, source)
+    if wanted != text:
+        write_file(CHRONY_CONF, wanted)
+    write_json(TIME_FILE, {"source": source, "servers": servers})
+    run("systemctl", "restart", "chrony.service")
+
+
+def time_sources():
+    """The servers chrony is listening to, and the state of each."""
+    found = []
+    for line in run("chronyc", "-c", "-n", "sources", check=False).stdout.splitlines():
+        fields = line.split(",")
+        if len(fields) > 5 and fields[0] in ("^", "="):
+            found.append({"name": fields[2], "state": SOURCE_STATES.get(fields[1], fields[1]),
+                          "reachable": fields[5] not in ("0", "")})
+    return found
+
+
+def time_info():
+    """Where the clock comes from, whether it's synchronised, and with what."""
+    shown = run("timedatectl", "show", check=False).stdout
+    settings = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+    tracking = run("chronyc", "-c", "-n", "tracking", check=False).stdout.split(",")
+    choice = time_choice()
+    return {**choice, "title": TIME_SOURCES[choice["source"]]["title"],
+            "choices": [{"source": key, "title": value["title"]} for key, value in TIME_SOURCES.items()],
+            "synced": settings.get("NTPSynchronized") == "yes",
+            "current": tracking[1] if len(tracking) > 1 and tracking[1] not in ("", "0.0.0.0", "127.127.1.1") else "",
+            "offset": float(tracking[4]) if len(tracking) > 4 and tracking[4].replace(".", "", 1).lstrip("-").isdigit()
+            else None,
+            "sources": time_sources()}
 
 
 def install_certificate(cert, key, self_signed):

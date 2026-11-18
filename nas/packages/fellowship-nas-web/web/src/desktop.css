@@ -84,6 +84,26 @@
 .widget:hover { border-color: var(--gold); }
 .widget h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gold); }
 .widget-row { display: grid; gap: 4px; }
+/* A widget with its fold button; the button sits in the widget's top corner */
+.widget-frame { position: relative; display: grid; }
+.widget-frame > .widget { padding-right: 38px; }
+.widget-fold {
+    position: absolute; top: 6px; right: 6px;
+    display: grid; place-items: center; width: 26px; height: 26px;
+    border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); cursor: pointer;
+}
+.widget-fold:hover, .widget-fold:focus-visible { border-color: var(--border); color: var(--gold); }
+.widget-folded { display: flex; align-items: center; gap: 10px; padding-top: 10px; padding-bottom: 10px; }
+.widget-folded h2 { flex: 1; }
+.widgets-bar { display: flex; justify-content: flex-end; }
+.widgets-hide, .widgets-tab {
+    display: inline-flex; align-items: center; gap: 4px;
+    font: inherit; font-size: 0.8rem; color: var(--bar-text);
+    background: var(--bar); border: 1px solid var(--bar-border); border-radius: 999px;
+    padding: 3px 8px 3px 12px; cursor: pointer; box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+}
+.widgets-hide:hover, .widgets-tab:hover { border-color: var(--gold); }
+.widgets-tab { position: absolute; top: 16px; right: 16px; padding: 4px 10px 4px 6px; }
 
 .window {
     position: absolute;

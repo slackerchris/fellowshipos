@@ -4351,12 +4351,12 @@ class LookTests(unittest.TestCase):
     def test_a_person_who_has_not_chosen_gets_the_desktop_as_it_ships(self):
         self.assertEqual(self.look.show("kim"),
                          {"user": "kim", "mode": "system", "palette": "fellowship",
-                          "hours": "auto", "seconds": False, "date": "off"})
+                          "hours": "auto", "seconds": False, "date": "off", "widgets": "shown", "collapsed": []})
 
     def test_one_change_keeps_the_other(self):
         self.look.set_look("kim", palette="highwatch")
         expected = {"user": "kim", "mode": "system", "palette": "highwatch",
-                    "hours": "auto", "seconds": False, "date": "off"}
+                    "hours": "auto", "seconds": False, "date": "off", "widgets": "shown", "collapsed": []}
         self.assertEqual(self.look.show("kim"), expected)
         self.look.set_look("kim", mode="dark")
         self.assertEqual(self.look.show("kim"), {**expected, "mode": "dark"})
@@ -4382,6 +4382,20 @@ class LookTests(unittest.TestCase):
                          ("dark", "24", True, "short"))
         self.look.set_look("kim", seconds=False)
         self.assertEqual(self.look.show("kim")["hours"], "24")
+
+    def test_widgets_fold_and_hide_and_keep_the_rest(self):
+        self.look.set_look("kim", mode="dark")
+        self.look.set_look("kim", collapsed=["disks", "storage", "disks"])
+        self.look.set_look("kim", widgets="hidden")
+        chosen = self.look.show("kim")
+        self.assertEqual((chosen["mode"], chosen["widgets"], chosen["collapsed"]), ("dark", "hidden", ["disks", "storage"]))
+        # Unfolding every widget is a change of its own, not nothing
+        self.look.set_look("kim", collapsed=[])
+        self.assertEqual(self.look.show("kim")["collapsed"], [])
+        with self.assertRaisesRegex(fnas.FnasError, "isn't a widget"):
+            self.look.set_look("kim", collapsed=["weather"])
+        with self.assertRaisesRegex(fnas.FnasError, "widgets must be"):
+            self.look.set_look("kim", widgets="folded")
 
     def test_only_a_real_clock_choice_is_kept(self):
         with self.assertRaisesRegex(fnas.FnasError, "hours must be"):
@@ -4925,6 +4939,83 @@ class UnraidPoolDelete(unittest.TestCase):
     def test_a_busy_pool_is_left_as_it_was(self):
         with self.assertRaisesRegex(fnas.FnasError, "target is busy: disconnect any clients"):
             self.delete("media", umount_code=32)
+
+
+class TimeServers(unittest.TestCase):
+    """The clock follows pool.ntp.org until someone chooses otherwise; any other
+    choice is all chrony hears, and pool.ntp.org brings Debian's lines back."""
+
+    DEBIAN = ("# Use Debian vendor zone.\npool 2.debian.pool.ntp.org iburst\n\n"
+              "sourcedir /run/chrony-dhcp\nsourcedir /etc/chrony/sources.d\nmakestep 1 3\n")
+
+    def setUp(self):
+        self.system = {m.__name__: m for m in MODULES}["fellowship_nas.system"]
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = directory.name
+        self.conf = os.path.join(self.dir, "chrony.conf")
+        with open(self.conf, "w") as file:
+            file.write(self.DEBIAN)
+        self.calls = []
+        for patcher in (mock.patch.object(self.system, "CHRONY_CONF", self.conf),
+                        mock.patch.object(self.system, "CHRONY_SOURCES", os.path.join(self.dir, "sources.d", "f.sources")),
+                        mock.patch.object(self.system, "TIME_FILE", os.path.join(self.dir, "time.json")),
+                        mock.patch.object(self.system, "run", lambda *c, **kw: self.calls.append(c)
+                                          or SimpleNamespace(stdout="", stderr="", returncode=0))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def read(self, path):
+        with open(path) as file:
+            return file.read()
+
+    def test_nothing_chosen_is_pool_ntp_org(self):
+        self.assertEqual(self.system.time_choice(), {"source": "pool", "servers": []})
+
+    def test_google_alone_turns_off_the_pool_and_the_routers_servers(self):
+        self.system.set_time_source("google")
+        conf = self.read(self.conf)
+        self.assertIn("#fnas-off# pool 2.debian.pool.ntp.org iburst\n", conf)
+        self.assertIn("#fnas-off# sourcedir /run/chrony-dhcp\n", conf)
+        self.assertIn("\nsourcedir /etc/chrony/sources.d\n", conf)
+        self.assertIn("server time1.google.com iburst\n", self.read(self.system.CHRONY_SOURCES))
+        self.assertIn(("systemctl", "restart", "chrony.service"), self.calls)
+
+    def test_pool_brings_debians_lines_back_as_they_were(self):
+        self.system.set_time_source("cloudflare")
+        self.assertIn("nts", self.read(self.system.CHRONY_SOURCES))
+        self.system.set_time_source("pool")
+        self.assertEqual(self.read(self.conf), self.DEBIAN)
+        self.assertNotIn("server", self.read(self.system.CHRONY_SOURCES))
+
+    def test_own_servers_are_checked_and_kept(self):
+        self.system.set_time_source("custom", ["192.168.1.1", "ntp.home.lan"])
+        self.assertEqual(self.system.time_choice(), {"source": "custom", "servers": ["192.168.1.1", "ntp.home.lan"]})
+        self.assertIn("server ntp.home.lan iburst\n", self.read(self.system.CHRONY_SOURCES))
+        for servers, problem in (([], "at least one"), (["a", "b", "c", "d", "e"], "at most 4"),
+                                 (["bad host"], "isn't a host"), (["x;reboot"], "isn't a host")):
+            with self.subTest(servers), self.assertRaisesRegex(fnas.FnasError, problem):
+                self.system.set_time_source("custom", servers)
+        with self.assertRaisesRegex(fnas.FnasError, "only for your own"):
+            self.system.set_time_source("google", ["192.168.1.1"])
+        with self.assertRaisesRegex(fnas.FnasError, "source must be"):
+            self.system.set_time_source("sundial")
+
+    def test_the_status_names_the_server_and_each_sources_state(self):
+        answers = {"timedatectl": "NTPSynchronized=yes\n",
+                   "tracking": "A29FC87B,162.159.200.123,3,1794950000.1,-0.000012345,0.0,0.0,0,0,0,0,0,0,Normal\n",
+                   "sources": "^,*,162.159.200.123,3,6,377,12,0.0,0.0,0.0\n^,?,10.0.0.9,0,6,0,0,0.0,0.0,0.0\n"}
+
+        def run(*command, **kw):
+            key = "timedatectl" if command[0] == "timedatectl" else command[-1]
+            return SimpleNamespace(stdout=answers.get(key, ""), stderr="", returncode=0)
+        with mock.patch.object(self.system, "run", run):
+            info = self.system.time_info()
+        self.assertTrue(info["synced"])
+        self.assertEqual(info["current"], "162.159.200.123")
+        self.assertAlmostEqual(info["offset"], -0.000012345)
+        self.assertEqual(info["sources"], [{"name": "162.159.200.123", "state": "in use", "reachable": True},
+                                           {"name": "10.0.0.9", "state": "unreachable", "reachable": False}])
 
 
 class ServiceControl(unittest.TestCase):

@@ -63,7 +63,8 @@ var commands = map[string][]string{
 	"backup":   {"show", "set", "off", "run", "list", "restore"},
 	"alert":    {"list", "show", "test", "email-set", "email-off", "ntfy-set", "ntfy-off", "clear", "dismiss"},
 	"config":   {"show", "restore", "adopt"},
-	"system":   {"show", "timezones", "hostname", "timezone", "certificate", "storage", "grow", "restart", "shutdown"},
+	"system": {"show", "timezones", "hostname", "timezone", "time", "time-source", "certificate", "storage", "grow",
+		"restart", "shutdown"},
 	// Only fnas itself runs a job; people follow them
 	"job":   {"list", "show"},
 	"setup": {"status", "done", "reset"},

@@ -1,8 +1,9 @@
 // The desktop: wallpaper, app icons, widgets, windows and the taskbar
+import { ComponentChildren } from "preact";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Alert, DiskHealth, FNAS_CHANGED, Health, Pool, SetupStatus, fnas, fnasJson, humanSize, logout, plural, when } from "../api";
 import { SEVERITY, SEVERITY_WORD, Severity, level, measureLevel, severityOf } from "../health";
-import { ClockFormat, MODES, formatTaskbarDate, formatTime, useAppearance, useClockFormat } from "../appearance";
+import { ClockFormat, MODES, WidgetId, formatTaskbarDate, formatTime, useAppearance, useClockFormat, useWidgetPrefs } from "../appearance";
 import { useJobs } from "../jobs";
 import { dayIn, useNasTime } from "../nas-clock";
 import { ClockChoices, PowerChoice, SessionContext } from "../settings";
@@ -328,9 +329,84 @@ function DisksWidget({ status, open }: { status: Status; open: (app: AppId) => v
     );
 }
 
+type Attention = { kind: "warning" | "bad"; text: string } | null;
+
+const worse = (a: "warning" | "bad", b: "warning" | "bad") => a === "bad" || b === "bad" ? "bad" : "warning";
+
+/** What each widget would warn about, so a folded or hidden one still says so. */
+function attentionOf(status: Status): Record<WidgetId, Attention> {
+    const pools = (status.pools || []).filter(pool => pool.health !== "ONLINE");
+    const problems = (status.health?.problems || []).filter(problem => problem.severity !== "info");
+    const disks = (status.health?.disks || []).filter(disk => disk.state !== "os")
+        .map(disk => bayState(disk, status.health?.problems || []))
+        .filter(state => BAY_RANK[state] >= BAY_RANK.low);
+    const alerts = (status.alerts || []).slice(-3).filter(alert => SEVERITY[alert.severity] !== "neutral");
+    const kindOf = (severity: keyof typeof SEVERITY) => SEVERITY[severity] === "bad" ? "bad" as const : "warning" as const;
+    return {
+        storage: pools.length ? {
+            kind: pools.some(pool => pool.health !== "DEGRADED" && pool.health !== "BUILDING") ? "bad" : "warning",
+            text: pools.length === 1 ? `${pools[0].name} ${pools[0].health.toLowerCase()}` : `${pools.length} pools need a look`,
+        } : null,
+        health: problems.length ? {
+            kind: problems.map(problem => kindOf(problem.severity)).reduce(worse), text: plural(problems.length, "problem"),
+        } : null,
+        disks: disks.length ? {
+            kind: disks.includes("critical") ? "bad" : "warning", text: plural(disks.length, "disk") + " need a look",
+        } : null,
+        alerts: alerts.length ? {
+            kind: alerts.map(alert => kindOf(alert.severity)).reduce(worse), text: plural(alerts.length, "warning"),
+        } : null,
+    };
+}
+
+/** A widget that can be folded to its title. Folded, it still says when
+    something needs attention, and a click opens its app as before. */
+function WidgetFrame({ id, title, attention, known, onOpen, children }: {
+    id: WidgetId; title: string; attention: Attention; known: boolean; onOpen: () => void; children: ComponentChildren;
+}) {
+    const { prefs, setCollapsed } = useWidgetPrefs();
+    const folded = prefs.collapsed.includes(id);
+    return (
+        <div class={`widget-frame${folded ? " folded" : ""}`}>
+            {folded ? (
+                <button type="button" class="widget widget-folded" onClick={onOpen}>
+                    <h2>{title}</h2>
+                    {attention ? <Badge kind={attention.kind}>{attention.text}</Badge>
+                        : known && <span class="small muted">All well</span>}
+                </button>
+            ) : children}
+            <button type="button" class="widget-fold" aria-expanded={!folded}
+                    aria-label={`${folded ? "Unfold" : "Fold"} ${title}`} title={folded ? "Unfold" : "Fold to its title"}
+                    onClick={() => setCollapsed(id, !folded)}>
+                <Glyph name={folded ? "unfold" : "fold"} />
+            </button>
+        </div>
+    );
+}
+
 function Widgets({ status, open }: { status: Status; open: (app: AppId) => void }) {
+    const { prefs, setHidden } = useWidgetPrefs();
+    const attention = attentionOf(status);
+    const known = !!status.health || !!status.pools;
+    const flagged = Object.values(attention).filter((found): found is NonNullable<Attention> => !!found);
+    if (prefs.widgets === "hidden") {
+        return (
+            <button type="button" class="widgets-tab" onClick={() => setHidden(false)} aria-label="Show the status widgets"
+                    title="Show the status widgets">
+                <Glyph name="show" />
+                <span>Status</span>
+                {flagged.length > 0 && <Badge kind={flagged.map(found => found.kind).reduce(worse)}>{flagged.length}</Badge>}
+            </button>
+        );
+    }
     return (
         <aside class="widgets" aria-label="Status">
+            <div class="widgets-bar">
+                <button type="button" class="widgets-hide" onClick={() => setHidden(true)} title="Hide the status widgets">
+                    Hide <Glyph name="hide" />
+                </button>
+            </div>
+            <WidgetFrame id="storage" title="Storage" attention={attention.storage} known={known} onOpen={() => open("storage")}>
             <button type="button" class="widget" onClick={() => open("storage")}>
                 <h2>Storage</h2>
                 {!status.pools && <p class="muted small">{status.error || "Loading…"}</p>}
@@ -348,8 +424,14 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                     </div>
                 ))}
             </button>
-            <HealthWidget status={status} open={open} />
-            <DisksWidget status={status} open={open} />
+            </WidgetFrame>
+            <WidgetFrame id="health" title="Health" attention={attention.health} known={known} onOpen={() => open("health")}>
+                <HealthWidget status={status} open={open} />
+            </WidgetFrame>
+            <WidgetFrame id="disks" title="Disks" attention={attention.disks} known={known} onOpen={() => open("health")}>
+                <DisksWidget status={status} open={open} />
+            </WidgetFrame>
+            <WidgetFrame id="alerts" title="Recent alerts" attention={attention.alerts} known={known} onOpen={() => open("alerts")}>
             <div class="widget" role="button" tabIndex={0} onClick={() => open("alerts")}
                  onKeyDown={event => {
                      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open("alerts"); }
@@ -371,6 +453,7 @@ function Widgets({ status, open }: { status: Status; open: (app: AppId) => void 
                     </div>
                 ))}
             </div>
+            </WidgetFrame>
         </aside>
     );
 }
@@ -524,6 +607,7 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
     const visible = windows.windows.filter(win => !win.minimized);
     const front = visible.reduce<Win | null>((best, win) => !best || win.z > best.z ? win : best, null)?.id;
 
+    const widgetPrefs = useWidgetPrefs();
     // Asked from the account menu, and shown over the whole desktop rather than inside it
     const [power, setPower] = useState(false);
 
@@ -594,6 +678,14 @@ export function Desktop({ onSignedOut }: { onSignedOut: () => void }) {
                             setPanel("launcher");
                         }}>
                             Show apps
+                        </button>
+                    )}
+                    {!contextMenu.app && session.admin && (
+                        <button type="button" class="menu-item" onClick={() => {
+                            setContextMenu(null);
+                            widgetPrefs.setHidden(widgetPrefs.prefs.widgets !== "hidden");
+                        }}>
+                            {widgetPrefs.prefs.widgets === "hidden" ? "Show status widgets" : "Hide status widgets"}
                         </button>
                     )}
                 </div>

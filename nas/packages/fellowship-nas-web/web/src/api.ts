@@ -806,6 +806,20 @@ export function diskName(disk: { by_id: string | null; path: string }): string {
     return (disk.by_id || disk.path).replace("/dev/disk/by-id/", "");
 }
 
+/** Where the NAS's clock comes from, and how that's going. */
+export interface TimeInfo {
+    source: "pool" | "google" | "cloudflare" | "custom";
+    servers: string[];
+    title: string;
+    choices: { source: TimeInfo["source"]; title: string }[];
+    synced: boolean;
+    // The server the clock follows right now, if any
+    current: string;
+    // How far the clock is from it, in seconds
+    offset: number | null;
+    sources: { name: string; state: string; reachable: boolean }[];
+}
+
 export interface SystemInfo {
     hostname: string;
     timezone: string;
