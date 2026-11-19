@@ -125,7 +125,7 @@ Priority: optional
 Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
- xdg-desktop-portal, xdg-desktop-portal-gtk,
+ xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64,
  pipewire, pipewire-pulse, wireplumber
 Description: The FellowshipOS desktop
  The Wayland compositor, the shell (top bar, dock, launcher), the

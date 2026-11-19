@@ -55,6 +55,14 @@ breeze-cursor-theme
 # Rhythmbox's library assume the folders exist.
 xdg-user-dirs
 
+# Drives and network shares in Strider (the file manager) go through GIO:
+# GVfs's backends for SMB, SFTP, FTP and WebDAV and for browsing the
+# network, its FUSE bridge so a mounted share is an ordinary folder that
+# copy, move and undo work on, and UDisks for USB drives. Nemo pulls these
+# in today; they are listed here so they stay when Nemo goes.
+gvfs-backends
+gvfs-fuse
+udisks2
 # The everyday apps chosen in the desktop checklist: GTK 3 where there is a
 # choice, so the session's GTK theme reaches them.
 foot
