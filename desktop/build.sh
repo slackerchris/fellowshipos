@@ -56,6 +56,8 @@ install_bin fellowship-notifyd
 install_bin fellowship-settings
 install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.desktop" \
     "$STAGE/usr/share/applications/org.fellowship.Settings.desktop"
+install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
+    "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
 install -Dm644 desktop/session/fellowship-session.sh "$STAGE/etc/profile.d/fellowship-session.sh"
 install -Dm440 desktop/session/sudoers "$STAGE/etc/sudoers.d/fellowship-session"
