@@ -58,11 +58,18 @@ xdg-user-dirs
 # Drives and network shares in Strider (the file manager) go through GIO:
 # GVfs's backends for SMB, SFTP, FTP and WebDAV and for browsing the
 # network, its FUSE bridge so a mounted share is an ordinary folder that
-# copy, move and undo work on, and UDisks for USB drives. Nemo pulls these
-# in today; they are listed here so they stay when Nemo goes.
+# copy, move and undo work on, and UDisks for USB drives, with polkit's
+# daemon so UDisks lets the person at the desktop open a drive (without it
+# every mount was "not authorized", seen in the VM on 2026-11-19). Avahi lets
+# Strider find FellowshipNAS machines by their _fellowship-nas._tcp advert,
+# and nss-mdns resolves their .local names. The 1.0 image had none of the
+# network pieces: Nemo didn't pull them in.
 gvfs-backends
 gvfs-fuse
 udisks2
+polkitd
+avahi-daemon
+libnss-mdns
 # The everyday apps chosen in the desktop checklist: GTK 3 where there is a
 # choice, so the session's GTK theme reaches them.
 foot

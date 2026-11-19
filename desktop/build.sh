@@ -29,7 +29,7 @@ if ! command -v cargo >/dev/null 2>&1; then
     apt-get update -qq
     apt-get install -y -qq build-essential pkg-config curl ca-certificates \
         libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgbm-dev libudev-dev \
-        libseat-dev libinput-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+        libseat-dev libinput-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libglib2.0-dev
     curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
     . "$HOME/.cargo/env"
 fi
@@ -79,7 +79,9 @@ ln -sf /usr/lib/systemd/system/fellowship-console.service \
 # One place for the themes, read by the Rust desktop at run time, and the
 # tree the dock draws in the middle
 install -d "$STAGE/usr/share/fellowship/themes/wallpapers" "$STAGE/usr/share/fellowship/icons"
-install -m644 "$WORK"/assets/icons/* "$STAGE/usr/share/fellowship/icons/"
+# Loose icons only: the folders beside them (apps, files, settings) are
+# installed above or compiled into the apps.
+find "$WORK/assets/icons" -maxdepth 1 -type f -exec install -m644 {} "$STAGE/usr/share/fellowship/icons/" \;
 install -m644 themes/*.toml "$STAGE/usr/share/fellowship/themes/"
 install -m644 themes/wallpapers/* "$STAGE/usr/share/fellowship/themes/wallpapers/"
 

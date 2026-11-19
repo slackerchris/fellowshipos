@@ -94,16 +94,17 @@ for edition in $EDITIONS; do
 
             # live-build installs every .deb in packages.chroot, so the
             # desktop's package is there for the desktop image and kept aside
-            # for the images that are not it
-            mkdir -p .build/desktop-package
+            # for the images that are not it. Aside means cache/: lb clean
+            # empties .build/, which lost the package between images.
+            mkdir -p cache/desktop-package
             if [ \"$edition\" = desktop ]; then
-                ls .build/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
-                    mv .build/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
+                ls cache/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
+                    mv cache/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
                 ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 ||
                     { echo 'the desktop package is missing: run desktop/build.sh' >&2; exit 1; }
             else
                 ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 &&
-                    mv config/packages.chroot/fellowship-desktop_*.deb .build/desktop-package/
+                    mv config/packages.chroot/fellowship-desktop_*.deb cache/desktop-package/
             fi
 
             lb clean

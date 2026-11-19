@@ -24,6 +24,9 @@
 #                           lets the driver pick)
 #   FELLOWSHIP_ISO          the desktop image
 #   FELLOWSHIP_WAIT         seconds allowed for the boot (default 300)
+#   FELLOWSHIP_QEMU_EXTRA   more QEMU arguments, split on spaces: a second
+#                           network card on a private segment shared with a
+#                           NAS VM, a USB stick (vm-strider.py uses both)
 set -eu
 
 cd "$(dirname "$0")/../.."
@@ -89,6 +92,7 @@ qemu-system-x86_64 \
     -display "$DISPLAY_KIND" \
     -serial "unix:$SERIAL,server=on,wait=off" \
     -monitor "unix:$MONITOR",server,nowait \
+    ${FELLOWSHIP_QEMU_EXTRA:-} \
     -daemonize -pidfile "$OUT/vm.pid"
 
 echo "booting: serial $SERIAL ; monitor $MONITOR ; share $OUT/share"

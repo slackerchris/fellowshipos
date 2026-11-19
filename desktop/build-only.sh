@@ -37,7 +37,7 @@ docker run --rm --privileged \
         apt-get install -y -qq build-essential pkg-config curl ca-certificates \
             libwayland-dev libxkbcommon-dev libegl1-mesa-dev libgbm-dev \
             libudev-dev libseat-dev libinput-dev libx11-dev libxcursor-dev \
-            libxrandr-dev libxi-dev
+            libxrandr-dev libxi-dev libglib2.0-dev
         if [ ! -x /cargo/bin/cargo ]; then
             curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
         fi
