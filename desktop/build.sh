@@ -6,7 +6,7 @@
 # build.sh runs this inside its Debian trixie container with the desktop
 # checkout mounted at /fellowship-desktop. The result is one .deb in
 # config/packages.chroot/, which live-build installs into the image: the
-# compositor, shell, message tool, portal backend, Settings and Files apps, the shared themes, the
+# compositor, shell, message tool, portal backend, Settings and Strider (the file manager), the shared themes, the
 # portal's configuration and the console-session starter.
 set -e
 
@@ -57,6 +57,10 @@ install_bin fellowship-settings
 install_bin fellowship-files
 install -Dm644 "$WORK/crates/fellowship-files/data/org.fellowship.Files.desktop" \
     "$STAGE/usr/share/applications/org.fellowship.Files.desktop"
+install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Files.svg" \
+    "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Files.svg"
+install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Files-256.png" \
+    "$STAGE/usr/share/icons/hicolor/256x256/apps/org.fellowship.Files.png"
 install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.desktop" \
     "$STAGE/usr/share/applications/org.fellowship.Settings.desktop"
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
