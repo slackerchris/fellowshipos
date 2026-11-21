@@ -6,11 +6,18 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.2.3** — a slimmer NAS image: no Docker, git, nmap or full mtr
+Current: **0.3.0** — the desktop tour batch (Chris, 2026-11-20): Strider
+(Fellowship Files) in the desktop image beside Nemo, with its GVfs backends,
+and the NAS announcing itself on the network; the theme manager's light mode,
+by time of day (sunrise and sunset, or set hours) and the wallpaper fade, all
+switched live; a darker gold for Strider's toolbar icons in light mode; and
+Qt apps' menu and tool bars following a live switch under Breeze 6.3.
+
+Before it, **0.2.3** was a slimmer NAS image: no Docker, git, nmap or full mtr
 (mtr-tiny instead), 479 MB less installed and a 1.01 GB ISO. The other images
 keep them.
 
-Before it, **0.2.2** made Files feel like a file browser: right-click menus, a
+Before that, **0.2.2** made Files feel like a file browser: right-click menus, a
 folder tree in the side, a selection line and Properties, and a recycle bin
 that follows each share's SMB bin switch. Also the installer's Tab order on the
 You step, and the appliance-first decision in the release list.
