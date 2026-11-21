@@ -1,9 +1,9 @@
-// Bundles the install page into dist/. It shares the desktop's stylesheet and
-// the Fellowship theme file, so the NAS looks the same from install to desktop.
+// Bundles the install page into dist/. Its stylesheet and theme loader began as
+// copies of the NAS desktop's, taken when FellowshipNAS became its own project.
 import * as esbuild from "esbuild";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { THEMES, THEMES_DIR, themesCss } from "../../nas/packages/fellowship-nas-web/web/themes.mjs";
+import { THEMES, THEMES_DIR, themesCss } from "./themes.mjs";
 
 mkdirSync("dist", { recursive: true });
 copyFileSync(join(THEMES_DIR, "branding", "fellowship-tree.png"), "dist/fellowship-tree.png");

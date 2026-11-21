@@ -12,6 +12,17 @@ bump.
 
 ## [Unreleased]
 
+### Changed
+
+- FellowshipNAS is its own project. `nas/`, the NAS documents, the NAS image's
+  edition and its CI jobs moved to the FellowshipOS-NAS repository with their
+  history; it carries its own copy of the installer, the live-build profile and
+  the themes, and builds without this checkout. `./build.sh` now builds the
+  multi-purpose image by default. The installer keeps its own copy of the
+  stylesheet and theme loader it used to borrow from the NAS desktop
+  (`installer/web/themes.mjs`, `installer/web/src/desktop-style.css` and
+  `desktop.css`), so the install page looks as it did.
+
 ### Added
 
 - A third image, **FellowshipOS Desktop**: the same live system with the

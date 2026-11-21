@@ -2,8 +2,9 @@
 
 Read [PROJECTS.md](PROJECTS.md) for the product map, builds, and Git workflow.
 
-For FellowshipNAS work, read [the release list](docs/fellowship-nas-release.md)
-before choosing or expanding an implementation task. Follow the owner's current
-request and use the release list to pick up work between sessions. Treat older
-plans, reviews, and handoffs as references. Bring new features and policy changes
-to Chris before starting them.
+FellowshipNAS is its own project in the FellowshipOS-NAS repository
+(`~/Git/FellowshipOS-NAS`) since 2026-11-20. Do NAS work there, starting from
+its release list. Never make a build, import or CI step here depend on that
+checkout; a fix wanted in both projects is made in each.
+
+Bring new features and policy changes to Chris before starting them.

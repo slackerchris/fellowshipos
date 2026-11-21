@@ -1,8 +1,8 @@
 # FellowshipOS themes
 
 One file per theme. Every part of FellowshipOS that draws in colour reads
-these files: the NAS web desktop (`nas/packages/fellowship-nas-web/web/themes.mjs`,
-at build time), the graphical installer (Fellowship only), and the Rust
+these files: the graphical installer (Fellowship only, through
+`installer/web/themes.mjs` at build time) and the Rust
 desktop for the desktop role (`fellowship-theme` in the fellowship-desktop
 repository, at run time). Installed systems get them in
 `/usr/share/fellowship/themes`.

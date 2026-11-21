@@ -16,9 +16,6 @@ cp -r . "$WORK/fellowship-installer"
 sed -i "1s/([^)]*)/(${VERSION})/" "$WORK/fellowship-installer/debian/changelog"
 cd "$WORK/fellowship-installer"
 rm -rf web/node_modules web/dist
-# The page borrows the desktop's stylesheet and wallpapers
-mkdir -p ../nas/packages/fellowship-nas-web
-cp -r "$OLDPWD/../nas/packages/fellowship-nas-web/web" ../nas/packages/fellowship-nas-web/
 (cd web && npm ci --no-audit --no-fund && npm run build)
 dpkg-buildpackage -b -us -uc
 

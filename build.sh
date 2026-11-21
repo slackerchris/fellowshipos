@@ -9,10 +9,11 @@ WORKDIR="/build"
 # The one release version, prerelease 0.major.minor; see docs/versioning.md
 VERSION="$(cat VERSION)"
 TEMPLATE_NAME="fellowshipos-trixie-amd64-${VERSION}"
-# Both images are the same live system, built twice. FELLOWSHIP_EDITIONS picks
-# which to build; the LXC template comes from the multi-purpose one. Add
-# `desktop` for the image that boots into the Fellowship desktop.
-EDITIONS="${FELLOWSHIP_EDITIONS:-nas multi}"
+# The images are the same live system, built per edition. FELLOWSHIP_EDITIONS
+# picks which to build; the LXC template comes from the multi-purpose one. Add
+# `desktop` for the image that boots into the Fellowship desktop. FellowshipNAS
+# is its own project now, in the FellowshipOS-NAS repository.
+EDITIONS="${FELLOWSHIP_EDITIONS:-multi}"
 TEMPLATE_FROM="multi"
 
 echo "[fellowshipos] Checking for Docker image..."
@@ -38,14 +39,13 @@ run() {
 > "$LOG"
 rm -f "${TEMPLATE_NAME}_lxc.tar.gz"
 
-# The packages are the same for both images, so they are built once. The
+# The packages are the same for every image, so they are built once. The
 # desktop package needs the fellowship-desktop checkout beside this
 # repository; building it costs a Rust build, so it runs only when asked for.
 PACKAGES='
         set -e
         apt-get update -qq
         apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
-        nas/packages/build.sh
         installer/build.sh
         installer/cog/build.sh
     '
@@ -82,15 +82,9 @@ for edition in $EDITIONS; do
             apt-get update -qq
             apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
 
-            # The NAS packages are in the NAS image only: the multi-purpose
-            # image leaves the role to first boot and offers no NAS choice.
-            # The packages step above makes them again on every run.
-            if [ \"$edition\" = nas ]; then
-                [ -d config/includes.chroot/usr/share/fellowshipos/nas-repo ] ||
-                    { echo 'the NAS packages are missing: run nas/packages/build.sh' >&2; exit 1; }
-            else
-                rm -rf config/includes.chroot/usr/share/fellowshipos/nas-repo
-            fi
+            # FellowshipNAS is built in its own repository; a NAS package
+            # repo left here by an older build must not reach these images
+            rm -rf config/includes.chroot/usr/share/fellowshipos/nas-repo
 
             # live-build installs every .deb in packages.chroot, so the
             # desktop's package is there for the desktop image and kept aside
@@ -133,9 +127,6 @@ for edition in $EDITIONS; do
                 # Clean up leftover live artifacts
                 rm -rf chroot/lib/live chroot/etc/live chroot/etc/fstab.d/live 2>/dev/null || true
                 rm -f chroot/etc/debian_chroot
-
-                # The NAS packages belong to the NAS image, not the general container
-                rm -rf chroot/usr/share/fellowshipos/nas-repo
 
                 # Tar up the rootfs in Proxmox-compatible format
                 tar -czf ${TEMPLATE_NAME}_lxc.tar.gz \

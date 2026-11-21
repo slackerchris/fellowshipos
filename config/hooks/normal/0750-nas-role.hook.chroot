@@ -1,7 +1,7 @@
 #!/bin/bash
 # The NAS image carries the NAS role already installed, with ZFS compiled for
 # the image's kernel, so installing needs no network and nothing is built on the
-# machine. Only the NAS image has the NAS packages (nas/packages/build.sh puts
+# machine. Only the NAS image has the NAS packages (the FellowshipOS-NAS build puts
 # them in its own repo); the other images skip this.
 #
 # The live system the installer runs in must not act as a NAS: the web desktop

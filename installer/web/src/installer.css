@@ -1,5 +1,5 @@
 /* The desktop's palette, controls and wallpapers, so install and desktop look alike */
-@import "../../../nas/packages/fellowship-nas-web/web/src/style.css";
+@import "./desktop-style.css";
 
 body { overflow: auto; }
 

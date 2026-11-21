@@ -1,6 +1,9 @@
 # Versioning
 
-One file, `VERSION` at the repository root, holds the release version. It is a
+One file, `VERSION` at the repository root, holds the release version of the
+Multi-purpose and Desktop images, the LXC template and the installer package.
+FellowshipNAS keeps its own `VERSION` in the FellowshipOS-NAS repository since
+it became its own project on 2026-11-20; both stood at 0.3.0 then. It is a
 **prerelease** scheme, `0.major.minor` (Chris, 2026-11-17): while FellowshipOS is
 pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
@@ -44,9 +47,9 @@ installer recovery-key gate removal).
 - `build.sh` reads `VERSION` and names the ISOs
   `fellowshipos-<edition>-amd64-<version>.hybrid.iso` and the LXC template
   `fellowshipos-trixie-amd64-<version>_lxc.tar.gz`.
-- `nas/packages/build.sh` and `installer/build.sh` stamp the **temporary build
-  copies'** `debian/changelog` first line with `VERSION`, so the installed
-  packages carry the release version. The checkout's changelogs are never
+- `installer/build.sh` stamps the **temporary build copy's** `debian/changelog`
+  first line with `VERSION`, so the installed package carries the release
+  version. The checkout's changelogs are never
   touched by a build.
 - `proxmox/create-ct.sh` expects the template at
   `/var/lib/vz/template/cache/fellowshipos-trixie-amd64-<version>_lxc.tar.gz`;

@@ -1,7 +1,6 @@
 name: CI
 
-# Every gate in docs/fellowship-nas-plan.md is run by hand in a VM and takes
-# hours. This catches the cheap mistakes first: a broken unit test, a Go file
+# The image gates run by hand in a VM and take hours. This catches the cheap mistakes first: a broken unit test, a Go file
 # that doesn't build, a TypeScript type error, a shell bug. The ISO build needs
 # Docker and Debian mirrors, so it stays a local step.
 
@@ -17,26 +16,6 @@ permissions:
   contents: read
 
 jobs:
-  python:
-    name: Python
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: Unit tests
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest nas/tests/unit/test_fnas.py
-      - name: Byte-compile every module
-        run: python3 -m compileall -q nas/packages/fellowship-nas-tools/fellowship_nas
-      # Errors only to start with, like ShellCheck: a name used before it is
-      # defined, an import that isn't there, an f-string with no placeholders.
-      # Widen the selection once the package is quiet.
-      - name: Lint
-        run: |
-          pip install --quiet ruff
-          ruff check --select E9,F nas/packages/fellowship-nas-tools nas/tests/unit/test_fnas.py
-
   go:
     name: Go (${{ matrix.module }})
     runs-on: ubuntu-24.04
@@ -45,7 +24,6 @@ jobs:
       matrix:
         module:
           - installer
-          - nas/packages/fellowship-nas-web
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -84,7 +62,6 @@ jobs:
       fail-fast: false
       matrix:
         folder:
-          - nas/packages/fellowship-nas-web/web
           - installer/web
     steps:
       - uses: actions/checkout@v7
@@ -111,9 +88,4 @@ jobs:
       # Errors only to start with, so the first runs are about real bugs.
       # Tighten to --severity=warning once the scripts are quiet.
       - name: ShellCheck
-        # Plus the hook and maintainer scripts, which carry no .sh
-        run: >-
-          shellcheck --severity=error $(git ls-files '*.sh')
-          nas/packages/fellowship-nas-tools/md-alert nas/packages/fellowship-nas-tools/fellowship-nas-notify
-          nas/packages/fellowship-nas/smart-alert nas/packages/fellowship-nas/zfs-kernel-check
-          $(git ls-files 'nas/packages/*/debian/postinst' 'nas/packages/*/debian/postrm')
+        run: shellcheck --severity=error $(git ls-files '*.sh')

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 /** Where the theme files are: FELLOWSHIP_THEMES_DIR, or the repository's themes/. */
 export const THEMES_DIR = process.env.FELLOWSHIP_THEMES_DIR
-    ?? fileURLToPath(new URL("../../../../themes/", import.meta.url));
+    ?? fileURLToPath(new URL("../../themes/", import.meta.url));
 
 /** The small part of TOML the theme files use: [tables], key = "string",
     key = number, and # comments. Anything else stops the build. */

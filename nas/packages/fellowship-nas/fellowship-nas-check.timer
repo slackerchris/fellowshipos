@@ -1,9 +1,0 @@
-[Unit]
-Description=Look for FellowshipNAS problems every hour
-
-[Timer]
-OnBootSec=10min
-OnUnitActiveSec=1h
-
-[Install]
-WantedBy=timers.target

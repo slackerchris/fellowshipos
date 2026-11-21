@@ -1,17 +1,11 @@
 #!/bin/bash
 # live-build configuration, run by `lb config`. FELLOWSHIP_EDITION chooses which
-# of the two images this build is: the ISO's name, the boot menu entry and the
+# of the images this build is: the ISO's name, the boot menu entry and the
 # value the installer reads from the kernel command line all follow from it.
 set -e
 
 EDITION="${FELLOWSHIP_EDITION:-multi}"
 case "$EDITION" in
-    nas)
-        TITLE="FellowshipOS NAS"
-        VOLUME="FELLOWSHIPOS_NAS"
-        ENTRY="Install FellowshipOS NAS (graphical)"
-        HOTKEY="n"
-        ;;
     multi)
         TITLE="FellowshipOS Multi-purpose"
         VOLUME="FELLOWSHIPOS_MULTI"
@@ -60,14 +54,7 @@ lb config noauto \
 sed -e "s|@ENTRY@|$ENTRY|g" -e "s|@EDITION@|$EDITION|g" -e "s|@HOTKEY@|$HOTKEY|g" \
     config/bootloaders/grub-pc/grub.cfg.in > config/bootloaders/grub-pc/grub.cfg
 
-# The NAS image leaves out what nothing on a NAS uses: git, nmap and the full
-# mtr here, and Docker in its hook. The other images keep them.
-rm -f config/package-lists/tools.list.chroot
-if [ "$EDITION" = nas ]; then
-    cp config/tools-nas.list config/package-lists/tools.list.chroot
-else
-    cp config/tools-general.list config/package-lists/tools.list.chroot
-fi
+cp config/tools-general.list config/package-lists/tools.list.chroot
 
 # live-build installs every list in package-lists, so the desktop's extra
 # packages are written for that edition and removed for the others: an

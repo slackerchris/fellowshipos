@@ -1,8 +1,0 @@
-[Unit]
-Description=Look for FellowshipNAS updates and say what is waiting (installs nothing)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/fnas updates check

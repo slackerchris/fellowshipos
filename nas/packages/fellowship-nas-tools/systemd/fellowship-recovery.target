@@ -1,8 +1,0 @@
-[Unit]
-Description=FellowshipOS recovery
-Documentation=file:///usr/share/doc/fellowship-nas-tools
-# Started from GRUB's FellowshipOS recovery entry, which only the recovery key
-# opens: the console runs the recovery program instead of a login
-Requires=sysinit.target fellowship-recovery.service
-After=sysinit.target fellowship-recovery.service
-AllowIsolate=yes

@@ -1,5 +1,0 @@
-#!/bin/sh
-# sshd's PAM stack on a separated NAS calls this through pam_exec: the person
-# comes as PAM_USER and their password on stdin (expose_authtok). fnas answers
-# with its exit code, checking the NAS store, not Linux.
-exec /usr/sbin/fnas auth check "$PAM_USER"

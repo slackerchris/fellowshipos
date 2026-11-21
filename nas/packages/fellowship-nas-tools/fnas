@@ -1,9 +1,0 @@
-#!/usr/bin/python3
-"""fnas: storage, sharing and protection helper for FellowshipNAS. The work
-is done by the fellowship_nas package."""
-import sys
-
-from fellowship_nas.cli import main
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -1,8 +1,8 @@
 # FellowshipOS
 
-FellowshipOS builds three Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS NAS**, **FellowshipOS Multi-purpose** and **FellowshipOS Desktop**. **FellowshipNAS** is the NAS image's role. It manages disks, ZFS pools, traditional RAID arrays and Unraid-style pools, shares, snapshots, backups, and health from a browser desktop with movable windows, status widgets, and light and dark appearances, with four themes chosen in **Settings → Appearance**.
+FellowshipOS builds two Debian Trixie live ISOs and a Proxmox LXC template for amd64 homelab systems: **FellowshipOS Multi-purpose** and **FellowshipOS Desktop**. **FellowshipNAS**, the NAS appliance with its browser desktop, became its own project on 2026-11-20 and is built from the FellowshipOS-NAS repository (`~/Git/FellowshipOS-NAS`).
 
-[Build](#build) · [Install FellowshipNAS](#install-fellowshipnas) · [Manage the NAS](#manage-the-nas) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
+[Build](#build) · [Deploy to Proxmox LXC](#deploy-to-proxmox-lxc) · [Develop and test](#develop-and-test)
 
 ## Build
 
@@ -14,12 +14,11 @@ On a Linux host with Docker, internet access, and at least 10 GB of free space, 
 
 | Output | Use |
 | --- | --- |
-| `fellowshipos-nas-amd64-0.1.0.hybrid.iso` | Install FellowshipNAS, or try it live |
 | `fellowshipos-multi-amd64-0.1.0.hybrid.iso` | Install a general FellowshipOS machine, or try it live |
 | `fellowshipos-desktop-amd64-0.1.0.hybrid.iso` | Boot into the Fellowship desktop, or install it |
 | `fellowshipos-trixie-amd64-0.1.0_lxc.tar.gz` | Create a general-purpose Proxmox container |
 
-The NAS and multi-purpose images are the same live system built twice. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `FELLOWSHIP_EDITIONS=nas` or `FELLOWSHIP_EDITIONS=multi` builds one of them. The build packages the NAS tools and graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The release version lives in the [VERSION](VERSION) file — prerelease `0.major.minor`, see [docs/versioning.md](docs/versioning.md). `build.sh` names the ISOs and template from it, and the package builds stamp their changelogs from it. If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) or pass `FELLOWSHIP_TEMPLATE`.
+The images are the same live system built per edition. `auto/config` gives each one its ISO name and boot menu from `FELLOWSHIP_EDITION`, and the boot menu tells the graphical installer which image it is. `./build.sh` builds the multi-purpose image; `FELLOWSHIP_EDITIONS="multi desktop"` builds both. The build packages the graphical installer, runs Debian `live-build` in Docker, and packages the LXC root filesystem from the multi-purpose chroot. See `build.log` for build and packaging errors. The release version lives in the [VERSION](VERSION) file — prerelease `0.major.minor`, see [docs/versioning.md](docs/versioning.md). `build.sh` names the ISOs and template from it, and the package builds stamp their changelogs from it. If it changes, update the expected filename in [create-ct.sh](proxmox/create-ct.sh) or pass `FELLOWSHIP_TEMPLATE`.
 
 ### The desktop image
 
@@ -56,94 +55,6 @@ The rest of `desktop/tests/` answers questions a picture cannot. They all drive 
 
 `desktop/build-only.sh` builds just the desktop package in the trixie container, the same way the full packages step does it, with the toolchain, registry and release target cached on the host: about 2m19s. To test a committed revision without disturbing a working tree, add detached worktrees **side by side** (`build.sh` mounts the desktop checkout at `../fellowship-desktop`) and run `FELLOWSHIP_EDITIONS=desktop ./build.sh` inside the OS one. [The desktop VM records](docs/fellowship-desktop-vm-session-2026-11-14.md) and the desktop repository's `docs/vm-testing.md` carry the results and the harness gotchas.
 
-## Install FellowshipNAS
-
-1. Boot the image and choose its **Install FellowshipOS … (graphical)** entry on a UEFI system. The installer runs on this machine's own screen. To drive it from another computer, add `fellowship.installer.remote=:8443` to the boot entry (press `e` at the menu): the page is then served over HTTPS and the console prints the certificate's SHA-256 and a pairing code. The browser must show that same certificate before the code is typed. Legacy BIOS machines use the text installer under **Advanced install options** until the graphical one supports them.
-2. Select the OS disk and review the layout. Choosing a disk's card selects it and agrees that everything on it is erased; nothing else on the machine is written to, and when one disk is the only one that can be used it is already chosen. The graphical installer uses LVM for the system and can leave a separate data partition on disks of at least 64 GiB. Its four steps, **Disk**, **Space**, **You** and **Install**, can be opened in any order from the rail at the top, each step ends with one button naming the step it leads to, and the user name follows the name typed until it is changed. Create storage pools after installation from the NAS desktop.
-3. Reboot and complete the first-boot wizard. The graphical installer preselects **NAS / Home Server**. This step needs access to the Debian mirrors. NAS setup stops if Secure Boot is enabled, with "Secure Boot is on, so the ZFS module can't load: disable it and retry". Turn Secure Boot off in the firmware, then run `sudo homelabos-flavor nas-node`.
-4. Open the HTTPS address printed by the wizard and sign in with your local NAS account. The default certificate is self-signed. **Settings → Certificate** shows its fingerprint and accepts a replacement.
-5. On the first admin login, **Setup** guides you through storage, the LAN subnet, people and shares, alerts, and backup. Skip it or reopen it from **Settings → Setup**.
-
-The ISO also has a live session and a Debian text installer for other FellowshipOS roles. On a full text install, you can select the NAS role in the first-boot wizard. The first-boot wizard runs on installed systems and LXC containers. The NAS role requires a full install with access to disks and the ZFS kernel module.
-
-## Manage the NAS
-
-| App | What you can do |
-| --- | --- |
-| **Files** | Browse the shares your own account can use, open folders, and preview pictures, video, audio, PDFs and text, with download. Where the share allows it you can also upload, make folders, rename, delete, copy, cut and paste, and move by dragging or with **Move to…**. Pick several at once to delete, move or download them together as a zip. Search the whole share by name, and add Kind, Owner and Permissions columns; when you can't change something, Files says why. A share you can't use never appears or answers, and one you can only read hides the changes and refuses them anyway. **Earlier versions…** in a file's menu lists the snapshots holding it and puts one back beside it as a copy. |
-| **Storage** | Create, scan, import, check, and grow ZFS pools and RAID arrays, choosing XFS or ext4 for an array. Repair an array's mismatched blocks after a check. **Disks** lists every drive by bay, model, capacity and assignment, and opens the selected one's serial, device and health beside it. Replace or identify disks and follow background jobs. **Details and history** shows space use, compression, a Week or Year chart, and a fill estimate after at least three days of history if usage is rising. |
-| **Users** | Manage local accounts, groups, administrators, and SSH eligibility. Password changes through FellowshipNAS set the Linux and Samba passwords together. |
-| **Shares** | Share over SMB, NFS, WebDAV (a drive over HTTPS) or SFTP, each on its own switch; **Manage** on a share's line opens its paths, switches and settings. Grant access to everyone or give selected users and groups read or write permissions. Configure SMB guest access, recycle bin, Time Machine, and Previous Versions, or set NFS client rules and identity mapping. |
-| **Snapshots & backup** | Set snapshot retention and schedule a backup to a second ZFS pool. Restore a missing share from that backup. Shares on traditional RAID and Unraid-style pools show these controls disabled, with the reason. |
-| **Health & Alerts** | See what needs attention at a glance, from the verdict banner through cards for CPU, memory, load, pools, disks, and services, then drill down. The system and each pool draw Week or Year charts from what the hourly check recorded. View local alerts and configure optional email or ntfy delivery. |
-| **Settings** | Manage your password, sessions, certificates, system disk space, storage check schedules, SSH, and power controls. |
-
-**Available today.** ZFS pools, traditional RAID arrays and Unraid-style pools (mergerfs with SnapRAID parity) are the implemented storage engines. SMB, NFS, WebDAV and SFTP are the implemented share protocols; FTP is next. The desktop shows planned choices with their availability. Files browses, downloads, previews, uploads and changes what is there, earlier versions among them. Btrfs is still to come. See the [architecture plan](docs/fellowship-nas-plan.md) for scope and verification gates.
-
-### Storage and shares
-
-Pools mount at `/mnt/POOL`, with shares at `/mnt/POOL/shares/NAME`. ZFS supports single disks, mirrors, RAIDZ1/2/3, and hot spares. Traditional RAID supports RAID 1, 5, 6 and 10 with hot spares, on XFS or ext4, as one array per pool. Unraid-style pools keep whole files on each XFS disk, joined by mergerfs, with one or two SnapRAID parity disks synced nightly; disks may differ in size, and idle ones spin down. The graphical installer's eligible data partition can hold a single-disk pool. For the OS volume itself, **Settings → System space** can allocate free space from its LVM volume group.
-
-```bash
-sudo fnas disk list
-sudo fnas pool scan
-sudo fnas pool layouts SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5
-sudo fnas pool create tank raidz2 SERIAL1 SERIAL2 SERIAL3 SERIAL4 SERIAL5 --width 4 --spares 1 --confirm "erase 5 disks"
-sudo fnas pool create vault raid6 SERIAL1 SERIAL2 SERIAL3 SERIAL4 --engine mdadm --filesystem xfs --confirm "erase 4 disks"
-sudo fnas pool scrub vault
-sudo fnas job list
-```
-
-Use disk serials or stable `/dev/disk/by-id/` paths to identify pool members. Disks with existing data require `--wipe` in addition to the erase confirmation. Run `fnas pool grow --help` or `fnas pool replace --help` for maintenance options. Add `--json` before a supported command for machine-readable output.
-
-```bash
-sudo fnas share create media tank --everyone --nfs --smb
-sudo fnas share create docs tank --user sam=read --group family=write --smb
-sudo fnas share smb media --recycle on --recycle-days 14
-sudo fnas share nfs media --client 192.168.1.0/24=ro
-```
-
-Create the referenced users and groups before assigning them to a share. Shares for everyone map access to a common account so SMB and NFS clients can edit the same files. Set the share subnet during Setup. NFS client rules can allow other private networks or hosts. NFS clients using per-user access need numeric IDs that match the NAS. Changing a share's access can rewrite existing file permissions. Deleting a share destroys its dataset and snapshots; the desktop asks first, and the CLI needs `--confirm NAME`.
-
-### Accounts and SSH
-
-Desktop administrators belong to `nas-admins`. Regular users can change their own password in **Settings → Your account**, and their own light or dark and theme in **Settings → Appearance**, which the NAS keeps with the account so it follows them to another browser. Desktop and SSH permissions are separate. An account is one of three kinds: **Shares only** (`--kind shares`), **Files over SFTP** (`--kind sftp`) or **Shares and SSH** (`--kind ssh`). SSH accepts **Shares and SSH** accounts through `nas-ssh`, and root SSH login is disabled. **Files over SFTP** accounts join `nas-sftp` instead: they get SFTP and nothing else, chrooted to a view holding just the shares that are theirs and have their SFTP box ticked.
-
-Manage public keys under **Users → Change**, and control the service and password authentication from **Settings → SSH**. Add a key for an enabled administrator with SSH access before turning off password authentication.
-
-```bash
-sudo fnas user create sam --kind shares --password-stdin
-sudo fnas user set sam --kind ssh --admin on
-sudo fnas user keys sam --set-stdin < ~/.ssh/id_ed25519.pub
-sudo fnas ssh show
-sudo fnas look show sam
-```
-
-`fnas share roots USER` prints the shares an account can use, where each one is on disk and whether it keeps snapshots. Files and WebDAV both ask it rather than working out a path.
-
-The network-facing `fellowship-nas-web` process runs as an unprivileged account. A separate local helper authenticates with PAM, runs approved `fnas` commands for authorized users, and serves files for the Files app as the signed-in person, in a child running with that person's own account, inside the share roots they were given.
-
-### Snapshots, backup, and recovery
-
-ZFS shares default to 24 hourly, 30 daily, and 6 monthly snapshots. Traditional RAID arrays and Unraid-style pools have no snapshots, and the backup job covers ZFS pools only; their shares show those controls disabled, with the reason. With SMB Previous Versions enabled, Windows can expose those snapshots. The single scheduled backup job copies a source pool's shares to a second ZFS pool at 03:00 local time. A share restore leaves an existing share in place.
-
-```bash
-sudo fnas snapshot list media
-sudo fnas backup set tank usb
-sudo fnas backup show
-sudo fnas backup restore media
-```
-
-Pools also save configuration for a reinstall. It includes share settings, accounts and numeric IDs, groups, the LAN subnet, the backup definition, alert channels, and SSH settings and public keys. Set user passwords and any SMTP password again after restoring.
-
-```bash
-sudo fnas pool scan
-sudo fnas pool import tank
-sudo fnas config restore tank
-```
-
-To inspect a pool first, import it with `--readonly`. Configuration restore requires a writable imported pool. A pool that was never exported may require `--force` to import. Make sure its former host is offline before using that option. The new install preserves saved settings until you restore them or explicitly take ownership with `fnas config adopt`.
-
 ## Deploy to Proxmox LXC
 
 Copy the template to the Proxmox node:
@@ -159,51 +70,35 @@ cd proxmox
 ./create-ct.sh --flavor base
 ```
 
-The helper supports `base`, `docker`, `monitor`, and `storage` container presets. For FellowshipNAS on Proxmox, install the ISO in a VM.
+The helper supports `base`, `docker`, `monitor`, and `storage` container presets.
 
 ## Develop and test
 
 The [November 14 desktop VM handoff](docs/fellowship-desktop-vm-session-2026-11-14.md) records the current ISO, app additions, cursor investigation, pending compositor input fix, and VM verification steps.
 
-Run the Python and Go suites from the repository root. The Go modules require Go 1.24 or later. The web helper uses cgo and PAM development headers.
+Run the installer's Go suite from the repository root. It needs Go 1.24 or later.
 
 ```bash
-python3 -m unittest nas/tests/unit/test_fnas.py
 (cd installer && go test ./...)
-(cd nas/packages/fellowship-nas-web && go test ./...)
 ```
 
-[CI](.github/workflows/ci.yml) runs those suites on every push and pull request,
-the Go ones under the race detector, then checks `gofmt` and `go vet` in both Go
-modules, lints the Python with ruff, type-checks and bundles both frontends, and
-runs ShellCheck on the shell scripts. The phase gates in the plan still run by
-hand in a VM, since they need real disks and hours of patience.
+[CI](.github/workflows/ci.yml) runs it on every push and pull request under the
+race detector, checks `gofmt` and `go vet`, type-checks and bundles the
+installer page, and runs ShellCheck on the shell scripts.
 
-For desktop development, build the frontend and run the web server and helper in Docker with sample `fnas` responses:
-
-```bash
-(cd nas/packages/fellowship-nas-web/web && npm ci && npm run build)
-nas/packages/fellowship-nas-web/dev/run.sh
-```
-
-Open `http://localhost:8080`. The script lists the development accounts. Run `npm run watch` in the web directory to rebuild while editing.
-
-For disk and reinstall testing, use the [QEMU/KVM VM harness](nas/tests/vm/vm.sh) with a built ISO, OVMF, and a dedicated VM work directory. Its modes and environment variables are documented at the top of the script. `install` drives the text installer, `nas` and `multi` boot the graphical installers, and `remote` boots straight into the HTTPS page for a browser on this host, with the certificate's fingerprint and the pairing code in `serial-remote.log`. `FELLOWSHIP_VM_DISPLAY=gtk` shows the machine's own screen in a window; the window's pointer is relative, so using the page from a browser is the reliable way to click through it. The installed guest's HTTPS is forwarded to `https://localhost:8443/`. Set `FELLOWSHIP_KEEP_DATA=1` when reinstalling a test VM with data disks you want to preserve.
+The QEMU/KVM VM harness that drove the multi-purpose image's installer went to FellowshipOS-NAS with the NAS tests (`tests/vm/vm.sh` there); the desktop image has its own in [desktop/tests/](desktop/tests/).
 
 | Path | Purpose |
 | --- | --- |
 | [auto/config](auto/config) and [config/](config/) | Live-build profile, boot menu, package lists, first-boot wizard, and role scripts |
-| [installer/](installer/) | Graphical NAS installer in Go and TypeScript |
-| [nas/packages/](nas/packages/) | NAS packages, Python CLI, Go services, browser desktop, and scheduled jobs |
-| [nas/tests/](nas/tests/) | Python unit tests and VM harness |
-| [PROJECTS.md](PROJECTS.md) | The three products, which folders belong to each, and the branch, commit and push rules |
-| [docs/](docs/) | [Document index](docs/README.md), [architecture plan](docs/fellowship-nas-plan.md), [project overview](docs/fellowship-nas-overview.md) of what is built and verified, [next steps](docs/fellowship-nas-next-steps.md), [Files plan](docs/fellowship-nas-files-plan.md), [November 9 review notes](docs/fellowship-nas-changes.md) and [November 11 VM walkthrough](docs/fellowship-vm-walkthrough-2026-11-11.md) |
+| [installer/](installer/) | Graphical installer in Go and TypeScript |
+| [PROJECTS.md](PROJECTS.md) | The products, which folders belong to each, and the branch, commit and push rules |
+| [docs/](docs/) | [Document index](docs/README.md), [versioning](docs/versioning.md) and the [November 11 VM walkthrough](docs/fellowship-vm-walkthrough-2026-11-11.md) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, and what is waiting to be released |
 
 ## Troubleshooting
 
 - **Build failed:** Check `build.log`, Docker, and access to Debian mirrors and GitHub. The script checks that both output files exist before reporting success.
-- **First boot or role setup failed:** Check `/var/log/fellowshipos/setup.log`. Use `sudo fellowshipos-setup` to run the wizard manually or `sudo homelabos-flavor nas-node` to retry the NAS role. If setup reports that ZFS was built for a newer kernel, reboot before using the NAS.
-- **Desktop unavailable:** Run `systemctl status fellowship-nas-web fellowship-nas-helper` on the NAS and check the corresponding service logs.
+- **First boot or role setup failed:** Check `/var/log/fellowshipos/setup.log`. Use `sudo fellowshipos-setup` to run the wizard manually.
 
 This repository currently has no license file.

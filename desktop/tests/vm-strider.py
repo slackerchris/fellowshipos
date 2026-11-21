@@ -9,7 +9,7 @@ finding the NAS by its Avahi advert, and USB drives.
     desktop/tests/vm-strider.py usb add|remove
     desktop/tests/vm-strider.py test          # strider-vm-test.sh's checks
 
-The NAS VM comes from nas/tests/vm/vm.sh (install, then `boot` with the
+The NAS VM comes from the FellowshipOS-NAS repository's tests/vm/vm.sh (install, then `boot` with the
 same private card: see LAN below); give its private card 10.77.0.1/24 on
 its console. The segment is QEMU's socket multicast bound to 127.0.0.1, so
 nothing reaches the real network. The desktop gets 10.77.0.2/24 there and
