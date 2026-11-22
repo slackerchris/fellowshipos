@@ -136,6 +136,11 @@ install -Dm644 "$WORK/crates/fellowship-comp/data/decorations" \
 install -Dm644 desktop/session/wireplumber/50-fallback-sink.conf \
     "$STAGE/usr/share/wireplumber/wireplumber.conf.d/50-fellowship-fallback-sink.conf"
 
+# A short stop timeout for BlueZ's mpris-proxy user service, which can ignore
+# SIGTERM at logout and hold up the next login for 90 s (see the file).
+install -Dm644 desktop/session/systemd/mpris-proxy-stop-timeout.conf \
+    "$STAGE/usr/lib/systemd/user/mpris-proxy.service.d/50-fellowship-stop-timeout.conf"
+
 # The colour-scheme backend, selected through XDG_CURRENT_DESKTOP=Fellowship
 PORTAL=$WORK/crates/fellowship-portal/data
 install -d "$STAGE/usr/share/xdg-desktop-portal/portals" "$STAGE/usr/share/dbus-1/services"
