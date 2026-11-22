@@ -23,6 +23,7 @@ the release list, `fellowship-nas-release.md`.
 
 | Document | What it answers |
 | --- | --- |
+| [builds/fellowshipos-desktop-0.4.2.md](builds/fellowshipos-desktop-0.4.2.md) | The 0.4.2 release candidate: commits, checksum, package list, acceptance results |
 | [desktop-update-feed.md](desktop-update-feed.md) | The signed apt repository that brings desktop fixes to installed systems: key, layout, publishing, tests |
 | [fellowship-desktop-vm-session-2026-11-14.md](fellowship-desktop-vm-session-2026-11-14.md) | A dated handoff, superseded the same day; kept for the record |
 
