@@ -69,6 +69,15 @@ install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.de
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
+# Settings' firewall and remote-login switches: two fixed helpers run with
+# pkexec, and the polkit actions that let the session read freely and ask an
+# administrator's password to change anything
+SDATA=$WORK/crates/fellowship-settings/data
+install -Dm755 "$SDATA/fellowship-sharing" "$STAGE/usr/libexec/fellowship-sharing"
+install -Dm755 "$SDATA/fellowship-sharing-status" "$STAGE/usr/libexec/fellowship-sharing-status"
+install -Dm644 "$SDATA/org.fellowship.sharing.policy" \
+    "$STAGE/usr/share/polkit-1/actions/org.fellowship.sharing.policy"
+
 # Desktop updates: the signing key, the source line, and the unit that adds the
 # source on an installed system's first boot (publish-apt.sh serves the repo)
 install -Dm644 desktop/apt/fellowshipos.asc "$STAGE/usr/share/keyrings/fellowshipos.asc"
@@ -151,7 +160,8 @@ Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
  xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64,
- pipewire, pipewire-pulse, wireplumber, greetd, cage, accountsservice
+ pipewire, pipewire-pulse, wireplumber, greetd, cage, accountsservice,
+ pkexec, polkitd, iproute2
 Description: The FellowshipOS desktop
  The Wayland compositor, the shell (top bar, dock, launcher), the
  Fellowship graphical greeter and appearance service, the fellowship-msg

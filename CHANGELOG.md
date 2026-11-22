@@ -42,6 +42,11 @@ bump.
   indicators, scaled from 800×600 to 4K. `fellowship-appearanced`, a narrow
   system D-Bus service, keeps the last active user's theme and mode so the
   greeter wears it after logout and reboot.
+- Settings → Privacy → **Firewall and remote login**: switches for the
+  firewall (ufw) and the SSH server, each showing what the system is doing,
+  what the firewall lets in, and how to connect over SSH. Turning SSH on also
+  lets it through the firewall. Changes ask for an administrator's password;
+  the image gains `pkexec` for it.
 - Restart and shut down from the desktop: the top bar's power menu has
   Restart, Shut down and Log out, each confirmed in a dialog that goes ahead
   by itself after 60 seconds (Escape or Cancel closes it). They are off in a
