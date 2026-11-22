@@ -68,6 +68,9 @@ install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.de
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
+# Default apps, read only in a Fellowship session (XDG_CURRENT_DESKTOP)
+install -Dm644 desktop/fellowship-mimeapps.list \
+    "$STAGE/usr/share/applications/fellowship-mimeapps.list"
 
 # Graphical login: greetd hosts fellowship-greeter inside Cage on tty1.
 # Installed systems boot directly to fellowship-greeter; live ISO boots enter
