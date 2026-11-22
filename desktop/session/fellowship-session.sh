@@ -5,7 +5,8 @@
 # the way in when the session needs looking at. FELLOWSHIP_NO_SESSION=1 skips
 # it once.
 if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${FELLOWSHIP_NO_SESSION:-}" ] &&
-   [ "$(id -u)" -ne 0 ] && [ -x /usr/bin/fellowship-session ]; then
+   [ "$(id -u)" -ne 0 ] && [ -x /usr/bin/fellowship-session ] &&
+   ! grep -q 'fellowship\.installer' /proc/cmdline 2>/dev/null; then
     case "$(tty 2>/dev/null)" in
         /dev/tty[0-9]*)
             # Not exec: when the desktop ends, the shell is still there

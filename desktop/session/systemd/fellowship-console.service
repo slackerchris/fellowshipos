@@ -1,6 +1,7 @@
 [Unit]
 Description=Console login for the FellowshipOS desktop
 Documentation=man:agetty(8)
+ConditionKernelCommandLine=!fellowship.installer
 After=dev-tty1.device
 Before=getty.target
 

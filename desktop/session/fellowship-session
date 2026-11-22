@@ -1,16 +1,16 @@
 #!/bin/bash
-# Start the FellowshipOS desktop session on the console.
+# Start the FellowshipOS Wayland desktop session.
 #
 #   fellowship-session [fellowship-comp arguments...]
 #
-# Starts the compositor on the panel through DRM, as a Wayland session with
-# its own D-Bus: single-instance apps land inside the session, and the portal
-# frontend finds fellowship-portal there. A login on a text console starts it
-# through /etc/profile.d/fellowship-session.sh.
+# Launched by greetd after PAM authentication on tty1 (or directly for
+# debugging). Starts the compositor on the seat through DRM with the user's
+# systemd D-Bus session bus, PipeWire audio, and Secret Service keyring, and
+# cleans up session-scoped graphical environment on logout without disturbing
+# unrelated SSH/TTY sessions or the user's systemd manager.
 set -e
 
-# One session per seat. The image autologins on more than one console, so a
-# second login must not start a second compositor and fight over the panel.
+# One graphical session per user seat: never let two compositors fight over DRM.
 LOCK=${FELLOWSHIP_SESSION_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/fellowship-session.lock}
 exec 9>"$LOCK"
 if ! flock -n 9; then
@@ -18,44 +18,26 @@ if ! flock -n 9; then
     exit 0
 fi
 
-# The console shows what the session prints, and so does this file: when the
-# compositor fails before it can paint, the console is the only place its
-# error would land and nobody can read a console that died with the session.
-LOG=${FELLOWSHIP_SESSION_LOG:-/tmp/fellowship-session.log}
-exec > >(tee -a "$LOG") 2>&1
-echo "--- $(date -Is) fellowship-session on $(tty) as $(id -un)"
-
-# DRM only works for the VT that is on screen, and the console the image
-# autologins on is not always the active one. Switching needs root; when that
-# is not available without a password the compositor says so and the shell
-# stays, which is still better than a session that half-starts.
-VT=${XDG_VTNR:-}
-if [ -n "$VT" ] && [ "$(cat /sys/class/tty/tty0/active 2>/dev/null)" != "tty$VT" ]; then
-    echo "switching the screen to tty$VT"
-    if sudo -n chvt "$VT" 2>/dev/null; then
-        # logind marks the session active as the switch lands, a moment after
-        # chvt returns; the device is handed over once it has.
-        for _ in $(seq 20); do
-            [ "$(cat /sys/class/tty/tty0/active 2>/dev/null)" = "tty$VT" ] && break
-            sleep 0.5
-        done
-    else
-        echo "could not switch; the session needs vt$VT to be on screen"
-    fi
+# Keep the session log inside the user's own state directory (never /tmp).
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fellowship"
+if [ -n "${FELLOWSHIP_SESSION_LOG:-}" ]; then
+    LOG="$FELLOWSHIP_SESSION_LOG"
+    mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+elif mkdir -p "$STATE_DIR" 2>/dev/null; then
+    LOG="$STATE_DIR/session.log"
+else
+    LOG="${XDG_RUNTIME_DIR:-$HOME}/fellowship-session.log"
 fi
+exec >>"$LOG" 2>&1
+echo "--- $(date -Is) fellowship-session on $(tty 2>/dev/null || echo non-tty) as $(id -un)"
 
-export XDG_CURRENT_DESKTOP=Fellowship
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Fellowship}"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-fellowship}"
 export XCURSOR_THEME="${XCURSOR_THEME:-breeze_cursors}"
 export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
 
-# Sound: PipeWire, its Pulse-compatible socket, and WirePlumber. Debian
-# ships these as *user* systemd units that a logind session starts on its
-# own, so the usual case is simply to make sure they are up — asking
-# systemd, which keeps exactly one of each. Backgrounding the binaries
-# ourselves instead would double them against systemd's copies: two
-# WirePlumbers on one PipeWire fight over the default sink and every
-# client of it (wpctl included) hangs. Only if there is no user manager
-# at all do we start them directly, once.
+# Sound: PipeWire, its Pulse-compatible socket, and WirePlumber via user systemd.
 if systemctl --user enable --now pipewire.socket pipewire.service \
                   pipewire-pulse.service wireplumber.service 2>/dev/null; then
     :
@@ -68,14 +50,49 @@ else
     done
 fi
 
-# The user folders: Desktop, Downloads, Pictures and friends, with the
-# `user-dirs.dirs` file that says where they are. Nothing else does this
-# here — Debian's own hook lives in `/etc/xdg/autostart`, and the session
-# reads only the person's autostart folder until FellowshipOS ships its own
-# (see `fellowship-apps`), so the system entry never runs. The screenshot
-# path reads that file, and Nemo's sidebar and Rhythmbox's library assume
-# the folders exist. Best-effort: a machine without the package still
-# starts.
+# Create standard XDG user directories (Desktop, Downloads, Pictures, ...).
 command -v xdg-user-dirs-update >/dev/null 2>&1 && xdg-user-dirs-update
 
-exec dbus-run-session -- fellowship-comp --backend drm --mod super "$@"
+# Share the systemd user session bus when available so PipeWire, portals,
+# GVfs, keyring, and desktop apps all speak on the same bus.
+USER_BUS="/run/user/$(id -u)/bus"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$USER_BUS" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$USER_BUS"
+fi
+
+# Initialize the Secret Service daemon (unlocked by pam_gnome_keyring during
+# greetd login) and export its environment to the user session.
+if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v gnome-keyring-daemon >/dev/null 2>&1; then
+    systemctl --user import-environment DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE 2>/dev/null || true
+    eval "$(gnome-keyring-daemon --start --components=secrets,pkcs11 2>/dev/null)" || true
+    export SSH_AUTH_SOCK GNOME_KEYRING_CONTROL
+    busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus StartServiceByName su org.freedesktop.secrets 0 >/dev/null 2>&1 || true
+fi
+
+COMP_PID=""
+cleanup_session() {
+    # Clear graphical display variables from the user manager so a subsequent
+    # login starts with fresh sockets; do not kill the user manager itself or
+    # any unrelated SSH/background sessions.
+    systemctl --user unset-environment WAYLAND_DISPLAY FELLOWSHIP_CONTROL 2>/dev/null || true
+    echo "--- $(date -Is) fellowship-session ended"
+}
+forward_signal() {
+    if [ -n "$COMP_PID" ]; then
+        kill -TERM "$COMP_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup_session EXIT
+trap forward_signal TERM INT HUP
+
+if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    fellowship-comp --backend drm --mod super "$@" &
+else
+    dbus-run-session -- fellowship-comp --backend drm --mod super "$@" &
+fi
+COMP_PID=$!
+set +e
+wait "$COMP_PID"
+STATUS=$?
+exit "$STATUS"

@@ -55,6 +55,8 @@ install_bin fellowship-portal
 install_bin fellowship-notifyd
 install_bin fellowship-settings
 install_bin fellowship-files
+install_bin fellowship-greeter
+install_bin fellowship-appearanced
 install -Dm644 "$WORK/crates/fellowship-files/data/org.fellowship.Files.desktop" \
     "$STAGE/usr/share/applications/org.fellowship.Files.desktop"
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Files.svg" \
@@ -66,15 +68,25 @@ install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.de
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
-install -Dm644 desktop/session/fellowship-session.sh "$STAGE/etc/profile.d/fellowship-session.sh"
-install -Dm440 desktop/session/sudoers "$STAGE/etc/sudoers.d/fellowship-session"
-install -Dm644 desktop/session/systemd/getty-tty1.conf \
-    "$STAGE/etc/systemd/system/getty@tty1.service.d/10-fellowship-console.conf"
-install -Dm644 desktop/session/systemd/fellowship-console.service \
-    "$STAGE/usr/lib/systemd/system/fellowship-console.service"
-install -d "$STAGE/etc/systemd/system/multi-user.target.wants"
-ln -sf /usr/lib/systemd/system/fellowship-console.service \
-    "$STAGE/etc/systemd/system/multi-user.target.wants/fellowship-console.service"
+
+# Graphical login: greetd hosts fellowship-greeter inside Cage on tty1.
+# Installed systems boot directly to fellowship-greeter; live ISO boots enter
+# the live desktop once and return to the greeter on logout.
+install -Dm644 desktop/greeter/greetd.toml "$STAGE/etc/fellowship/greetd.toml"
+install -Dm644 desktop/greeter/greetd-live.toml "$STAGE/etc/fellowship/greetd-live.toml"
+install -Dm755 desktop/greeter/fellowship-greetd-launch "$STAGE/usr/libexec/fellowship-greetd-launch"
+install -Dm755 desktop/greeter/fellowship-greeter-session "$STAGE/usr/libexec/fellowship-greeter-session"
+install -Dm644 desktop/greeter/greetd-override.conf \
+    "$STAGE/usr/lib/systemd/system/greetd.service.d/10-fellowship.conf"
+
+# Restricted greeter appearance service (system D-Bus + hardened systemd unit).
+ADATA=$WORK/crates/fellowship-appearanced/data
+install -Dm644 "$ADATA/org.fellowship.GreeterAppearance.conf" \
+    "$STAGE/usr/share/dbus-1/system.d/org.fellowship.GreeterAppearance.conf"
+install -Dm644 "$ADATA/org.fellowship.GreeterAppearance.service" \
+    "$STAGE/usr/share/dbus-1/system-services/org.fellowship.GreeterAppearance.service"
+install -Dm644 "$ADATA/fellowship-appearanced.service" \
+    "$STAGE/usr/lib/systemd/system/fellowship-appearanced.service"
 
 # One place for the themes, read by the Rust desktop at run time, and the
 # tree the dock draws in the middle
@@ -128,16 +140,16 @@ Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
  xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64,
- pipewire, pipewire-pulse, wireplumber
+ pipewire, pipewire-pulse, wireplumber, greetd, cage, accountsservice
 Description: The FellowshipOS desktop
  The Wayland compositor, the shell (top bar, dock, launcher), the
- fellowship-msg control tool, the notification service, and the
- xdg-desktop-portal Settings backend that answers the colour-scheme
- signal, with the shared themes and the console session starter.
+ Fellowship graphical greeter and appearance service, the fellowship-msg
+ control tool, the notification service, and the xdg-desktop-portal Settings
+ backend, with the shared themes and session starter.
 EOF
 
 mkdir -p "$ROOT/config/packages.chroot"
-rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb
+rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb "$ROOT"/cache/desktop-package/fellowship-desktop_*.deb
 dpkg-deb --build --root-owner-group "$STAGE" \
     "$ROOT/config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"
 

@@ -3,31 +3,73 @@
 # (compositor, shell, portals) comes from the fellowship-desktop .deb that
 # desktop/build.sh makes.
 
-# Wayland session and software rendering. QEMU's virtio-gpu has no 3D of its
-# own, so the desktop draws through llvmpipe; on real hardware the same Mesa
-# package picks the GPU driver.
+# Wayland session and GPU/software rendering. QEMU's virtio-gpu falls back to
+# llvmpipe when 3D isn't passed; on real hardware and virgl guests Mesa picks
+# the native driver, Vulkan ICD and VA-API video acceleration.
 libegl-mesa0
 libgl1-mesa-dri
 libglx-mesa0
+mesa-vulkan-drivers
+mesa-va-drivers
+intel-media-va-driver
 xkb-data
 dbus
 # chvt: the session switches the screen to its own console, which the live
 # image's autologin does not necessarily leave active
 kbd
 
+# Hardware firmware (non-free-firmware): Wi-Fi, GPU microcode, Realtek NICs
+# and modern Intel SOF laptop audio. Unused in QEMU, required on bare metal.
+firmware-linux
+firmware-iwlwifi
+firmware-amd-graphics
+firmware-intel-graphics
+firmware-realtek
+firmware-sof-signed
+
 # Portals: the frontend, and the GTK backend for the file picker and friends.
 # The Settings (colour-scheme) interface is answered by fellowship-portal.
 xdg-desktop-portal
 xdg-desktop-portal-gtk
 
-# Sound: PipeWire with WirePlumber, and the Pulse-compatible socket the
-# media apps reach for. fellowship-session starts all three; the volume
-# keys and the top bar speak to them through wpctl (in wireplumber).
+# Sound and media codecs: PipeWire with WirePlumber, RTKit for realtime
+# scheduling, Pulse compatibility, and GStreamer plugins for media playback.
 pipewire
 pipewire-pulse
 wireplumber
+rtkit
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-libav
+gstreamer1.0-pipewire
 # notify-send: the small client every desktop has for scripts and tests.
 libnotify-bin
+
+# Networking, power, printing, Bluetooth, firewall and session security:
+# greetd + cage + accountsservice provide the graphical login screen;
+# NetworkManager handles Wi-Fi/Ethernet; UPower reports battery/AC; mate-polkit
+# answers admin prompts for Settings; gnome-keyring provides Secret Service;
+# xwayland prepares X11 app compatibility; CUPS + system-config-printer handle
+# printing; ufw gives a default-deny desktop firewall.
+greetd
+cage
+accountsservice
+network-manager
+wpasupplicant
+nm-connection-editor
+upower
+mate-polkit
+gnome-keyring
+libpam-gnome-keyring
+libsecret-tools
+xwayland
+cups
+system-config-printer
+printer-driver-cups-pdf
+bluez
+blueman
+ufw
 
 # Look: fonts, icons and pointer the shell and the apps ask for.
 # DejaVu alone leaves whole scripts with no glyphs, measured on the seat
@@ -40,6 +82,7 @@ libnotify-bin
 # down anywhere in either repository; the desktop image was 1.39 GB before
 # this and lands near 1.45 GB, which fits a 4 GB stick with room to spare.
 fonts-dejavu-core
+fonts-urw-base35
 fonts-noto-core
 fonts-noto-color-emoji
 fonts-noto-cjk

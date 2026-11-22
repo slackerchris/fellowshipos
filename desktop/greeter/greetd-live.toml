@@ -1,0 +1,12 @@
+[terminal]
+vt = 1
+
+# Live ISO ("Try FellowshipOS") enters the live desktop automatically;
+# logging out returns to fellowship-greeter.
+[initial_session]
+command = "/usr/bin/fellowship-session"
+user = "user"
+
+[default_session]
+command = "/usr/libexec/fellowship-greeter-session"
+user = "_greetd"

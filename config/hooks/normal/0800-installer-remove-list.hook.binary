@@ -3,7 +3,14 @@ set -e
 
 # live-build lists everything added after its install pass, which includes
 # packages from our chroot hooks such as Docker. Only remove the live system
-# and the NAS installer, which is only for the live session.
-printf '%s\n' live-boot live-boot-initramfs-tools live-config live-config-systemd user-setup \
-    fellowship-installer cage cog \
-    > live/filesystem.packages-remove
+# and the installer, which is only for the live session. Keep cage on desktop
+# builds where fellowship-greeter uses it to host the graphical login screen.
+if [ -x chroot/usr/bin/fellowship-greeter ] || [ -x ../chroot/usr/bin/fellowship-greeter ]; then
+    printf '%s\n' live-boot live-boot-initramfs-tools live-config live-config-systemd user-setup \
+        fellowship-installer cog \
+        > live/filesystem.packages-remove
+else
+    printf '%s\n' live-boot live-boot-initramfs-tools live-config live-config-systemd user-setup \
+        fellowship-installer cage cog \
+        > live/filesystem.packages-remove
+fi

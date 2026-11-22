@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run fellowship-greeter inside Cage as the unprivileged _greetd account.
+# Cage owns the Wayland display for the greeter only and exits as soon as
+# fellowship-greeter exits after greetd accepts StartSession, releasing the
+# DRM seat cleanly before fellowship-comp starts.
+set -eu
+
+export XDG_CURRENT_DESKTOP=Fellowship-Greeter
+export XDG_SESSION_TYPE=wayland
+export XCURSOR_THEME="${XCURSOR_THEME:-breeze_cursors}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+
+# On virtual GPUs without hardware 3D acceleration (such as QEMU virtio-gpu),
+# hardware cursor planes can be invisible and OpenGL software rendering in
+# Cage can tear. Pixman + iced's tiny-skia renderer finish every frame cleanly.
+if command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --vm --quiet; then
+    export WLR_NO_HARDWARE_CURSORS=1
+    export WLR_RENDERER="${WLR_RENDERER:-pixman}"
+    export ICED_BACKEND="${ICED_BACKEND:-tiny-skia}"
+fi
+
+exec /usr/bin/cage -s -- /usr/bin/fellowship-greeter
