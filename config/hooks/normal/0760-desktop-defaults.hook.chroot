@@ -43,4 +43,14 @@ systemctl disable ssh.service ssh.socket 2>/dev/null || true
 if [ -f /etc/ufw/ufw.conf ]; then
     sed -i 's/^ENABLED=.*/ENABLED=yes/' /etc/ufw/ufw.conf
     systemctl enable ufw.service 2>/dev/null || true
+    # Except on a boot that asks for the installer page from another computer
+    # (fellowship.installer.remote=ADDRESS): default-deny would refuse the
+    # very connection that boot exists for. Measured on 0.4.2 RC1 in QEMU —
+    # the page timed out with ufw running and answered with it masked.
+    # Installed systems, live sessions and local installs keep the firewall.
+    mkdir -p /etc/systemd/system/ufw.service.d
+    cat > /etc/systemd/system/ufw.service.d/10-fellowship-remote-install.conf <<'EOF'
+[Unit]
+ConditionKernelCommandLine=!fellowship.installer.remote
+EOF
 fi
