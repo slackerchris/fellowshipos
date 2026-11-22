@@ -22,9 +22,40 @@ bump.
   stylesheet and theme loader it used to borrow from the NAS desktop
   (`installer/web/themes.mjs`, `installer/web/src/desktop-style.css` and
   `desktop.css`), so the install page looks as it did.
+- The desktop image signs in through a login screen instead of a text console.
+  An installed system boots to `fellowship-greeter`, hosted in Cage by greetd
+  on tty1; a live boot goes straight into the desktop once and comes back to
+  the greeter on logout. The console autologin, the `profile.d` starter and
+  the `chvt` sudoers rule are no longer installed. The session log moved from
+  `/tmp/fellowship-session.log` to `~/.local/state/fellowship/session.log`.
+- The desktop image leaves networking to NetworkManager: the installer writes
+  no ifupdown settings when NetworkManager is in the target. SSH is off and
+  ufw is on, denying incoming connections, on a desktop install.
+- The desktop image no longer runs the homelab first-boot wizard or the NAS
+  console banner.
 
 ### Added
 
+- The desktop's login screen, `fellowship-greeter` (in the fellowship-desktop
+  repository): accounts from AccountsService or a typed name, the PAM
+  conversation through greetd, restart and shut down, Caps Lock and layout
+  indicators, scaled from 800×600 to 4K. `fellowship-appearanced`, a narrow
+  system D-Bus service, keeps the last active user's theme and mode so the
+  greeter wears it after logout and reboot.
+- Admin password prompts (`mate-polkit`, started by the compositor) and saved
+  passwords and keys (`gnome-keyring`, unlocked by PAM at login) in the
+  desktop session, which now shares the systemd user bus.
+- Default apps for the Fellowship session in
+  `/usr/share/applications/fellowship-mimeapps.list`: folders open in Strider,
+  links in Chromium, text in Mousepad, PDFs in Atril, pictures in Ristretto,
+  video in mpv, music in Rhythmbox, archives in Engrampa. Only a Fellowship
+  session reads it.
+- The desktop image gains NetworkManager, UPower, CUPS with
+  system-config-printer, BlueZ with Blueman, ufw, GStreamer codecs, VA-API
+  and Vulkan drivers, and firmware for common Wi-Fi, GPU, Realtek and Intel
+  audio hardware. The ISO grows from about 1.51 GB to 1.72 GB.
+- `desktop/tests/vm-install.sh`: a blank-disk UEFI install and first boot of
+  the desktop image in QEMU, the acceptance test for each desktop ISO.
 - A third image, **FellowshipOS Desktop**: the same live system with the
   Fellowship desktop in it. `FELLOWSHIP_EDITIONS=desktop ./build.sh` builds the
   Rust desktop in the build container (`desktop/build.sh`, rustup's stable,
@@ -429,6 +460,12 @@ bump.
   image, and the NAS packages are only in the NAS image.
 
 ### Fixed
+
+- `build.sh` no longer lets a desktop package parked by an earlier build
+  replace the one `desktop/build.sh` has just made.
+- The installer stops the target's maintainer scripts from starting or
+  stopping services while it removes the live packages, so they can no longer
+  stop the running installer.
 
 From the VM walkthrough of both images on Nov 11
 ([notes](docs/fellowship-vm-walkthrough-2026-11-11.md)):

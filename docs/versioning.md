@@ -9,7 +9,19 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.3.0** — the desktop tour batch (Chris, 2026-11-20): Strider
+Current: **0.4.2** — the desktop's first release candidate (Chris,
+2026-11-21). He chose the number, keeping to the prerelease scheme rather
+than `1.0.0~rc1`. RC1 covers a desktop that installs in a virtual machine and
+is used on a wired network with one display: the login screen on greetd,
+admin prompts, the keyring, default apps with folders in Strider, and the
+everyday services and firmware in the image. Left out of RC1, and to be said
+so in its release notes: joining Wi-Fi from the desktop (NetworkManager is
+in the image, but nothing on screen drives it), the lock screen, idle
+dimming, suspend and lid close, more than one monitor and HiDPI, X11 apps,
+battery and brightness, and any run on real hardware. Updates to the
+desktop itself are to come from an apt repository, still to be set up.
+
+Before it, **0.3.0** was the desktop tour batch (Chris, 2026-11-20): Strider
 (Fellowship Files) in the desktop image beside Nemo, with its GVfs backends,
 and the NAS announcing itself on the network; the theme manager's light mode,
 by time of day (sunrise and sunset, or set hours) and the wallpaper fade, all
