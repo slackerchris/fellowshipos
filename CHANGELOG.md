@@ -42,6 +42,11 @@ bump.
   indicators, scaled from 800×600 to 4K. `fellowship-appearanced`, a narrow
   system D-Bus service, keeps the last active user's theme and mode so the
   greeter wears it after logout and reboot.
+- **Wi-Fi from the desktop**: a network icon on the top bar (wired, Wi-Fi
+  signal, joining, offline) whose popover turns Wi-Fi on and off and joins
+  networks in range, asking for the password in place; Settings → Wi-Fi and
+  Ethernet does the same and forgets saved networks, with More… for
+  `nm-connection-editor`. Joined networks reconnect at boot.
 - Settings → Privacy → **Firewall and remote login**: switches for the
   firewall (ufw) and the SSH server, each showing what the system is doing,
   what the firewall lets in, and how to connect over SSH. Turning SSH on also

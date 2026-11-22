@@ -14,9 +14,10 @@ Current: **0.4.2** — the desktop's first release candidate (Chris,
 than `1.0.0~rc1`. RC1 covers a desktop that installs in a virtual machine and
 is used on a wired network with one display: the login screen on greetd,
 admin prompts, the keyring, default apps with folders in Strider, and the
-everyday services and firmware in the image. Left out of RC1, and to be said
-so in its release notes: joining Wi-Fi from the desktop (NetworkManager is
-in the image, but nothing on screen drives it), the lock screen, idle
+everyday services and firmware in the image. Since widened by Chris (2026-11-22) with
+Wi-Fi from the desktop, for his laptop, restart and shut down from the power
+menu, and the firewall and SSH switches in Settings. Left out of RC1, and to
+be said so in its release notes: the lock screen, idle
 dimming, suspend and lid close, more than one monitor and HiDPI, X11 apps,
 battery and brightness, and any run on real hardware. Updates to the
 desktop itself come from a signed apt repository on GitHub Pages
