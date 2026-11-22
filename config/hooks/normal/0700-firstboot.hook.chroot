@@ -2,6 +2,14 @@
 set -e
 
 chmod +x /usr/local/bin/fellowshipos-setup
-systemctl enable fellowshipos-setup.service
 chmod +x /usr/local/sbin/fellowship-nas-issue
+
+# The homelab TTY first-boot wizard and NAS issue banner belong to the
+# multi-purpose/server image, not the desktop edition.
+if [ -x /usr/bin/fellowship-session ]; then
+    systemctl disable fellowshipos-setup.service fellowship-nas-issue.service fellowship-nas-issue.timer 2>/dev/null || true
+    exit 0
+fi
+
+systemctl enable fellowshipos-setup.service
 systemctl enable fellowship-nas-issue.service fellowship-nas-issue.timer
