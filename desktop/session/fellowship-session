@@ -53,6 +53,42 @@ fi
 # Create standard XDG user directories (Desktop, Downloads, Pictures, ...).
 command -v xdg-user-dirs-update >/dev/null 2>&1 && xdg-user-dirs-update
 
+# Services that had to be killed because they wouldn't stop. It happens while
+# a session is ending, when nothing of ours is left to notice, so each login
+# looks back through the user journal to the previous login and records every
+# "State 'stop-sigterm' timed out" with that service's last log lines, in
+# service-timeouts.log beside this log (Chris, 2026-11-22; DESK-015). In the
+# background: it must never hold up the login.
+record_stop_timeouts() {
+    local since_file="$STATE_DIR/service-timeouts.since"
+    local out="$STATE_DIR/service-timeouts.log"
+    local since now
+    now=$(date +%s)
+    since=$(cat "$since_file" 2>/dev/null || echo $((now - 86400)))
+    case "$since" in ''|*[!0-9]*) since=$((now - 86400)) ;; esac
+    command -v journalctl >/dev/null 2>&1 || return 0
+    journalctl --user --since "@$since" --until "@$now" --no-pager -q -o short-iso \
+        -g "State 'stop-sigterm' timed out" 2>/dev/null |
+    while IFS= read -r line; do
+        local unit when upto
+        unit=$(printf '%s\n' "$line" | sed -n "s/.*: \([^ :]*\): State 'stop-sigterm' timed out.*/\1/p")
+        when=${line%% *}
+        [ -n "$unit" ] || continue
+        upto=$(( $(date -d "$when" +%s 2>/dev/null || echo "$now") + 1 ))
+        {
+            echo "=== $when $unit was killed: it didn't stop within its timeout"
+            echo "--- its log before that:"
+            journalctl --user -u "$unit" --since "@$since" --until "@$upto" --no-pager -q -o short-iso -n 30 2>/dev/null
+            echo
+        } >>"$out"
+        echo "service stop timeout recorded: $unit at $when (see $out)"
+    done
+    echo "$now" >"$since_file"
+}
+if [ -n "${STATE_DIR:-}" ] && [ -d "$STATE_DIR" ]; then
+    record_stop_timeouts &
+fi
+
 # Share the systemd user session bus when available so PipeWire, portals,
 # GVfs, keyring, and desktop apps all speak on the same bus.
 USER_BUS="/run/user/$(id -u)/bus"
