@@ -92,8 +92,15 @@ for edition in $EDITIONS; do
             # empties .build/, which lost the package between images.
             mkdir -p cache/desktop-package
             if [ \"$edition\" = desktop ]; then
-                ls cache/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
-                    mv cache/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
+                # Only restore a parked package if packages.chroot doesn't already
+                # hold a freshly built one (otherwise a stale parked .deb from a
+                # previous multi build would overwrite what desktop/build.sh just made).
+                if ! ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1; then
+                    ls cache/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
+                        mv cache/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
+                else
+                    rm -f cache/desktop-package/fellowship-desktop_*.deb
+                fi
                 ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 ||
                     { echo 'the desktop package is missing: run desktop/build.sh' >&2; exit 1; }
             else
