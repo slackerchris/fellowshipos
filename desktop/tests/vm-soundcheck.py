@@ -70,7 +70,9 @@ def main():
     # without this evidence the cause stays a guess).
     print("=== the session as the swap left it ===")
     ser.run("date; pgrep -af 'fellowship-comp|fellowship-shell$|fellowship-notifyd' | head -6; "
-            "grep -ac 'notifications claimed' /tmp/fellowship-session.log; "
+            "LOG=\"$HOME/.local/state/fellowship/session.log\"; "
+            "[ -f \"$LOG\" ] || LOG=/tmp/fellowship-session.log; "
+            "grep -ac 'notifications claimed' \"$LOG\"; "
             "ls -l /run/user/1000/fellowship-wayland-*.sock", "SEEN", timeout=90)
 
     checks = []

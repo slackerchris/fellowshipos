@@ -22,7 +22,11 @@
 #                           the console for watching by hand)
 #   FELLOWSHIP_VIDEO        kernel video= argument (default 1920x1080; empty
 #                           lets the driver pick)
-#   FELLOWSHIP_ISO          the desktop image
+#   FELLOWSHIP_OUTPUTS      number of virtual DRM outputs (default 1; set 2
+#                           for multi-monitor testing)
+#   FELLOWSHIP_AUDIO        QEMU audiodev backend (default none; set pipewire
+#                           or pa when interactive to hear guest sound)
+#   FELLOWSHIP_ISO          the desktop image (defaults to newest desktop ISO)
 #   FELLOWSHIP_WAIT         seconds allowed for the boot (default 300)
 #   FELLOWSHIP_QEMU_EXTRA   more QEMU arguments, split on spaces: a second
 #                           network card on a private segment shared with a
@@ -30,7 +34,8 @@
 set -eu
 
 cd "$(dirname "$0")/../.."
-ISO=${FELLOWSHIP_ISO:-$(pwd)/fellowshipos-desktop-amd64-1.0.hybrid.iso}
+DEFAULT_ISO=$(ls -t "$(pwd)"/fellowshipos-desktop-amd64-*.hybrid.iso 2>/dev/null | head -1 || true)
+ISO=${FELLOWSHIP_ISO:-$DEFAULT_ISO}
 OUT=${1:-/tmp/fellowship-desktop-vm-interact}
 WORK=$OUT/work
 MONITOR=$OUT/monitor.sock
@@ -63,13 +68,15 @@ if [ ! -f "$WORK/vmlinuz" ] || [ ! -f "$WORK/initrd.img" ] || [ "$ISO" -nt "$WOR
     xorriso -osirrox on -indev "$ISO" -extract "$file" "$WORK/initrd.img" 2>/dev/null
 fi
 
-GPU=(-vga none -device virtio-gpu-pci,xres=1920,yres=1080)
+OUTPUTS=${FELLOWSHIP_OUTPUTS:-1}
+GPU=(-vga none -device "virtio-gpu-pci,xres=1920,yres=1080,max_outputs=$OUTPUTS")
 DISPLAY_KIND="${FELLOWSHIP_VM_DISPLAY:-none}"
 VIDEO_ARG=${FELLOWSHIP_VIDEO-video=Virtual-1:1920x1080}
 if [ "${FELLOWSHIP_GL:-0}" = 1 ]; then
-    GPU=(-vga none -device virtio-gpu-gl-pci,xres=1920,yres=1080)
+    GPU=(-vga none -device "virtio-gpu-gl-pci,xres=1920,yres=1080,max_outputs=$OUTPUTS")
     [ "$DISPLAY_KIND" = none ] && DISPLAY_KIND=egl-headless
 fi
+AUDIO=(-audiodev "${FELLOWSHIP_AUDIO:-none},id=snd0" -device ich9-intel-hda -device hda-duplex,audiodev=snd0)
 
 if [ -f "$OUT/vm.pid" ] && kill -0 "$(cat "$OUT/vm.pid")" 2>/dev/null; then
     echo "already running (pid $(cat "$OUT/vm.pid")): $OUT"; exit 0
@@ -86,6 +93,7 @@ qemu-system-x86_64 \
     -drive "file=$ISO,if=none,id=isorom,readonly=on" \
     -device "virtio-blk-pci,drive=isorom,serial=FELLOWSHIP-ISO" \
     "${GPU[@]}" \
+    "${AUDIO[@]}" \
     -device qemu-xhci -device usb-kbd -device usb-tablet \
     -nic user,model=virtio-net-pci \
     -virtfs "local,path=$OUT/share,mount_tag=hostshare,security_model=mapped-xattr,id=hostshare" \

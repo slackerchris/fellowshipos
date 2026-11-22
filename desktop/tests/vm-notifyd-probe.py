@@ -87,8 +87,10 @@ def main():
     ask("the session really runs on a private bus",
         "pgrep -af 'dbus-run-session|dbus-daemon' | head -6", "A3")
     ask("what the session log says about notifyd (if anything)",
-        "grep -i notify /tmp/fellowship-session.log 2>/dev/null | tail -10; "
-        "tail -5 /tmp/fellowship-session.log", "A4")
+        "LOG=\"$HOME/.local/state/fellowship/session.log\"; "
+        "[ -f \"$LOG\" ] || LOG=/tmp/fellowship-session.log; "
+        "grep -i notify \"$LOG\" 2>/dev/null | tail -10; "
+        "tail -5 \"$LOG\"", "A4")
 
     # The bus is the compositor's own; reach it through that process's
     # environment (the live user is a member of its user namespace).
