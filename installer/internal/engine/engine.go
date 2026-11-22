@@ -376,26 +376,54 @@ func (e *Engine) configure(s Settings, group string) error {
 		e.Log("EFI variables weren't writable; the disk will still boot through the fallback loader")
 	}
 
-	// Keep the boot tools, then drop the live system and this installer
+	// Keep the boot tools, then drop the live system and this installer.
+	// Install a temporary policy-rc.d returning 101 so maintainer scripts
+	// inside the chroot (e.g. fellowship-installer's prerm) never call
+	// deb-systemd-invoke against the live host's bind-mounted /run and stop
+	// the running installer or kiosk mid-install.
+	policyRC := filepath.Join(e.Target, "usr/sbin/policy-rc.d")
+	if err := e.write("usr/sbin/policy-rc.d", "#!/bin/sh\nexit 101\n", 0o755); err != nil {
+		return err
+	}
+	defer os.Remove(policyRC)
+
 	for _, name := range bootPackages {
 		e.chroot("", "apt-mark", "manual", name)
 	}
-	if err := e.chroot("", append([]string{"apt-get", "purge", "-y"}, e.installedOf(LivePackages)...)...); err != nil {
+	removeList := LivePackages
+	if _, err := os.Stat(filepath.Join(e.Target, "usr/bin/fellowship-greeter")); err == nil {
+		// Desktop editions use cage to host fellowship-greeter under greetd.
+		e.chroot("", "apt-mark", "manual", "cage")
+		filtered := make([]string, 0, len(LivePackages))
+		for _, pkg := range LivePackages {
+			if pkg != "cage" {
+				filtered = append(filtered, pkg)
+			}
+		}
+		removeList = filtered
+	}
+	if err := e.chroot("", append([]string{"apt-get", "purge", "-y"}, e.installedOf(removeList)...)...); err != nil {
 		return err
 	}
 	if err := e.chroot("", "apt-get", "autoremove", "--purge", "-y"); err != nil {
 		return err
 	}
+	_ = os.Remove(policyRC)
 
-	// The live system set its network up itself; the installed one needs settings
-	for _, port := range e.Network {
-		config := fmt.Sprintf("# Written by the FellowshipOS installer\nallow-hotplug %[1]s\niface %[1]s inet dhcp\niface %[1]s inet6 auto\n", port)
-		if err := e.write("etc/network/interfaces.d/"+port, config, 0o644); err != nil {
-			return err
+	// The live system set its network up itself; the installed one needs settings.
+	// On desktop installs where NetworkManager is installed, let NetworkManager
+	// manage wired and wireless interfaces directly instead of writing ifupdown
+	// stanzas that conflict with it.
+	if _, err := os.Stat(filepath.Join(e.Target, "usr/sbin/NetworkManager")); err != nil {
+		for _, port := range e.Network {
+			config := fmt.Sprintf("# Written by the FellowshipOS installer\nallow-hotplug %[1]s\niface %[1]s inet dhcp\niface %[1]s inet6 auto\n", port)
+			if err := e.write("etc/network/interfaces.d/"+port, config, 0o644); err != nil {
+				return err
+			}
 		}
-	}
-	if len(e.Network) == 0 {
-		e.Log("No wired network port found; set up the network after the first start")
+		if len(e.Network) == 0 {
+			e.Log("No wired network port found; set up the network after the first start")
+		}
 	}
 
 	files := map[string]string{
