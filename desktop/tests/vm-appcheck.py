@@ -57,7 +57,9 @@ APPS = [
     # name            spawn command                                        matchers                pkill      budget
     ("foot",          "foot",                                              ["foot"],               "foot", 40),
     ("mousepad",      "mousepad",                                          ["mousepad"],           "mousepad", 40),
-    ("nemo",          "nemo --no-desktop",                                 ["nemo", "files"],      "nemo", 40),
+    # Strider replaced Nemo in the image (2026-11-22). Its frame mode is
+    # recorded, not asserted, until it has been measured on the seat.
+    ("strider",       "fellowship-files",                                  ["org.fellowship.files", "strider"], "fellowship-files", 40),
     ("ristretto",     "ristretto",                                         ["ristretto"],          "ristretto", 40),
     ("atril",         "atril",                                              ["atril", "document"], "atril", 60),
     ("engrampa",      "engrampa",                                          ["engrampa", "archive"], "engrampa", 60),
@@ -83,7 +85,7 @@ APPS = [
 # not listed opens a window, and its mode is recorded but not asserted —
 # nobody has tested those and this table does not invent expectations.
 #
-# The seven `False` rows for silent GTK clients are promises the shipped
+# The `False` rows for silent GTK clients are promises the shipped
 # rules file makes (crates/fellowship-comp/data/decorations), each measured
 # on this seat before it was written down: those apps draw their own titlebar
 # and never ask, so a second bar above them is the defect and one bar is the
@@ -94,7 +96,6 @@ DECOR = {
     "zenity": True,        # silent, draws NO titlebar of its own: ours is the only one
     "chromium": False,     # asks for ClientSide, and is answered in kind
     "mousepad": False,     # silent, draws its own titlebar: named in the rules
-    "nemo": False,
     "ristretto": False,
     "atril": False,
     "engrampa": False,

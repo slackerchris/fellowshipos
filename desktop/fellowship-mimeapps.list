@@ -5,7 +5,8 @@
 # in ~/.config/mimeapps.list come first.
 #
 # The apps are the ones chosen in fellowship-desktop/docs/basic-desktop.md §7;
-# folders open in Strider (Chris, 2026-11-21), with Nemo still installed.
+# folders open in Strider (Chris, 2026-11-21), which replaced Nemo in the
+# image (2026-11-22).
 
 [Default Applications]
 # Folders

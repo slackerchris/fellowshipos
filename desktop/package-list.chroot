@@ -94,7 +94,7 @@ breeze-cursor-theme
 # this session: Debian's own hook sits in /etc/xdg/autostart, which the
 # compositor deliberately does not read until FellowshipOS ships its own
 # system autostart, so `fellowship-session` runs the updater at login. The
-# screenshot path reads the file this writes, and Nemo's sidebar and
+# screenshot path reads the file this writes, and Strider's sidebar and
 # Rhythmbox's library assume the folders exist.
 xdg-user-dirs
 
@@ -106,7 +106,7 @@ xdg-user-dirs
 # every mount was "not authorized", seen in the VM on 2026-11-19). Avahi lets
 # Strider find FellowshipNAS machines by their _fellowship-nas._tcp advert,
 # and nss-mdns resolves their .local names. The 1.0 image had none of the
-# network pieces: Nemo didn't pull them in.
+# network pieces: Nemo, the file manager then, didn't pull them in.
 gvfs-backends
 gvfs-fuse
 udisks2
@@ -114,10 +114,11 @@ polkitd
 avahi-daemon
 libnss-mdns
 # The everyday apps chosen in the desktop checklist: GTK 3 where there is a
-# choice, so the session's GTK theme reaches them.
+# choice, so the session's GTK theme reaches them. Strider, in the
+# fellowship-desktop package, is the file manager: Chris approved it in
+# place of Nemo after touring it, and Nemo left the image (2026-11-22).
 foot
 mousepad
-nemo
 ristretto
 atril
 engrampa

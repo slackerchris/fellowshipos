@@ -14,6 +14,11 @@ bump.
 
 ### Changed
 
+- Strider is the desktop image's only file manager. Nemo is no longer
+  installed: Chris approved Strider in its place after touring it. Folders
+  already opened in Strider by default; the drive and network-share pieces
+  it uses (GVfs, UDisks, Avahi) stay in the image.
+
 - FellowshipNAS is its own project. `nas/`, the NAS documents, the NAS image's
   edition and its CI jobs moved to the FellowshipOS-NAS repository with their
   history; it carries its own copy of the installer, the live-build profile and
