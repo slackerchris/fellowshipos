@@ -9,8 +9,14 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.4.2** — the desktop's first release candidate (Chris,
-2026-11-21). He chose the number, keeping to the prerelease scheme rather
+Current: **0.4.3** — the desktop's first release candidate (Chris,
+2026-11-22), the fixes found installing 0.4.2 in the VM: Wi-Fi's wrong-password
+message and a slow network's profile kept, only managed radios used, no
+bridge addresses offered for SSH. It is the first version published to the
+update feed.
+
+Before it, **0.4.2** (Chris, 2026-11-21) was built and tested but never
+published. He chose the number, keeping to the prerelease scheme rather
 than `1.0.0~rc1`. RC1 covers a desktop that installs in a virtual machine and
 is used on a wired network with one display: the login screen on greetd,
 admin prompts, the keyring, default apps with folders in Strider, and the
