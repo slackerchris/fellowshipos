@@ -42,6 +42,10 @@ bump.
   indicators, scaled from 800×600 to 4K. `fellowship-appearanced`, a narrow
   system D-Bus service, keeps the last active user's theme and mode so the
   greeter wears it after logout and reboot.
+- Restart and shut down from the desktop: the top bar's power menu has
+  Restart, Shut down and Log out, each confirmed in a dialog that goes ahead
+  by itself after 60 seconds (Escape or Cancel closes it). They are off in a
+  nested developer session, where they would act on the host.
 - Admin password prompts (`mate-polkit`, started by the compositor) and saved
   passwords and keys (`gnome-keyring`, unlocked by PAM at login) in the
   desktop session, which now shares the systemd user bus.
