@@ -13,7 +13,8 @@ set -e
 cd "$(dirname "$0")/.."                     # the FellowshipOS repository root
 ROOT=$(pwd)
 DESKTOP=${FELLOWSHIP_DESKTOP_SRC:-/fellowship-desktop}
-VERSION=1.0
+# The one release version (docs/versioning.md), so the feed and apt agree
+VERSION=$(cat "$ROOT/VERSION")
 
 if [ ! -f "$DESKTOP/Cargo.toml" ]; then
     echo "desktop/build.sh: no fellowship-desktop checkout at $DESKTOP" >&2
