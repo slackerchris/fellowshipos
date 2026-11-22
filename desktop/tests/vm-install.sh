@@ -24,7 +24,8 @@ case "$MODE" in
 esac
 
 cd "$(dirname "$0")/../.."
-WORK=${2:-/tmp/fellowship-desktop-install-vm}
+# On the main drive, not /tmp (RAM here)
+WORK=${2:-$HOME/Git/fellowship/build/vm}
 DISK=$WORK/disk.qcow2
 VARS=$WORK/ovmf-vars.fd
 MONITOR=$WORK/monitor.sock
