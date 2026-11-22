@@ -487,6 +487,11 @@ bump.
 
 ### Fixed
 
+- Logging in no longer flashes a screen of log text between the login screen
+  and the desktop. Cage and the greeter printed to tty1, which the kernel
+  shows for a moment once the greeter exits; their output now goes to the
+  journal (`journalctl -t fellowship-greeter`) and tty1 is cleared, cursor
+  hidden, before the greeter starts.
 - `build.sh` no longer lets a desktop package parked by an earlier build
   replace the one `desktop/build.sh` has just made.
 - The installer stops the target's maintainer scripts from starting or
