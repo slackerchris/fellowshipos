@@ -68,6 +68,13 @@ install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.de
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
+# Desktop updates: the signing key, the source line, and the unit that adds the
+# source on an installed system's first boot (publish-apt.sh serves the repo)
+install -Dm644 desktop/apt/fellowshipos.asc "$STAGE/usr/share/keyrings/fellowshipos.asc"
+install -Dm644 desktop/apt/fellowshipos.list "$STAGE/usr/share/fellowshipos/fellowshipos.list"
+install -Dm644 desktop/apt/fellowship-apt-source.service \
+    "$STAGE/usr/lib/systemd/system/fellowship-apt-source.service"
+
 # Default apps, read only in a Fellowship session (XDG_CURRENT_DESKTOP)
 install -Dm644 desktop/fellowship-mimeapps.list \
     "$STAGE/usr/share/applications/fellowship-mimeapps.list"

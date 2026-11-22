@@ -26,6 +26,7 @@ all editions share `config/`, `installer/` and `themes/`.
 | `installer/` | all | Graphical installer; the desktop edition preselects its role |
 | `proxmox/` | Multi-purpose | LXC templates and `create-ct.sh` |
 | `desktop/` | Desktop | Session starter, package list, Chromium flags, seat tests |
+| `publish-apt.sh`, `desktop/apt/` | Desktop | Signed update feed at `slackerchris/fellowshipos-apt` ([design](docs/desktop-update-feed.md)) |
 | `themes/` | Multi-purpose + Desktop | Themes and wallpapers; FellowshipNAS keeps its own copy |
 | `docs/` | all | Indexed in [docs/README.md](docs/README.md) |
 | `../fellowship-desktop/` | Desktop | The Rust compositor, shell and apps, in its own repository |

@@ -54,6 +54,13 @@ bump.
   system-config-printer, BlueZ with Blueman, ufw, GStreamer codecs, VA-API
   and Vulkan drivers, and firmware for common Wi-Fi, GPU, Realtek and Intel
   audio hardware. The ISO grows from about 1.51 GB to 1.72 GB.
+- A signed apt repository for desktop updates, served by GitHub Pages at
+  <https://slackerchris.github.io/fellowshipos-apt/> and signed with its own
+  key, `FellowshipOS Updates` (9A9055842DE0422D0D9B7AFD73D46C9F680BB715).
+  `publish-apt.sh` publishes the built package; the desktop image ships the
+  key and adds the source on an installed system's first boot;
+  `desktop/tests/apt-feed.sh` checks that apt takes it only when signed with
+  that key ([the design](docs/desktop-update-feed.md)).
 - `desktop/tests/vm-install.sh`: a blank-disk UEFI install and first boot of
   the desktop image in QEMU, the acceptance test for each desktop ISO.
 - A third image, **FellowshipOS Desktop**: the same live system with the

@@ -19,7 +19,8 @@ so in its release notes: joining Wi-Fi from the desktop (NetworkManager is
 in the image, but nothing on screen drives it), the lock screen, idle
 dimming, suspend and lid close, more than one monitor and HiDPI, X11 apps,
 battery and brightness, and any run on real hardware. Updates to the
-desktop itself are to come from an apt repository, still to be set up.
+desktop itself come from a signed apt repository on GitHub Pages
+([desktop-update-feed.md](desktop-update-feed.md)).
 
 Before it, **0.3.0** was the desktop tour batch (Chris, 2026-11-20): Strider
 (Fellowship Files) in the desktop image beside Nemo, with its GVfs backends,

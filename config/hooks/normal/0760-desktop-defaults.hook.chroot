@@ -31,6 +31,8 @@ install -d -m 0755 /etc/skel/.local /etc/skel/.local/share
 install -d -m 0700 /etc/skel/.local/share/keyrings
 systemctl enable greetd.service 2>/dev/null || true
 systemctl enable fellowship-appearanced.service 2>/dev/null || true
+# Adds the signed desktop update source on the installed system's first boot
+systemctl enable fellowship-apt-source.service 2>/dev/null || true
 
 # A desktop workstation should not expose an open SSH daemon by default;
 # users who want remote access can enable ssh.service explicitly.
