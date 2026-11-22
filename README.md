@@ -30,7 +30,7 @@ FELLOWSHIP_EDITIONS=desktop ./build.sh
 
 `desktop/build.sh` builds the Rust desktop in the build container (rustup's stable; trixie's rustc is too old for its dependencies), packs it as `fellowship-desktop` — compositor, shell, `fellowship-msg`, the portal Settings backend, the shared themes and the console session starter — and `live-build` installs it. The extra packages, the session's portals, software rendering, fonts, icons and everyday GTK apps, are listed in [desktop/package-list.chroot](desktop/package-list.chroot).
 
-Booting it live autologins as `user` on the console the kernel shows, and the desktop starts on the panel by itself: a login on a text console starts the session, the first one to take the lock wins, and any other console stays a plain shell — the way in if the session needs looking at. The package keeps that console's `getty` alive — the stock unit is skipped at boot because `/dev/tty0` is not there yet, so the package clears that condition and asks for the getty once the consoles exist — and lets the session switch the screen to its own VT, which DRM requires. The session's own output goes to `/tmp/fellowship-session.log`. In QEMU:
+An installed system boots to the login screen, `fellowship-greeter`, which greetd runs in Cage on tty1; signing in starts the desktop with `fellowship-session`. A live boot goes straight into the desktop as `user` once and returns to the login screen on logout. The other consoles (Ctrl+Alt+F2 and on) stay plain text logins, the way in if the session needs looking at. The session's own output goes to `~/.local/state/fellowship/session.log`. In QEMU:
 
 ```bash
 qemu-system-x86_64 -enable-kvm -m 4G -smp 2 \

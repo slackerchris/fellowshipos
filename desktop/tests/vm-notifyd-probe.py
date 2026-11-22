@@ -23,6 +23,17 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from importlib import import_module
+import os
+
+
+def test_dir(name):
+    """Where a run keeps its output: on disk, not /tmp, which is RAM on the
+    build machine (it filled on 2026-11-22). FELLOWSHIP_TEST_DIR overrides."""
+    base = os.environ.get("FELLOWSHIP_TEST_DIR") or os.path.expanduser("~/.cache/fellowship-tests")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, name)
+
+
 vm_measure = import_module("vm-measure")  # the Serial helper, unchanged
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -33,13 +44,13 @@ def main():
     no_swap = "--no-swap" in args
     dirs = [a for a in args if not a.startswith("--")]
     out = pathlib.Path(dirs[0] if dirs
-                       else "/tmp/fellowship-notifyd-probe")
+                       else test_dir("notifyd-probe"))
     # The freshest desktop package, wherever the image build left it: a
     # running NAS build parks it in .build/desktop-package; VM workdirs
     # from earlier seat runs keep the copies that were shared in.
     candidates = [d for d in ([p for r in (REPO / "config" / "packages.chroot", REPO / ".build" / "desktop-package")
                                for p in r.glob("fellowship-desktop_*.deb")] +
-                              [p for t in pathlib.Path("/tmp").glob("fellowship-*/share/pkg")
+                              [p for t in pathlib.Path(test_dir("")).glob("*/share/pkg")
                                for p in t.glob("fellowship-desktop_*.deb")])
                   if d.resolve() != (out / "share" / "pkg" / d.name).resolve()]
     if not candidates and not no_swap:

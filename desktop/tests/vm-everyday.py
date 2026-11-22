@@ -37,13 +37,24 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from importlib import import_module
+import os
+
+
+def test_dir(name):
+    """Where a run keeps its output: on disk, not /tmp, which is RAM on the
+    build machine (it filled on 2026-11-22). FELLOWSHIP_TEST_DIR overrides."""
+    base = os.environ.get("FELLOWSHIP_TEST_DIR") or os.path.expanduser("~/.cache/fellowship-tests")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, name)
+
+
 vm_measure = import_module("vm-measure")  # the Serial helper, unchanged
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
 FIX = "--fix" in sys.argv[1:]
 dirs = [a for a in sys.argv[1:] if not a.startswith("--")]
-OUT = pathlib.Path(dirs[0] if dirs else "/tmp/fellowship-everyday")
+OUT = pathlib.Path(dirs[0] if dirs else test_dir("everyday"))
 
 # A picture for the thumbnail test, made here so the guest only has to copy
 # it: 240x160 of hard-edged colour, which no thumbnailer can produce by

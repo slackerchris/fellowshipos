@@ -31,6 +31,17 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from importlib import import_module
+import os
+
+
+def test_dir(name):
+    """Where a run keeps its output: on disk, not /tmp, which is RAM on the
+    build machine (it filled on 2026-11-22). FELLOWSHIP_TEST_DIR overrides."""
+    base = os.environ.get("FELLOWSHIP_TEST_DIR") or os.path.expanduser("~/.cache/fellowship-tests")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, name)
+
+
 vm_measure = import_module("vm-measure")
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -48,7 +59,7 @@ SAMPLES = 12
 
 
 def main():
-    out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/fellowship-gtk-csd")
+    out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else test_dir("gtk-csd"))
     pidfile = out / "vm.pid"
     if pidfile.exists():
         subprocess.run(["kill", pidfile.read_text().strip()], check=False)

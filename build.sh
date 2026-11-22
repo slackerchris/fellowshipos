@@ -112,6 +112,18 @@ for edition in $EDITIONS; do
             lb config
             lb build
             mv live-image-amd64.hybrid.iso fellowshipos-${edition}-amd64-${VERSION}.hybrid.iso
+            # One ISO per edition here: older ones, renamed test builds
+            # included, piled up to a dozen root-owned copies by 2026-11-22.
+            # Handover copies belong in ../fellowship/build, which this leaves
+            # alone. FELLOWSHIP_KEEP_OLD_ISOS=1 keeps them all.
+            if [ \"${FELLOWSHIP_KEEP_OLD_ISOS:-}\" != 1 ]; then
+                for old in fellowshipos-${edition}-amd64-*.hybrid.iso; do
+                    [ \"\$old\" = fellowshipos-${edition}-amd64-${VERSION}.hybrid.iso ] || rm -fv \"\$old\"
+                done
+            fi
+            # Owned by whoever ran the build, not root, so it can be moved or
+            # deleted without sudo
+            chown $(id -u):$(id -g) fellowshipos-${edition}-amd64-${VERSION}.hybrid.iso
         "
 
     # The general container comes from the general image, whose chroot is the

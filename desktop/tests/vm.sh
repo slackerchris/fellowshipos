@@ -21,7 +21,7 @@ set -eu
 
 cd "$(dirname "$0")/../.."
 ISO=${FELLOWSHIP_ISO:-$(pwd)/fellowshipos-desktop-amd64-1.0.hybrid.iso}
-OUT=${1:-/tmp/fellowship-desktop-vm}
+OUT=${1:-${FELLOWSHIP_TEST_DIR:-$HOME/.cache/fellowship-tests}/desktop-vm}
 WORK=$OUT/work
 OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd

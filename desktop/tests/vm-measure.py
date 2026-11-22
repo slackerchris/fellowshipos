@@ -20,7 +20,7 @@ dri-mapped line says which Mesa driver was actually loaded instead of
 guessing it from the QEMU flags.
 
 FELLOWSHIP_OUT picks the working directory (default
-/tmp/fellowship-desktop-vm-interact, same as vm-interact.sh); --keep leaves
+~/.cache/fellowship-tests/desktop-vm-interact, same as vm-interact.sh); --keep leaves
 the VM running afterwards.
 """
 import argparse
@@ -32,6 +32,14 @@ import statistics
 import subprocess
 import sys
 import time
+
+
+def test_dir(name):
+    """Where a run keeps its output: on disk, not /tmp, which is RAM on the
+    build machine (it filled on 2026-11-22). FELLOWSHIP_TEST_DIR overrides."""
+    base = os.environ.get("FELLOWSHIP_TEST_DIR") or os.path.expanduser("~/.cache/fellowship-tests")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, name)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
@@ -46,7 +54,7 @@ def main():
     ap.add_argument("--measure-timeout", type=int, default=300)
     args = ap.parse_args()
 
-    out = pathlib.Path(os.environ.get("FELLOWSHIP_OUT", "/tmp/fellowship-desktop-vm-interact"))
+    out = pathlib.Path(os.environ.get("FELLOWSHIP_OUT", test_dir("desktop-vm-interact")))
     serial_path = out / "serial.sock"
     share = out / "share"
 
@@ -183,7 +191,7 @@ class Monitor:
         sys.exit("the monitor has no Super key name; sendkey meta_l alone failed")
 
 
-SHOT = "/tmp/fellowship-blind-shot.ppm"
+SHOT = test_dir("blind-shot.ppm")
 
 
 def blind_taps(mon, runs):

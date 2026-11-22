@@ -36,7 +36,7 @@ set -eu
 cd "$(dirname "$0")/../.."
 DEFAULT_ISO=$(ls -t "$(pwd)"/fellowshipos-desktop-amd64-*.hybrid.iso 2>/dev/null | head -1 || true)
 ISO=${FELLOWSHIP_ISO:-$DEFAULT_ISO}
-OUT=${1:-/tmp/fellowship-desktop-vm-interact}
+OUT=${1:-${FELLOWSHIP_TEST_DIR:-$HOME/.cache/fellowship-tests}/desktop-vm-interact}
 WORK=$OUT/work
 MONITOR=$OUT/monitor.sock
 SERIAL=$OUT/serial.sock

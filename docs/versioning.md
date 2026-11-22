@@ -60,6 +60,10 @@ installer recovery-key gate removal).
 - `build.sh` reads `VERSION` and names the ISOs
   `fellowshipos-<edition>-amd64-<version>.hybrid.iso` and the LXC template
   `fellowshipos-trixie-amd64-<version>_lxc.tar.gz`.
+- Each build keeps one ISO per edition in the repository folder: it deletes
+  that edition's older ISOs (renamed test builds too) and hands the new one to
+  the user who ran the build, not root. Copy an ISO to `../fellowship/build/`
+  to keep it; `FELLOWSHIP_KEEP_OLD_ISOS=1` keeps them all.
 - `installer/build.sh` stamps the **temporary build copy's** `debian/changelog`
   first line with `VERSION`, so the installed package carries the release
   version. The checkout's changelogs are never

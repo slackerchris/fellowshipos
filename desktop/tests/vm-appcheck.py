@@ -38,6 +38,14 @@ import subprocess
 import sys
 import time
 
+
+def test_dir(name):
+    """Where a run keeps its output: on disk, not /tmp, which is RAM on the
+    build machine (it filled on 2026-11-22). FELLOWSHIP_TEST_DIR overrides."""
+    base = os.environ.get("FELLOWSHIP_TEST_DIR") or os.path.expanduser("~/.cache/fellowship-tests")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, name)
+
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
 # The bar's height in logical pixels, as `fellowship-comp` draws it, and the
@@ -99,7 +107,7 @@ def main():
     args = [a for a in sys.argv[1:]]
     as_shipped = "--as-shipped" in args
     dirs = [a for a in args if not a.startswith("--")]
-    out = pathlib.Path(dirs[0] if dirs else "/tmp/fellowship-desktop-appcheck")
+    out = pathlib.Path(dirs[0] if dirs else test_dir("desktop-appcheck"))
     shots = out / "shots"
     shots.mkdir(parents=True, exist_ok=True)
     for old in shots.glob("app-*"):
