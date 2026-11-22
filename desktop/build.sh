@@ -58,6 +58,23 @@ install_bin fellowship-settings
 install_bin fellowship-files
 install_bin fellowship-greeter
 install_bin fellowship-appearanced
+
+# Holds the graphics cards open (never as their master) so the login
+# screen's exit isn't the last close, and the kernel doesn't put its console
+# back on screen between the login screen and the desktop (DESK-016). Enabled
+# by a vendor .wants link, so installs that update this package through the
+# apt feed get it switched on too, not only fresh images.
+install -Dm755 "$CARGO_TARGET_DIR/release/fellowship-drm-keeper" "$STAGE/usr/libexec/fellowship-drm-keeper"
+install -Dm644 "$WORK/crates/fellowship-drm-keeper/data/fellowship-drm-keeper.service" \
+    "$STAGE/usr/lib/systemd/system/fellowship-drm-keeper.service"
+install -d "$STAGE/usr/lib/systemd/system/multi-user.target.wants"
+ln -s ../fellowship-drm-keeper.service "$STAGE/usr/lib/systemd/system/multi-user.target.wants/fellowship-drm-keeper.service"
+
+# The kernel's text console on tty1-6 only, leaving tty7 to the login screen
+# and desktop (DESK-016). A grub.d drop-in rather than an edit to
+# /etc/default/grub; the postinst below regenerates grub.cfg on installs that
+# update.
+install -Dm644 desktop/console/grub-fellowship-console.cfg "$STAGE/etc/default/grub.d/fellowship-console.cfg"
 install -Dm644 "$WORK/crates/fellowship-files/data/org.fellowship.Files.desktop" \
     "$STAGE/usr/share/applications/org.fellowship.Files.desktop"
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Files.svg" \
@@ -89,7 +106,7 @@ install -Dm644 desktop/apt/fellowship-apt-source.service \
 install -Dm644 desktop/fellowship-mimeapps.list \
     "$STAGE/usr/share/applications/fellowship-mimeapps.list"
 
-# Graphical login: greetd hosts fellowship-greeter inside Cage on tty1.
+# Graphical login: greetd hosts fellowship-greeter inside Cage on tty7.
 # Installed systems boot directly to fellowship-greeter; live ISO boots enter
 # the live desktop once and return to the greeter on logout.
 install -Dm644 desktop/greeter/greetd.toml "$STAGE/etc/fellowship/greetd.toml"
@@ -173,6 +190,24 @@ Description: The FellowshipOS desktop
  control tool, the notification service, and the xdg-desktop-portal Settings
  backend, with the shared themes and session starter.
 EOF
+
+# Regenerate grub.cfg for the console drop-in, where GRUB is set up (an
+# installed system updating this package). In the image build's chroot there
+# is no grub.cfg yet and the installer writes it later, so nothing is done.
+# Then start the keeper on a running system; boot starts it from its link.
+cat > "$STAGE/DEBIAN/postinst" <<'POSTINST'
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ] && [ -x /usr/sbin/update-grub ] && [ -e /boot/grub/grub.cfg ]; then
+    update-grub >/dev/null 2>&1 || echo "fellowship-desktop: update-grub failed; run it by hand" >&2
+fi
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start fellowship-drm-keeper.service >/dev/null 2>&1 || true
+fi
+exit 0
+POSTINST
+chmod 755 "$STAGE/DEBIAN/postinst"
 
 mkdir -p "$ROOT/config/packages.chroot"
 rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb "$ROOT"/cache/desktop-package/fellowship-desktop_*.deb

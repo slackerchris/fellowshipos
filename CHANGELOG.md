@@ -487,6 +487,14 @@ bump.
 
 ### Fixed
 
+- Logging in goes from the login screen straight to the desktop: the login
+  screen fades into the wallpaper and the desktop starts on the same picture,
+  with no console text, black screen or flicker in between. The login screen
+  and desktop now run on tty7, the kernel's text console is limited to tty1-6
+  (`fbcon=vc:1-6`, through `/etc/default/grub.d/fellowship-console.cfg` and
+  the live boot menu), and `fellowship-drm-keeper` holds the graphics card so
+  the kernel doesn't put its console back during the hand-off. tty1 has a
+  text login again (Ctrl+Alt+F1).
 - Logging in no longer flashes a screen of log text between the login screen
   and the desktop. Cage and the greeter printed to tty1, which the kernel
   shows for a moment once the greeter exits; their output now goes to the
