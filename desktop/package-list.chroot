@@ -48,7 +48,8 @@ libnotify-bin
 
 # Networking, power, printing, Bluetooth, firewall and session security:
 # greetd + cage + accountsservice provide the graphical login screen;
-# NetworkManager handles Wi-Fi/Ethernet; UPower reports battery/AC; mate-polkit
+# NetworkManager handles Wi-Fi/Ethernet; UPower reports battery/AC;
+# power-profiles-daemon provides the power modes in the shell; mate-polkit
 # answers admin prompts for Settings; gnome-keyring provides Secret Service;
 # xwayland prepares X11 app compatibility; CUPS + system-config-printer handle
 # printing; ufw gives a default-deny desktop firewall.
@@ -59,6 +60,7 @@ network-manager
 wpasupplicant
 nm-connection-editor
 upower
+power-profiles-daemon
 mate-polkit
 gnome-keyring
 libpam-gnome-keyring
