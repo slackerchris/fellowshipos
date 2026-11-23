@@ -103,6 +103,13 @@ install -Dm755 "$SDATA/fellowship-sharing" "$STAGE/usr/libexec/fellowship-sharin
 install -Dm755 "$SDATA/fellowship-sharing-status" "$STAGE/usr/libexec/fellowship-sharing-status"
 install -Dm644 "$SDATA/org.fellowship.sharing.policy" \
     "$STAGE/usr/share/polkit-1/actions/org.fellowship.sharing.policy"
+# Settings → Power: what the lid and the power button do (a logind drop-in).
+# Only where the checkout has them (fellowship-desktop desktop/power-idle on).
+if [ -f "$SDATA/fellowship-power-buttons" ]; then
+    install -Dm755 "$SDATA/fellowship-power-buttons" "$STAGE/usr/libexec/fellowship-power-buttons"
+    install -Dm644 "$SDATA/org.fellowship.power.policy" \
+        "$STAGE/usr/share/polkit-1/actions/org.fellowship.power.policy"
+fi
 
 # Desktop updates: the signing key, the source line, and the unit that adds the
 # source on an installed system's first boot (publish-apt.sh serves the repo)
@@ -192,7 +199,7 @@ Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
  xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64, libglib2.0-bin, file,
  pipewire, pipewire-pulse, wireplumber, greetd, cage, accountsservice,
- pkexec, polkitd, iproute2
+ pkexec, polkitd, iproute2, packagekit
 Description: The FellowshipOS desktop
  The Wayland compositor, the shell (top bar, dock, launcher), the
  Fellowship graphical greeter and appearance service, the fellowship-msg
