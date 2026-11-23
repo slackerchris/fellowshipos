@@ -58,6 +58,7 @@ install_bin fellowship-msg
 install_bin fellowship-portal
 install_bin fellowship-notifyd
 install_bin fellowship-settings
+install_bin fellowship-screenshot
 install_bin fellowship-files
 install_bin fellowship-greeter
 install_bin fellowship-appearanced
@@ -88,6 +89,11 @@ install -Dm644 "$WORK/crates/fellowship-settings/data/org.fellowship.Settings.de
     "$STAGE/usr/share/applications/org.fellowship.Settings.desktop"
 install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Settings.svg" \
     "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Settings.svg"
+# The Screenshot app (Print Screen needs no app: the compositor saves at once)
+install -Dm644 "$WORK/crates/fellowship-screenshot/data/org.fellowship.Screenshot.desktop" \
+    "$STAGE/usr/share/applications/org.fellowship.Screenshot.desktop"
+install -Dm644 "$WORK/assets/icons/apps/org.fellowship.Screenshot.svg" \
+    "$STAGE/usr/share/icons/hicolor/scalable/apps/org.fellowship.Screenshot.svg"
 install -Dm755 desktop/session/fellowship-session "$STAGE/usr/bin/fellowship-session"
 # Settings' firewall and remote-login switches: two fixed helpers run with
 # pkexec, and the polkit actions that let the session read freely and ask an
@@ -184,7 +190,7 @@ Priority: optional
 Depends: libgbm1, libinput10, libseat1, libudev1, libxkbcommon0, xkb-data, kbd,
  libwayland-client0, libwayland-server0, libwayland-egl1, libegl1,
  libegl-mesa0, libgl1-mesa-dri, fonts-dejavu-core, dbus,
- xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64,
+ xdg-desktop-portal, xdg-desktop-portal-gtk, libglib2.0-0t64, libglib2.0-bin, file,
  pipewire, pipewire-pulse, wireplumber, greetd, cage, accountsservice,
  pkexec, polkitd, iproute2
 Description: The FellowshipOS desktop
