@@ -1,7 +1,4 @@
-# Tools the general images carry and the NAS image leaves out. auto/config
-# copies this into package-lists for every edition but the NAS. On a NAS
-# nothing uses git or a network scanner, and root, the only account with a
-# shell, works at the console.
+# Extra tools every image carries. auto/config copies this into package-lists.
 git
 nmap
 mtr

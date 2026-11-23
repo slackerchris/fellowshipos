@@ -3,7 +3,6 @@
 # Runs once on first boot via systemd, marks itself done on completion
 
 DONE_FLAG="/etc/fellowshipos/.setup-complete"
-NAS_DONE_FLAG="/etc/fellowshipos/.nas-role-complete"
 LOG_DIR="/var/log/fellowshipos"
 LOG_FILE="$LOG_DIR/setup.log"
 
@@ -85,10 +84,6 @@ confirm() {
 
 # ─── Validation ───────────────────────────────────────────────────────────────
 
-valid_subnet() {
-    # fnas checks this properly: here it only needs to be a private subnet
-    [[ "$1" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+/([89]|[12][0-9]|30)$ ]]
-}
 
 valid_username() {
     # Must start with letter or underscore, 1-32 chars, only a-z 0-9 _ -
@@ -103,78 +98,6 @@ valid_hostname() {
 valid_timezone() {
     [ -f "/usr/share/zoneinfo/$1" ]
 }
-
-# ─── A NAS from the graphical installer ───────────────────────────────────────
-
-# The graphical installer has already asked for the name, time zone and account,
-# so a NAS it installed finishes here without a single question. If the NAS role
-# can't finish (no network, Secure Boot on), the reason is kept for the login
-# screen (fellowship-nas-issue) and the next start tries again, because the
-# setup only counts as done once the role is.
-NAS_STATUS="/var/lib/fellowshipos/nas-role-status"
-
-nas_unattended() {
-    local user device lan reason
-    mkdir -p /etc/fellowshipos /var/lib/fellowshipos
-    # Kernel messages and systemd's status lines would write over this screen
-    # while packages install; the login screen reports anything that went wrong.
-    # SIGRTMIN+21 tells systemd to stop showing status for this boot.
-    dmesg --console-level emerg 2> /dev/null
-    kill -s RTMIN+21 1 2> /dev/null
-    clear
-    echo -e "${YELLOW}${BOLD}  FellowshipOS NAS: finishing the install${RESET}"
-    echo -e "  ${DIM}Nothing to answer here. Progress goes to ${LOG_FILE}.${RESET}"
-    echo ""
-
-    # SSH host keys need nothing here: the image carries none, and ssh.service
-    # makes this machine's own on its first start (ssh.service.d/host-keys.conf)
-
-    # Shares are offered to the local network, found from the default route.
-    # The network can come up a little after this starts.
-    if [ ! -s /etc/fellowshipos/nas-lan ]; then
-        echo -ne "  Finding the local network... "
-        for _ in $(seq 30); do
-            device=$(ip -4 route show default | awk '{print $5; exit}')
-            [ -n "$device" ] && break
-            sleep 2
-        done
-        [ -n "$device" ] && lan=$(ip -4 route show dev "$device" scope link | awk '{print $1; exit}')
-        if valid_subnet "$lan"; then
-            echo "$lan" > /etc/fellowshipos/nas-lan
-            echo -e "${GREEN}${lan}${RESET}"
-        else
-            echo -e "${YELLOW}none found; set it in the desktop's Settings${RESET}"
-        fi
-    fi
-
-    echo -ne "  Starting the NAS... "
-    # The installer's account: the first that can log in. Not UID 1000: the
-    # NAS's own file-share account (UID 3000, once called nas-share) is already in the image, so the
-    # installer's account comes after it
-    user=$(awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ {print $1; exit}' /etc/passwd)
-    if SUDO_USER="$user" bash /usr/local/lib/flavors/nas-node.sh >> "$LOG_FILE" 2>&1; then
-        echo "ready" > "$NAS_STATUS"
-        touch "$DONE_FLAG"
-        echo -e "${GREEN}done${RESET}"
-        echo "=== FellowshipOS NAS setup finished at $(date) ===" >> "$LOG_FILE"
-    else
-        # The flavor says why on its last [flavor] line before it stops
-        reason=$(grep '^\[flavor\] ' "$LOG_FILE" | tail -1 | sed 's/^\[flavor\] //')
-        if [ -z "$reason" ] || [ "$reason" = "nas-node" ]; then
-            reason="the install stopped; see $LOG_FILE"
-        fi
-        echo "$reason" > "$NAS_STATUS"
-        echo -e "${RED}not finished${RESET}"
-        echo -e "  ${reason}"
-        echo "=== FellowshipOS NAS setup stopped at $(date): $reason ===" >> "$LOG_FILE"
-    fi
-}
-
-if [ "$(cat /etc/fellowshipos/install-role 2>/dev/null)" = "nas" ] && [ -d /usr/share/fellowshipos/nas-repo ] \
-        && ! systemd-detect-virt --container --quiet; then
-    nas_unattended
-    exit 0
-fi
 
 # ─── System ───────────────────────────────────────────────────────────────────
 
@@ -257,34 +180,16 @@ echo "    1) Base only"
 echo "    2) Docker node"
 echo "    3) Server (web / app / database / proxy)"
 echo "    4) Monitor node"
-# Containers can't load ZFS or own disks, and only the NAS image carries the
-# NAS packages
-if systemd-detect-virt --container --quiet; then
-    NAS_AVAILABLE="N"
-    echo "    5) NAS / Home Server (full installs only)"
-elif [ ! -d /usr/share/fellowshipos/nas-repo ]; then
-    NAS_AVAILABLE="N"
-    echo "    5) NAS / Home Server (install the NAS image for this)"
-else
-    NAS_AVAILABLE="Y"
-    echo "    5) NAS / Home Server (ZFS + web UI)"
-fi
-echo "    6) Skip for now"
+echo "    5) Skip for now"
 echo ""
 
-# The NAS installer records the role chosen in the boot menu
 ROLE_DEFAULT=1
-[ "$(cat /etc/fellowshipos/install-role 2>/dev/null)" = "nas" ] && [ "$NAS_AVAILABLE" = "Y" ] && ROLE_DEFAULT=5
 
 while true; do
     prompt "Choice" "$ROLE_DEFAULT" SETUP_FLAVOR_CHOICE
     case "$SETUP_FLAVOR_CHOICE" in
-        5)
-            [ "$NAS_AVAILABLE" = "Y" ] && break
-            echo -e "  ${RED}The NAS role needs a full install from the NAS image. Choose another option.${RESET}"
-            ;;
-        1|2|3|4|6) break ;;
-        *) echo -e "  ${RED}Please enter a number between 1 and 6.${RESET}" ;;
+        1|2|3|4|5) break ;;
+        *) echo -e "  ${RED}Please enter a number between 1 and 5.${RESET}" ;;
     esac
 done
 
@@ -312,22 +217,6 @@ if [ "$SETUP_FLAVOR_CHOICE" = "3" ]; then
     done
 fi
 
-# NAS shares are only offered to this subnet
-SETUP_NAS_LAN=""
-if [ "$SETUP_FLAVOR_CHOICE" = "5" ]; then
-    NAS_LAN_DEVICE=$(ip -4 route show default | awk '{print $5; exit}')
-    NAS_LAN_DEFAULT=""
-    [ -n "$NAS_LAN_DEVICE" ] && NAS_LAN_DEFAULT=$(ip -4 route show dev "$NAS_LAN_DEVICE" scope link | awk '{print $1; exit}')
-    echo ""
-    while true; do
-        prompt "LAN subnet that may use shares" "$NAS_LAN_DEFAULT" SETUP_NAS_LAN
-        valid_subnet "$SETUP_NAS_LAN" && break
-        # Nothing to detect without a network, and the role needs one anyway
-        [ -z "$SETUP_NAS_LAN" ] && [ -z "$NAS_LAN_DEFAULT" ] && break
-        echo -e "  ${RED}Enter a private subnet, like 192.168.1.0/24.${RESET}"
-    done
-fi
-
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
 header
@@ -338,8 +227,7 @@ case "$SETUP_FLAVOR_CHOICE" in
     2) FLAVOR_LABEL="Docker node" ;;
     3) FLAVOR_LABEL="Server" ;;
     4) FLAVOR_LABEL="Monitor node" ;;
-    5) FLAVOR_LABEL="NAS / Home Server" ;;
-    6) FLAVOR_LABEL="Skip" ;;
+    5) FLAVOR_LABEL="Skip" ;;
 esac
 
 echo ""
@@ -349,7 +237,6 @@ echo -e "  User:       ${BOLD}$SETUP_USER${RESET}$([ "$SETUP_SUDO" = "Y" ] && ec
 echo -e "  SSH keys:   ${BOLD}$([ "$SETUP_REGEN_SSH" = "Y" ] && echo 'regenerate' || echo 'keep')${RESET}"
 echo -e "  Public key: ${BOLD}$([ -n "$SETUP_PUBKEY" ] && echo 'provided' || echo 'none')${RESET}"
 echo -e "  Flavor:     ${BOLD}$FLAVOR_LABEL${RESET}"
-[ -n "$SETUP_NAS_LAN" ] && echo -e "  LAN subnet: ${BOLD}$SETUP_NAS_LAN${RESET}"
 
 if [ "$SETUP_FLAVOR_CHOICE" = "3" ] && [ -n "$SETUP_SERVER_COMPONENTS" ]; then
     COMP_LABEL=""
@@ -570,12 +457,6 @@ case "$SETUP_FLAVOR_CHOICE" in
         apt-get update -qq >> "$LOG_FILE" 2>&1
         apply_flavor "monitor-node"
         ;;
-    5)
-        apt-get update -qq >> "$LOG_FILE" 2>&1
-        mkdir -p /etc/fellowshipos
-        [ -z "$SETUP_NAS_LAN" ] || echo "$SETUP_NAS_LAN" > /etc/fellowshipos/nas-lan
-        apply_flavor "nas-node"
-        ;;
 esac
 
 # ─── Mark complete ────────────────────────────────────────────────────────────
@@ -599,20 +480,6 @@ else
     echo -e "${GREEN}${BOLD}──────────────────────────────────────────────────────${RESET}"
 fi
 echo ""
-if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ ! -f "$NAS_DONE_FLAG" ]; then
-    echo -e "  ${YELLOW}NAS role did not finish. Retry with:${RESET} ${BOLD}sudo homelabos-flavor nas-node${RESET}"
-    echo ""
-fi
-if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ -f "$NAS_DONE_FLAG" ]; then
-    NAS_ADDRESS=$(ip -4 route get 1.1.1.1 2> /dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
-    echo -e "  Finish setting up the NAS in a browser: ${BOLD}https://${NAS_ADDRESS:-this-machine}${RESET}"
-    echo -e "  (log in as ${BOLD}$SETUP_USER${RESET}, then open NAS Setup)"
-    echo ""
-fi
-if [ "$SETUP_FLAVOR_CHOICE" = "5" ] && [ -f "$NAS_DONE_FLAG" ] && [ ! -d /sys/module/zfs ]; then
-    echo -e "  ${YELLOW}Reboot before using the NAS role:${RESET} ZFS was built for a newer kernel."
-    echo ""
-fi
 echo -e "  Login as ${BOLD}$SETUP_USER${RESET} on next session."
 echo ""
 # The login prompt clears the screen as soon as this script exits

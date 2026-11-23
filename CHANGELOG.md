@@ -12,6 +12,14 @@ bump.
 
 ## [Unreleased]
 
+### Removed
+
+- The NAS pieces the shared live-build profile still carried after
+  FellowshipNAS moved out: the NAS role hook, the `nas-node` flavor, the
+  `fellowship-nas-issue` screen and its timer, and the NAS path in the
+  first-boot wizard. The wizard's roles are now 1–4 and 5 to skip. Nothing in
+  this repository could build a NAS image any more, so none of it ran.
+
 ### Changed
 
 - Strider is the desktop image's only file manager. Nemo is no longer

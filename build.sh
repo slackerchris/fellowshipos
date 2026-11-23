@@ -82,10 +82,6 @@ for edition in $EDITIONS; do
             apt-get update -qq
             apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
 
-            # FellowshipNAS is built in its own repository; a NAS package
-            # repo left here by an older build must not reach these images
-            rm -rf config/includes.chroot/usr/share/fellowshipos/nas-repo
-
             # live-build installs every .deb in packages.chroot, so the
             # desktop's package is there for the desktop image and kept aside
             # for the images that are not it. Aside means cache/: lb clean
