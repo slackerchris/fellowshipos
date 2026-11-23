@@ -13,8 +13,11 @@ set -e
 cd "$(dirname "$0")/.."                     # the FellowshipOS repository root
 ROOT=$(pwd)
 DESKTOP=${FELLOWSHIP_DESKTOP_SRC:-/fellowship-desktop}
-# The one release version (docs/versioning.md), so the feed and apt agree
-VERSION=$(cat "$ROOT/VERSION")
+# The one release version (docs/versioning.md), so the feed and apt agree.
+# upgrade-from-source.sh passes its own (0.4.6+git…), and its own place for
+# the package, so a build from source never lands in the image's folder.
+VERSION=${FELLOWSHIP_VERSION:-$(cat "$ROOT/VERSION")}
+DEB_DIR=${FELLOWSHIP_DEB_DIR:-}
 
 if [ ! -f "$DESKTOP/Cargo.toml" ]; then
     echo "desktop/build.sh: no fellowship-desktop checkout at $DESKTOP" >&2
@@ -35,7 +38,7 @@ if ! command -v cargo >/dev/null 2>&1; then
     . "$HOME/.cargo/env"
 fi
 
-export CARGO_TARGET_DIR=/tmp/desktop-target
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/desktop-target}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -209,9 +212,14 @@ exit 0
 POSTINST
 chmod 755 "$STAGE/DEBIAN/postinst"
 
-mkdir -p "$ROOT/config/packages.chroot"
-rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb "$ROOT"/cache/desktop-package/fellowship-desktop_*.deb
-dpkg-deb --build --root-owner-group "$STAGE" \
-    "$ROOT/config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"
+if [ -n "$DEB_DIR" ]; then
+    mkdir -p "$DEB_DIR"
+    OUT="$DEB_DIR/fellowship-desktop_${VERSION}_amd64.deb"
+else
+    mkdir -p "$ROOT/config/packages.chroot"
+    rm -f "$ROOT"/config/packages.chroot/fellowship-desktop_*.deb "$ROOT"/cache/desktop-package/fellowship-desktop_*.deb
+    OUT="$ROOT/config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"
+fi
+dpkg-deb --build --root-owner-group "$STAGE" "$OUT"
 
-echo "desktop/build.sh: config/packages.chroot/fellowship-desktop_${VERSION}_amd64.deb"
+echo "desktop/build.sh: $OUT"
