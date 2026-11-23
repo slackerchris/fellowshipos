@@ -122,6 +122,8 @@ libnss-mdns
 foot
 mousepad
 ristretto
+# Ristretto asks for a thumbnailer and complains without one
+tumbler
 atril
 engrampa
 qalculate-gtk
