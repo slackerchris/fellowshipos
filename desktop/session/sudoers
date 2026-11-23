@@ -1,4 +1,0 @@
-# The desktop session needs the screen to be on its own console: DRM only
-# works for the VT that is active, and the console the image autologins on is
-# not always the one the kernel is showing. Switching VT is all this grants.
-%sudo ALL=(root) NOPASSWD: /usr/bin/chvt

@@ -1,5 +1,0 @@
-# FellowshipOS Desktop updates: the fellowship-desktop package, signed with
-# the FellowshipOS Updates key (9A9055842DE0422D0D9B7AFD73D46C9F680BB715) and
-# trusted for this source only. Written once by fellowship-apt-source.service
-# on an installed system's first boot; delete this file to stop the updates.
-deb [signed-by=/usr/share/keyrings/fellowshipos.asc] https://slackerchris.github.io/fellowshipos-apt trixie main
