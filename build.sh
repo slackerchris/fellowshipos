@@ -9,10 +9,10 @@ WORKDIR="/build"
 # The one release version, prerelease 0.major.minor; see docs/versioning.md
 VERSION="$(cat VERSION)"
 TEMPLATE_NAME="fellowshipos-trixie-amd64-${VERSION}"
-# The images are the same live system, built per edition. FELLOWSHIP_EDITIONS
-# picks which to build; the LXC template comes from the multi-purpose one. Add
-# `desktop` for the image that boots into the Fellowship desktop. FellowshipNAS
-# is its own project now, in the FellowshipOS-NAS repository.
+# FELLOWSHIP_EDITIONS picks which images to build; multi is the only one, and
+# the LXC template comes from it. FellowshipNAS and FellowshipOS Desktop are
+# their own projects, built from the FellowshipOS-NAS and fellowship-desktop
+# repositories.
 EDITIONS="${FELLOWSHIP_EDITIONS:-multi}"
 TEMPLATE_FROM="multi"
 
@@ -39,9 +39,7 @@ run() {
 > "$LOG"
 rm -f "${TEMPLATE_NAME}_lxc.tar.gz"
 
-# The packages are the same for every image, so they are built once. The
-# desktop package needs the fellowship-desktop checkout beside this
-# repository; building it costs a Rust build, so it runs only when asked for.
+# The packages are the same for every image, so they are built once.
 PACKAGES='
         set -e
         apt-get update -qq
@@ -49,14 +47,6 @@ PACKAGES='
         installer/build.sh
         installer/cog/build.sh
     '
-DESKTOP_MOUNT=()
-case " $EDITIONS " in
-    *" desktop "*)
-        PACKAGES="$PACKAGES
-        desktop/build.sh"
-        DESKTOP_MOUNT=(-v "$(cd .. && pwd)/fellowship-desktop:/fellowship-desktop:ro")
-        ;;
-esac
 
 if [ "${FELLOWSHIP_SKIP_PACKAGES:-}" = 1 ]; then
     echo "[fellowshipos] Building the packages... skipped (FELLOWSHIP_SKIP_PACKAGES)"
@@ -64,7 +54,6 @@ else
     run "Building the packages" docker run --rm \
         --privileged \
         -v "$(pwd):${WORKDIR}" \
-        "${DESKTOP_MOUNT[@]}" \
         -w "${WORKDIR}" \
         "$IMAGE" \
         bash -c "$PACKAGES"
@@ -82,27 +71,9 @@ for edition in $EDITIONS; do
             apt-get update -qq
             apt-get install -y -qq live-build debhelper nodejs npm golang-go libpam0g-dev libcrypt-dev
 
-            # live-build installs every .deb in packages.chroot, so the
-            # desktop's package is there for the desktop image and kept aside
-            # for the images that are not it. Aside means cache/: lb clean
-            # empties .build/, which lost the package between images.
-            mkdir -p cache/desktop-package
-            if [ \"$edition\" = desktop ]; then
-                # Only restore a parked package if packages.chroot doesn't already
-                # hold a freshly built one (otherwise a stale parked .deb from a
-                # previous multi build would overwrite what desktop/build.sh just made).
-                if ! ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1; then
-                    ls cache/desktop-package/fellowship-desktop_*.deb >/dev/null 2>&1 &&
-                        mv cache/desktop-package/fellowship-desktop_*.deb config/packages.chroot/
-                else
-                    rm -f cache/desktop-package/fellowship-desktop_*.deb
-                fi
-                ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 ||
-                    { echo 'the desktop package is missing: run desktop/build.sh' >&2; exit 1; }
-            else
-                ls config/packages.chroot/fellowship-desktop_*.deb >/dev/null 2>&1 &&
-                    mv config/packages.chroot/fellowship-desktop_*.deb cache/desktop-package/
-            fi
+            # A desktop package left by a build from before FellowshipOS
+            # Desktop moved out would be installed by live-build
+            rm -rf config/packages.chroot/fellowship-desktop_*.deb cache/desktop-package
 
             lb clean
             lb config
