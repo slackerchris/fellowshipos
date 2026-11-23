@@ -1,4 +1,9 @@
+# GRUB 2.12 scales the desktop image every time it draws the menu, even when
+# there is none, and then stops at the next submenu or boot with "null src
+# bitmap in grub_video_bitmap_create_scaled". A plain image of the desktop
+# colour avoids that.
 desktop-color: "#1b2923"
+desktop-image: "background.png"
 title-text: ""
 message-font: "Unifont Regular 16"
 terminal-font: "Unifont Regular 16"

@@ -14,6 +14,14 @@ bump.
 
 ## [Unreleased]
 
+### Fixed
+
+- The boot menu no longer stops with "error: null src bitmap in
+  grub_video_bitmap_create_scaled. Press any key to continue..." when you
+  start the installer or open a submenu. GRUB 2.12 scales the theme's
+  desktop image even when there is none; the theme now has a plain one in
+  the menu's forest colour (`live-theme/background.png`).
+
 ### Removed
 
 - FellowshipOS Desktop is its own project. Its image build moved to the
