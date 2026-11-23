@@ -114,7 +114,7 @@ var Steps = []string{
 
 // LivePackages leave the installed system: the live boot scripts and this installer
 var LivePackages = []string{"live-boot", "live-boot-initramfs-tools", "live-config", "live-config-systemd",
-	"user-setup", "fellowship-installer", "cage", "cog"}
+	"user-setup", "fellowship-installer", "cage", "sway", "cog"}
 
 // Keep these when the live packages and their dependencies go
 var bootPackages = []string{"lvm2", "grub-efi-amd64", "grub-efi-amd64-signed", "shim-signed", "efibootmgr",

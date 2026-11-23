@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build cog 0.18.5 for trixie into the live image's own packages.
 #
-# The installer's screen is cage running cog. Trixie's cog 0.18.4 sends the
+# The installer's screen is sway (once cage) running cog. Trixie's cog 0.18.4 sends the
 # wrong button code with Wayland pointer events, so WebKit fires mousedown and
 # mouseup but never click: with a mouse nothing on the installer can be
 # pressed, while the keyboard still works. Upstream fixed it in 0.18.5

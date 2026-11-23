@@ -1,0 +1,24 @@
+# The installer's own screen (fellowship-installer-kiosk.service): the
+# install page full screen, and nothing else: no bar, no borders, and no key
+# bindings at all, so there is nothing to escape to.
+#
+# Sway rather than cage, which this used to be, because cage leaves touchpads
+# at libinput's default, and tapping is off by default: on a laptop a tap
+# selected nothing and pressed nothing, while Tab and a pressed-down click did
+# (DESK-001, Chris, 2026-11-23). These are the desktop's own touchpad
+# defaults (Settings → Mouse and touchpad).
+input type:touchpad {
+    tap enabled
+    drag enabled
+    natural_scroll enabled
+    dwt enabled
+}
+
+default_border none
+default_floating_border none
+focus_follows_mouse no
+for_window [app_id=".*"] fullscreen enable
+
+# When the browser stops, so does the screen, and systemd starts it again,
+# as it did with cage -s.
+exec sh -c '/usr/bin/cog http://127.0.0.1/; swaymsg exit'

@@ -7,7 +7,7 @@ Standards-Version: 4.7.0
 
 Package: fellowship-installer
 Architecture: any
-Depends: cage, cog, lvm2, gdisk, parted, dosfstools, e2fsprogs, squashfs-tools,
+Depends: sway, cog, lvm2, gdisk, parted, dosfstools, e2fsprogs, squashfs-tools,
  grub-efi-amd64, grub-efi-amd64-signed, shim-signed, efibootmgr, adduser,
  ${shlibs:Depends}, ${misc:Depends}
 Description: FellowshipOS graphical installer

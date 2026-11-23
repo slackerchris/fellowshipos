@@ -1,2 +1,3 @@
 debian/bin/fellowship-installer usr/lib/fellowship-installer
+debian/kiosk.sway usr/lib/fellowship-installer
 web/dist/* usr/share/fellowship-installer
