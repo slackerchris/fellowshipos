@@ -9,7 +9,22 @@ pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
 release-worthy image.
 
-Current: **0.4.3** — the desktop's first release candidate (Chris,
+Current: **0.4.6** (Chris, 2026-11-22) — the RC1 gap work from the first
+run on real hardware, the Dell XPS 13 7390. Chris chose the number for how
+far it moved, skipping 0.4.4 and 0.4.5. In `fellowship-desktop` (merge
+`9b6f40a`): Settings → Display (resolution, refresh rate, scale and
+brightness, applied when picked with a 15 s keep-or-revert) and windows drawn
+correctly at fractional scales; the login screen fading into the desktop
+with no black, and a wrong password going straight back to the box; new apps
+in the launcher without logging out; the connection's details on the
+network page; a Back button in Settings; battery and brightness in the top
+bar, the brightness keys, and battery health in Settings; Settings → Mouse
+and touchpad; touch drag for windows that draw their own title bar. In this
+repository: the 90 s re-login hang fixed, logs kept off the screen between
+login and desktop, and power-profiles-daemon in the Desktop image. Status of
+each item: `fellowship-desktop/docs/release-tracker.md`.
+
+Before it, **0.4.3** was the desktop's first release candidate (Chris,
 2026-11-22), the fixes found installing 0.4.2 in the VM: Wi-Fi's wrong-password
 message and a slow network's profile kept, only managed radios used, no
 bridge addresses offered for SSH. It is the first version published to the
