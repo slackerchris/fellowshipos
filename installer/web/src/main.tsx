@@ -1,9 +1,9 @@
 import { ComponentChildren, render } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import "./installer.css";
 import {
-    Disk, GiB, Hello, Layout, Machine, Progress, Settings, hello, install, layoutFor, machine, pair, progress, reboot,
-    recoveryKey, shortName, size,
+    Disk, GiB, Hello, Layout, Machine, Progress, Settings, hello, install, machine, pair, progress, reboot,
+    shortName, size,
 } from "./api";
 import { suggestUser } from "./user";
 
@@ -125,9 +125,7 @@ function ChooseDisk({ info, chosen, onChoose }: { info: Machine; chosen: string;
 function LayoutBar({ layout }: { layout: Layout }) {
     const parts = [
         { key: "system", label: "System", bytes: layout.system },
-        { key: "reserve", label: "Room to grow", bytes: layout.reserve },
         { key: "swap", label: "Swap", bytes: layout.swap },
-        { key: "data", label: "Data", bytes: layout.data },
     ].filter(part => part.bytes > 0);
     return (
         <div class="stack">
@@ -145,49 +143,12 @@ function LayoutBar({ layout }: { layout: Layout }) {
     );
 }
 
-function ChooseSpace({ info, disk, layout, onLayout }: { info: Machine; disk: Disk; layout: Layout; onLayout: (layout: Layout) => void }) {
-    // The multi-purpose image has no pool to prepare for, so it never splits
-    const split = !info.whole_disk && disk.size >= info.split_from;
-    const [system, setSystem] = useState(layout.system);
-    const [error, setError] = useState("");
-    const latest = useRef(0);
-    const maximum = Math.max(info.min_system, Math.floor((disk.size - 8 * GiB - layout.swap - GiB) / GiB) * GiB);
-
-    const change = async (value: number) => {
-        setSystem(value);
-        const round = ++latest.current;
-        try {
-            const next = await layoutFor(disk.size, value);
-            round === latest.current && onLayout(next);
-            setError("");
-        } catch (failure) {
-            setError((failure as Error).message);
-        }
-    };
-
+function ChooseSpace({ layout }: { layout: Layout }) {
     return (
         <div class="stack">
             <LayoutBar layout={layout} />
-            {split ? (
-                <>
-                    <Field label={`System: ${size(system)}`}
-                           hint={`FellowshipOS needs about ${size(info.installed)} now. The suggestion leaves room for updates, older kernels kept for safety, and logs.`}>
-                        <input type="range" min={info.min_system} max={maximum} step={GiB} value={system}
-                               onInput={event => change(Number(event.currentTarget.value))} />
-                    </Field>
-                    <p class="small muted">
-                        {layout.data
-                            ? `The ${size(layout.data)} data part stays empty. Turn it into storage from the desktop whenever you like, on its own or alongside other disks.`
-                            : "Nothing is left for data at this size: the rest is room for the system to grow."}
-                    </p>
-                    <p class="small muted">The system sits on LVM, so it can use its room to grow later from Settings.</p>
-                </>
-            ) : info.whole_disk ? (
-                <Notice>The system takes the whole disk. Keep shared files on other disks, set up later.</Notice>
-            ) : (
-                <Notice>This disk is small, so FellowshipOS uses all of it. Keep shared files on other disks, set up from the desktop.</Notice>
-            )}
-            {error && <Notice kind="error">{error}</Notice>}
+            <Notice>The system takes the whole disk. Keep shared files on other disks, set up later.</Notice>
+            <p class="small muted">The system sits on LVM, so it can grow onto another disk later.</p>
         </div>
     );
 }
@@ -215,7 +176,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
     return (
         <div class="stack">
             <div class="grid-2">
-                <Field label={info.edition === "nas" ? "Name of this NAS" : "Name of this computer"}
+                <Field label="Name of this computer"
                        hint="What other computers see on the network">
                     <input value={settings.hostname} onInput={event => set({ hostname: event.currentTarget.value.toLowerCase() })} />
                 </Field>
@@ -227,7 +188,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                 <Field label="Your name">
                     <input value={settings.full_name} autoComplete="name" onInput={event => setName(event.currentTarget.value)} />
                 </Field>
-                <Field label="User name" hint={info.separated ? "For the NAS desktop and shares" : info.edition === "nas"
+                <Field label="User name" hint={info.edition === "desktop"
                     ? "For logging in to the desktop and over SSH" : "For logging in here and over SSH"}>
                     <input value={settings.user} autoComplete="username" autoCapitalize="none" spellcheck={false}
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
@@ -254,78 +215,17 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
     );
 }
 
-function aboutReady(settings: Settings, again: string, separated: boolean, rootAgain: string) {
+function aboutReady(settings: Settings, again: string) {
     return HOST.test(settings.hostname) && USER.test(settings.user) && settings.password.length >= 8
-        && again === settings.password && !!settings.timezone
-        && (!separated || rootReady(settings, rootAgain));
+        && again === settings.password && !!settings.timezone;
 }
 
-function rootReady(settings: Settings, rootAgain: string) {
-    const root = settings.root_password || "";
-    return root.length >= 8 && root === rootAgain && root !== settings.password;
-}
-
-/** Root's own password, on the NAS image: the system administrator, apart from
-    the NAS admin, who has no shell. */
-function RootPassword({ settings, rootAgain, onChange, onRootAgain }: {
-    settings: Settings; rootAgain: string; onChange: (settings: Settings) => void; onRootAgain: (again: string) => void;
-}) {
-    const root = settings.root_password || "";
-    return (
-        <div class="stack">
-            <p class="small"><strong>Root</strong> looks after the system itself: updates of last resort, repairs, and
-                getting the NAS admin back in. It logs in only here, at this machine's screen. Give it its own
-                password, not the one above.</p>
-            <div class="grid-2">
-                <Field label="Root's password" hint="At least 8 characters">
-                    <input type="password" value={root} autoComplete="new-password"
-                           onInput={event => onChange({ ...settings, root_password: event.currentTarget.value })} />
-                </Field>
-                <Field label="Root's password again">
-                    <input type="password" value={rootAgain} autoComplete="new-password"
-                           onInput={event => onRootAgain(event.currentTarget.value)} />
-                </Field>
-            </div>
-            {root && root.length < 8 && <p class="small warning-text">At least 8 characters.</p>}
-            {root && root === settings.password && <p class="small warning-text">Root's password must be different from yours.</p>}
-            {rootAgain && rootAgain !== root && <p class="small">The passwords don't match.</p>}
-        </div>
-    );
-}
-
-/** The recovery key, shown once to be kept: it is the one way back in if both
-    root's password and the NAS admin's are lost. There is no save button: the
-    kiosk browser (cog) discards downloads without a trace, so on the machine's
-    own screen it never produced a file. */
-function RecoveryKey({ keyText }: { keyText: string }) {
-    return (
-        <div class="stack recovery-key">
-            <p class="small"><strong>Save this key before you install.</strong> It is shown only on this screen.</p>
-            <p class="mono recovery-key-text">{keyText || "…"}</p>
-            <ol class="small recovery-steps">
-                <li><strong>Keep a copy off this NAS.</strong> Write the key on paper, or copy it into a file on
-                    another computer. A copy saved on the NAS itself is lost with it.</li>
-                <li><strong>When you would need it:</strong> only if you forget both your password and root's. Then, at
-                    the boot menu, “FellowshipOS recovery” asks for it and lets you set new passwords.</li>
-                <li><strong>Otherwise you never type it.</strong> Starting up and signing in don't ask for it. If the
-                    key and both passwords are all lost, the NAS can only be reinstalled.</li>
-            </ol>
-        </div>
-    );
-}
-
-function Confirm({ disk, layout, settings, edition, separated, onInstall }: {
-    disk: Disk; layout: Layout; settings: Settings; edition?: string; separated: boolean;
+function Confirm({ disk, layout, settings, title, onInstall }: {
+    disk: Disk; layout: Layout; settings: Settings; title: string;
     onInstall: (typed: string) => Promise<void>;
 }) {
     const [error, setError] = useState("");
     const [busy, setBusy] = useState(false);
-    const [keyText, setKeyText] = useState("");
-    useEffect(() => {
-        if (separated) {
-            recoveryKey().then(found => setKeyText(found.key), failure => setError((failure as Error).message));
-        }
-    }, [separated]);
     return (
         <form class="stack" onSubmit={async event => {
             event.preventDefault();
@@ -342,21 +242,15 @@ function Confirm({ disk, layout, settings, edition, separated, onInstall }: {
         }}>
             <table>
                 <tbody>
-                    <tr><th>Image</th><td>{edition === "nas" ? "FellowshipOS NAS" : "FellowshipOS Multi-purpose"}</td></tr>
+                    <tr><th>Image</th><td>{title}</td></tr>
                     <tr><th>Disk</th><td>{size(disk.size)} {disk.model} <span class="mono small">{shortName(disk.path)}</span>
                         {disk.contents?.length ? <><br /><span class="small warning-text">Holds {disk.contents.join(", ")}. It is erased.</span></> : null}</td></tr>
-                    <tr><th>Layout</th><td>System {size(layout.system)}{layout.reserve ? `, room to grow ${size(layout.reserve)}` : ""}, swap {size(layout.swap)}
-                        {layout.data ? `, data ${size(layout.data)} left empty` : ""}</td></tr>
+                    <tr><th>Layout</th><td>System {size(layout.system)}, swap {size(layout.swap)}</td></tr>
                     <tr><th>Name</th><td>{settings.hostname}</td></tr>
-                    <tr><th>Account</th><td>{settings.user}{settings.full_name ? ` (${settings.full_name})` : ""}, {separated
-                        ? "NAS admin, for the desktop and shares" : "administrator"}</td></tr>
-                    {separated && <tr><th>Root</th><td>its own password, at this machine's screen</td></tr>}
+                    <tr><th>Account</th><td>{settings.user}{settings.full_name ? ` (${settings.full_name})` : ""}, administrator</td></tr>
                     <tr><th>Time zone</th><td>{settings.timezone}</td></tr>
                 </tbody>
             </table>
-            {edition === "nas" && <p class="muted small">Everything the NAS needs is on this disk once it's installed:
-                the first start needs no network and asks nothing.</p>}
-            {separated && <RecoveryKey keyText={keyText} />}
             {error && <Notice kind="error">{error}</Notice>}
             <div class="row"><button class="button button-danger" type="submit" disabled={busy}>
                 {busy ? "Starting…" : `Erase ${shortName(disk.path)} and install`}</button></div>
@@ -364,8 +258,8 @@ function Confirm({ disk, layout, settings, edition, separated, onInstall }: {
     );
 }
 
-function Installing({ state, edition, hostname, addresses, onRetry }: {
-    state: Progress; edition?: string; hostname: string; addresses?: string[]; onRetry: () => void;
+function Installing({ state, edition, onRetry }: {
+    state: Progress; edition?: string; onRetry: () => void;
 }) {
     const [restarting, setRestarting] = useState(false);
     const log = state.log || [];
@@ -387,11 +281,8 @@ function Installing({ state, edition, hostname, addresses, onRetry }: {
             )}
             {state.phase === "done" && (
                 <>
-                    <Notice kind="done">FellowshipOS is installed. Restart now; the USB stick or disc can come out once the screen goes dark. {edition === "nas"
-                        ? <>On the first start the NAS starts its services, with nothing to answer, in under a minute. Then the NAS desktop opens from a browser on another computer
-                            at <span class="mono">https://{hostname}</span>
-                            {addresses?.length ? <> or <span class="mono">https://{addresses[0]}</span></> : null}, and
-                            this machine's screen shows that address and how the NAS is doing.</>
+                    <Notice kind="done">FellowshipOS is installed. Restart now; the USB stick or disc can come out once the screen goes dark. {edition === "desktop"
+                        ? "After the first start, sign in with the account you just made."
                         : "After the first start, the setup on screen finishes the machine and asks what it will do."}</Notice>
                     <div class="row">
                         <button class="button button-primary" type="button" disabled={restarting}
@@ -421,10 +312,9 @@ function Installer({ greeting }: { greeting: Hello }) {
     const [step, setStep] = useState(0);
     const [disk, setDisk] = useState<Disk | null>(null);
     const [layout, setLayout] = useState<Layout | null>(null);
-    const [settings, setSettings] = useState<Settings>({ disk: "", system: 0, hostname: "fellowship", timezone: "UTC",
+    const [settings, setSettings] = useState<Settings>({ disk: "", hostname: "fellowship", timezone: "UTC",
                                                           user: "", full_name: "", password: "" });
     const [again, setAgain] = useState("");
-    const [rootAgain, setRootAgain] = useState("");
     const [state, setState] = useState<Progress | null>(null);
 
     const load = () => machine().then(found => {
@@ -464,9 +354,8 @@ function Installer({ greeting }: { greeting: Hello }) {
     }, [state?.phase]);
 
     if (state && state.phase !== "choose") {
-        return <Frame step={3} title={info?.title} subtitle={info?.subtitle}>
-            <Installing state={state} edition={info?.edition} hostname={state.hostname || settings.hostname}
-                        addresses={greeting.addresses} onRetry={() => { setState(null); load(); }} />
+        return <Frame step={3} title={info?.title}>
+            <Installing state={state} edition={info?.edition} onRetry={() => { setState(null); load(); }} />
         </Frame>;
     }
     if (error) {
@@ -476,20 +365,17 @@ function Installer({ greeting }: { greeting: Hello }) {
         return <Frame><p class="muted">Looking at this machine…</p></Frame>;
     }
 
-    const canInstall = !info.blocked && !!disk && !!layout && aboutReady(settings, again, !!info?.separated, rootAgain);
+    const canInstall = !!disk && !!layout && aboutReady(settings, again);
     // One way on from each step, named after where it goes. The rail above is the
     // rest of the navigation: any step, in any order, and back without a button.
-    const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again, !!info?.separated, rootAgain);
+    const onFrom = step === 0 ? !!disk && !!layout : step === 1 ? !!layout : aboutReady(settings, again);
     // A step reads as answered only once everything before it is too, so the rail
     // shows how far along the install is rather than which boxes happen to be set
-    const answers = [!!disk, !!layout, aboutReady(settings, again, !!info?.separated, rootAgain), canInstall];
+    const answers = [!!disk, !!layout, aboutReady(settings, again), canInstall];
     const answered = answers.map((_, index) => answers.slice(0, index + 1).every(Boolean));
     return (
         <Frame step={step} onStep={setStep} answered={answered}
-               title={info.title} subtitle={info.subtitle}>
-            {/* Said on every step, before anything is chosen, so nobody gets as far as
-                erasing a disk on a machine the image can't run on */}
-            {info.blocked && <Notice kind="error"><strong>This machine can't be installed on yet.</strong> {info.blocked}</Notice>}
+               title={info.title}>
             {step === 0 && greeting.local && (greeting.remote_urls?.length ? (
                 <p class="small muted">Installing from another computer? Open <span class="mono">{greeting.remote_urls[0]}</span> there,
                     check the certificate it shows, and enter the pairing code <strong class="mono">{greeting.code}</strong>.</p>
@@ -498,7 +384,7 @@ function Installer({ greeting }: { greeting: Hello }) {
                     this image's boot entry; the console then prints the address, the certificate's fingerprint and the pairing code.</p>
             ))}
             {step === 0 && <ChooseDisk info={info} chosen={disk?.path || ""} onChoose={chosen => { setDisk(chosen); setLayout(chosen.layout || null); }} />}
-            {step === 1 && disk && layout && <ChooseSpace info={info} disk={disk} layout={layout} onLayout={setLayout} />}
+            {step === 1 && disk && layout && <ChooseSpace layout={layout} />}
             {step === 1 && !(disk && layout) && (
                 <div class="stack">
                     <Notice kind="warning">There's no disk yet, so there's nothing to lay out.</Notice>
@@ -506,25 +392,20 @@ function Installer({ greeting }: { greeting: Hello }) {
                 </div>
             )}
             {step === 2 && (
-                <div class="stack">
-                    <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
-                    {info.separated && <RootPassword settings={settings} rootAgain={rootAgain} onChange={setSettings}
-                                                     onRootAgain={setRootAgain} />}
-                </div>
+                <AboutYou info={info} settings={settings} again={again} onChange={setSettings} onAgain={setAgain} />
             )}
             {step === 3 && canInstall && disk && layout && (
-                <Confirm disk={disk} layout={layout} settings={settings} edition={info.edition}
-                         separated={!!info.separated} onInstall={async (typed) => {
-                    await install({ ...settings, disk: disk.path, system: layout.system }, typed);
+                <Confirm disk={disk} layout={layout} settings={settings} title={info.title} onInstall={async (typed) => {
+                    await install({ ...settings, disk: disk.path }, typed);
                     setState({ phase: "installing", steps: [], step: -1, log: [] });
                 }} />
             )}
-            {step === 3 && !canInstall && !info.blocked && (
+            {step === 3 && !canInstall && (
                 <div class="stack">
                     <Notice kind="warning">Not everything is settled yet.</Notice>
                     <div class="row">
                         {!disk && <button class="button" type="button" onClick={() => setStep(0)}>Choose a disk</button>}
-                        {!aboutReady(settings, again, !!info?.separated, rootAgain) && <button class="button" type="button" onClick={() => setStep(2)}>Finish your account</button>}
+                        {!aboutReady(settings, again) && <button class="button" type="button" onClick={() => setStep(2)}>Finish your account</button>}
                     </div>
                 </div>
             )}

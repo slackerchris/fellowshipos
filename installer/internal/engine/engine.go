@@ -24,25 +24,18 @@ type Runner interface {
 
 type Settings struct {
 	Disk     string `json:"disk"`
-	System   int64  `json:"system"`
 	Hostname string `json:"hostname"`
 	Timezone string `json:"timezone"`
 	User     string `json:"user"`
 	FullName string `json:"full_name"`
 	Password string `json:"password"`
-	Role     string `json:"role"`
-	// On a separated NAS (the NAS image): root's own password, and the recovery
-	// key the installer made and showed, which the page never sends back
-	RootPassword string `json:"root_password"`
-	RecoveryKey  string `json:"-"`
 }
 
 var (
 	hostName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	zoneName = regexp.MustCompile(`^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$`)
-	reserved = map[string]bool{"root": true, "daemon": true, "bin": true, "sys": true, "nobody": true,
-		"nas-share": true, "file-share": true, "fnas-web": true}
+	reserved = map[string]bool{"root": true, "daemon": true, "bin": true, "sys": true, "nobody": true}
 )
 
 // Check refuses settings that would install something broken
@@ -66,20 +59,6 @@ func (s Settings) Check() error {
 	return nil
 }
 
-// CheckSeparated refuses a separated NAS's own settings: root's password, which
-// must be the NAS admin's no more than the other way round
-func (s Settings) CheckSeparated() error {
-	switch {
-	case len(s.RootPassword) < 8:
-		return errors.New("root's password needs at least 8 characters")
-	case strings.ContainsAny(s.RootPassword, "\n"):
-		return errors.New("root's password can't contain a line break")
-	case s.RootPassword == s.Password:
-		return errors.New("root's password must be different from your NAS password")
-	}
-	return nil
-}
-
 type Engine struct {
 	Run Runner
 	// Where the new system is assembled
@@ -90,9 +69,6 @@ type Engine struct {
 	Installed, Memory int64
 	// UEFI firmware; legacy BIOS machines need the regular installer for now
 	EFI bool
-	// The system takes the whole disk, with no data partition left for a pool:
-	// the multi-purpose image, which has no pool to prepare for
-	WholeDisk bool
 	// The wired network ports, each set up for DHCP as Debian's installer does
 	Network []string
 	// Reports each step's title as it starts, and lines worth showing
@@ -172,14 +148,6 @@ func (e *Engine) Install(s Settings) error {
 	if err := s.Check(); err != nil {
 		return err
 	}
-	if s.Role == "nas" {
-		if err := s.CheckSeparated(); err != nil {
-			return err
-		}
-		if s.RecoveryKey == "" {
-			return errors.New("no recovery key was made for this install")
-		}
-	}
 	if !e.EFI {
 		return errors.New("this machine started in legacy BIOS mode; the graphical installer needs UEFI. Switch the firmware to UEFI, or use the text installer from the boot menu")
 	}
@@ -187,14 +155,7 @@ func (e *Engine) Install(s Settings) error {
 	if err != nil {
 		return err
 	}
-	// The NAS image leaves the rest of the disk for a pool; the multi-purpose
-	// image has no pool to prepare for and gives the system all of it
-	var plan layout.Layout
-	if e.WholeDisk {
-		plan, err = layout.WholeDisk(size, e.Installed, e.Memory)
-	} else {
-		plan, err = layout.WithSystem(size, e.Installed, e.Memory, s.System)
-	}
+	plan, err := layout.WholeDisk(size, e.Installed, e.Memory)
 	if err != nil {
 		return err
 	}
@@ -282,10 +243,6 @@ func (e *Engine) partition(disk string, plan layout.Layout) error {
 		"-n", fmt.Sprintf("1:0:+%dK", plan.EFI/1024), "-t", "1:EF00", "-c", "1:EFI",
 		"-n", fmt.Sprintf("2:0:+%dK", plan.LVM()/1024), "-t", "2:8E00", "-c", "2:fellowship-system",
 	}
-	if plan.Data > 0 {
-		args = append(args, "-n", "3:0:0", "-t", "3:8300", "-c", "3:fellowship-data")
-		e.Log(fmt.Sprintf("Leaving %s for data, to be set up later from the desktop", layout.Size(plan.Data)))
-	}
 	if _, err := e.run("sgdisk", append(args, disk)...); err != nil {
 		return err
 	}
@@ -306,16 +263,12 @@ func (e *Engine) volumes(disk, group string, plan layout.Layout) error {
 		{"mkfs.ext4", "-F", "-L", "fellowship-root", "/dev/" + group + "/root"},
 		{"mkswap", "-L", "fellowship-swap", "/dev/" + group + "/swap"},
 	}
-	if plan.Data > 0 {
-		// Left blank for a pool, without anything an old disk left behind
-		commands = append(commands, []string{"wipefs", "-a", Partition(disk, 3)})
-	}
 	for _, command := range commands {
 		if _, err := e.run(command[0], command[1:]...); err != nil {
 			return err
 		}
 	}
-	e.Log(fmt.Sprintf("System %s, room to grow %s, swap %s", layout.Size(plan.System), layout.Size(plan.Reserve), layout.Size(plan.Swap)))
+	e.Log(fmt.Sprintf("System %s, swap %s", layout.Size(plan.System), layout.Size(plan.Swap)))
 	return nil
 }
 
@@ -437,13 +390,6 @@ func (e *Engine) configure(s Settings, group string) error {
 			return err
 		}
 	}
-	if s.Role != "" {
-		// First boot installs this role; the multi-purpose image chooses none,
-		// so its first boot offers every choice instead
-		if err := e.write("etc/fellowshipos/install-role", s.Role+"\n", 0o644); err != nil {
-			return err
-		}
-	}
 	os.Remove(filepath.Join(e.Target, "var/lib/dbus/machine-id"))
 	if err := e.chroot("", "ln", "-sf", "/usr/share/zoneinfo/"+s.Timezone, "/etc/localtime"); err != nil {
 		return err
@@ -474,32 +420,7 @@ func (e *Engine) installedOf(names []string) []string {
 // The groups Debian's installer gives its first user, where they exist
 var userGroups = []string{"sudo", "adm", "cdrom", "dip", "plugdev", "users", "audio", "video", "netdev"}
 
-// separatedAccount sets up a separated NAS (docs/fellowship-nas-account-separation.md):
-// root gets its own password; the NAS's people are kept in the NAS's store, and
-// the account asked for is its first NAS admin, with a password for the desktop
-// and shares and no Linux login; and the recovery key locks GRUB and opens
-// recovery. fnas does the NAS's part inside the new system, as it would there.
-func (e *Engine) separatedAccount(s Settings) error {
-	if err := e.chroot("root:"+s.RootPassword+"\n", "chpasswd"); err != nil {
-		return err
-	}
-	if err := e.chroot("", "fnas", "accounts", "init"); err != nil {
-		return err
-	}
-	args := []string{"fnas", "user", "create", s.User, "--admin", "--password-stdin"}
-	if s.FullName != "" {
-		args = append(args, "--full-name", s.FullName)
-	}
-	if err := e.chroot(s.Password+"\n", args...); err != nil {
-		return err
-	}
-	return e.chroot(s.RecoveryKey+"\n", "fellowship-recovery-key", "set")
-}
-
 func (e *Engine) account(s Settings) error {
-	if s.Role == "nas" {
-		return e.separatedAccount(s)
-	}
 	var groups []string
 	content, _ := os.ReadFile(filepath.Join(e.Target, "etc/group"))
 	for _, line := range strings.Split(string(content), "\n") {

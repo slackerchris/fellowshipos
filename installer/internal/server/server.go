@@ -39,23 +39,6 @@ type Machine struct {
 	// Starts an install; reports through the callbacks
 	Install func(engine.Settings, func(string), func(string)) error
 	Reboot  func() error
-	// Whether the firmware has Secure Boot on; nil reads as off
-	SecureBoot func() bool
-}
-
-// SecureBootOn is why the NAS image won't install with Secure Boot on: the
-// install would finish and the NAS role would then fail on first boot.
-const SecureBootOn = "Secure Boot is on, so this machine can't run the NAS. Its storage uses ZFS, " +
-	"whose kernel module FellowshipOS builds on the machine itself, and Secure Boot won't load it. " +
-	"Turn Secure Boot off in this machine's firmware settings, then start the installer again. " +
-	"In a Proxmox VM: press Esc at the boot logo, then Device Manager, Secure Boot Configuration."
-
-// blocked is why nothing can be installed on this machine, or "" when it can
-func (s *Server) blocked() string {
-	if s.edition.NeedsSecureBootOff() && s.machine.SecureBoot != nil && s.machine.SecureBoot() {
-		return SecureBootOn
-	}
-	return ""
 }
 
 type progress struct {
@@ -72,15 +55,11 @@ type progress struct {
 type Server struct {
 	machine Machine
 	static  fs.FS
-	// Which image this is: the role it records and the disk layout it offers
+	// Which image this is, for the page's title
 	edition edition.Edition
 	// Where another computer should open, when remote install was asked for;
 	// the page tells the person at the screen so they can pass it on
 	RemoteURLs []string
-
-	// The recovery key for a separated NAS, made once per run of the installer
-	// and shown only to the page that installs
-	recoveryKey string
 
 	mu       sync.Mutex
 	code     string
@@ -106,33 +85,8 @@ func randomToken() (string, error) {
 }
 
 func New(machine Machine, static fs.FS, which edition.Edition) *Server {
-	s := &Server{machine: machine, static: static, edition: which, code: randomCode(), paired: map[string]bool{},
+	return &Server{machine: machine, static: static, edition: which, code: randomCode(), paired: map[string]bool{},
 		state: progress{Phase: "choose", Steps: engine.Steps, Step: -1}}
-	if which.Separated() {
-		s.recoveryKey = NewRecoveryKey()
-	}
-	return s
-}
-
-// The recovery key's letters: 30 that can't be mistaken for each other when
-// written down (no I, L, O, U, 0 or 1), as fellowship-recovery-key reads them
-const recoveryAlphabet = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
-
-// NewRecoveryKey makes a key: eight groups of five, about 196 bits
-func NewRecoveryKey() string {
-	var groups []string
-	for range 8 {
-		group := make([]byte, 5)
-		for i := range group {
-			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(recoveryAlphabet))))
-			if err != nil {
-				panic(err)
-			}
-			group[i] = recoveryAlphabet[n.Int64()]
-		}
-		groups = append(groups, string(group))
-	}
-	return strings.Join(groups, "-")
 }
 
 // Code is the current pairing code, for the console
@@ -224,7 +178,7 @@ func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !s.allowed(r) {
-			fail(w, http.StatusUnauthorized, "Type the pairing code shown on the NAS's screen.")
+			fail(w, http.StatusUnauthorized, "Type the pairing code shown on this machine's screen.")
 			return
 		}
 		next(w, r)
@@ -236,8 +190,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/hello", s.hello)
 	mux.HandleFunc("POST /api/pair", s.pair)
 	mux.HandleFunc("GET /api/machine", s.guard(s.machineInfo))
-	mux.HandleFunc("GET /api/recovery-key", s.guard(s.recoveryKeyInfo))
-	mux.HandleFunc("POST /api/layout", s.guard(s.layout))
 	mux.HandleFunc("POST /api/install", s.guard(s.install))
 	mux.HandleFunc("GET /api/progress", s.guard(s.progress))
 	mux.HandleFunc("POST /api/reboot", s.guard(s.reboot))
@@ -293,7 +245,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 			s.code, s.attempts = randomCode(), 0
 			log.Printf("too many wrong pairing codes from %s; made a new one", r.RemoteAddr)
 		}
-		fail(w, http.StatusUnauthorized, "That code is wrong. Check the NAS's screen.")
+		fail(w, http.StatusUnauthorized, "That code is wrong. Check this machine's screen.")
 		return
 	}
 	token, err := randomToken()
@@ -317,17 +269,6 @@ type diskChoice struct {
 	Layout *layout.Layout `json:"layout,omitempty"`
 }
 
-// recoveryKeyInfo hands the recovery key to the page that installs, which shows
-// it once to be saved; only a separated NAS has one
-func (s *Server) recoveryKeyInfo(w http.ResponseWriter, r *http.Request) {
-	if s.recoveryKey == "" {
-		fail(w, http.StatusNotFound, "This image has no recovery key.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]string{"key": s.recoveryKey})
-}
-
 func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 	found, err := s.machine.Disks()
 	if err != nil {
@@ -338,7 +279,7 @@ func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 	for _, d := range found {
 		choice := diskChoice{Disk: d}
 		if d.Refused == "" {
-			if suggested, err := layout.Suggest(d.Size, s.machine.Installed, s.machine.Memory); err == nil {
+			if suggested, err := layout.WholeDisk(d.Size, s.machine.Installed, s.machine.Memory); err == nil {
 				choice.Layout = &suggested
 			} else {
 				choice.Refused = err.Error()
@@ -352,36 +293,9 @@ func (s *Server) machineInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"edition": s.edition.String(), "title": s.edition.Title(),
-		"subtitle": s.edition.Subtitle(), "whole_disk": s.edition.WholeDisk(),
 		"disks": choices, "timezones": zones, "installed": s.machine.Installed,
 		"memory": s.machine.Memory, "min_system": layout.MinSystem(s.machine.Installed),
-		"split_from": layout.SplitFrom, "blocked": s.blocked(), "separated": s.edition.Separated(),
 	})
-}
-
-func (s *Server) layout(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Size   int64 `json:"size"`
-		System int64 `json:"system"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	chosen, err := s.plan(body.Size, body.System)
-	if err != nil {
-		fail(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, chosen)
-}
-
-// plan lays the disk out the way this image wants: the whole disk for the
-// multi-purpose image, a system and a data partition for the NAS image.
-func (s *Server) plan(size, system int64) (layout.Layout, error) {
-	if s.edition.WholeDisk() {
-		return layout.WholeDisk(size, s.machine.Installed, s.machine.Memory)
-	}
-	return layout.WithSystem(size, s.machine.Installed, s.machine.Memory, system)
 }
 
 // ConfirmPhrase is what the person types to erase a disk: its short name
@@ -395,10 +309,6 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		Confirm string `json:"confirm"`
 	}
 	if !readJSON(w, r, &body) {
-		return
-	}
-	if reason := s.blocked(); reason != "" {
-		fail(w, http.StatusConflict, reason)
 		return
 	}
 	if err := body.Settings.Check(); err != nil {
@@ -422,17 +332,6 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 	if body.Confirm != ConfirmPhrase(body.Disk) {
 		fail(w, http.StatusUnprocessableEntity, fmt.Sprintf("Type %q to confirm.", ConfirmPhrase(body.Disk)))
 		return
-	}
-	body.Role = s.edition.Role()
-	if s.edition.Separated() {
-		if err := body.Settings.CheckSeparated(); err != nil {
-			fail(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-		// The key is shown once and saving it is the owner's act; typing back a
-		// fragment of a key still on the screen proved nothing, so the erase
-		// phrase above is the only confirmation the install asks for
-		body.RecoveryKey = s.recoveryKey
 	}
 
 	s.mu.Lock()

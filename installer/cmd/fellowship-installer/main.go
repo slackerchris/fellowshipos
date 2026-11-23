@@ -1,4 +1,4 @@
-// fellowship-installer runs in the live system when the boot menu's NAS
+// fellowship-installer runs in the live system when the boot menu's install
 // entry is chosen. It serves the install page to the machine's own screen on
 // loopback, and, only when asked for with -remote, to another computer over
 // HTTPS once the pairing code shown on that screen has been typed.
@@ -35,7 +35,7 @@ var (
 	squashfs = flag.String("squashfs", "/run/live/medium/live/filesystem.squashfs", "the live system's image")
 	rootfs   = flag.String("rootfs", "/run/live/rootfs/filesystem.squashfs", "where the live image is mounted")
 	target   = flag.String("target", "/target", "where the new system is assembled")
-	which    = flag.String("edition", "", "which image this is: nas or multi (default: from the boot menu)")
+	which    = flag.String("edition", "", "which image this is: multi or desktop (default: from the boot menu)")
 	demo     = flag.Bool("demo", false, "show sample disks and pretend to install, touching nothing")
 )
 
@@ -58,7 +58,7 @@ func kernelCmdline() string {
 	return string(content)
 }
 
-// The NAS role's packages and ZFS's build, added after the install
+// Room for what the first start's role installs on top of the copied system
 const roleAllowance = 2 * layout.GiB
 
 type runner struct{ logf func(string) }
@@ -169,7 +169,7 @@ func main() {
 		Addresses: addresses,
 		Install: func(settings engine.Settings, step, logf func(string)) error {
 			e := &engine.Engine{Run: runner{logf}, Target: *target, Squashfs: *squashfs, Installed: installed,
-				Memory: mem, EFI: efiErr == nil, WholeDisk: chosen.WholeDisk(),
+				Memory: mem, EFI: efiErr == nil,
 				Network: netif.Wired("/sys/class/net"), Step: step, Log: logf}
 			return e.Install(settings)
 		},
@@ -178,7 +178,6 @@ func main() {
 			syscall.Sync()
 			return exec.Command("systemctl", "reboot").Run()
 		},
-		SecureBoot: secureBoot,
 	}
 	installer := server.New(machine, os.DirFS(*static), chosen)
 	serve(installer, chosen)
@@ -241,15 +240,4 @@ func remoteURLs(address string) []string {
 		return []string{"https://" + address}
 	}
 	return found
-}
-
-// secureBootVar is the firmware's Secure Boot state: four bytes of attributes,
-// then one byte that is 1 when Secure Boot is on
-const secureBootVar = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
-
-// secureBoot reads it on every call, so the page always says what the firmware
-// says; a machine started without UEFI has none and reads as off
-func secureBoot() bool {
-	data, err := os.ReadFile(secureBootVar)
-	return err == nil && len(data) >= 5 && data[4] == 1
 }

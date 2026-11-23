@@ -13,9 +13,7 @@ export interface Layout {
     disk: number;
     efi: number;
     system: number;
-    reserve: number;
     swap: number;
-    data: number;
 }
 
 export interface Machine {
@@ -24,24 +22,15 @@ export interface Machine {
     installed: number;
     memory: number;
     min_system: number;
-    split_from: number;
     // Which image this is, and what it calls itself
-    edition: "nas" | "multi";
+    edition: "multi" | "desktop";
     title: string;
-    subtitle: string;
-    // True when the system takes the whole disk and no data part is offered
-    whole_disk: boolean;
-    // Why nothing can be installed on this machine, such as Secure Boot being on
-    blocked?: string;
-    // The NAS image keeps its people apart from the system: root gets its own
-    // password, and a recovery key is shown to be saved
-    separated?: boolean;
 }
 
 export interface Hello {
     allowed: boolean;
     local: boolean;
-    edition?: "nas" | "multi";
+    edition?: "multi" | "desktop";
     title?: string;
     code?: string;
     addresses?: string[];
@@ -59,13 +48,11 @@ export interface Progress {
 
 export interface Settings {
     disk: string;
-    system: number;
     hostname: string;
     timezone: string;
     user: string;
     full_name: string;
     password: string;
-    root_password?: string;
 }
 
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
@@ -90,10 +77,8 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 export const hello = () => call<Hello>("GET", "/api/hello");
 export const pair = (code: string) => call<Hello>("POST", "/api/pair", { code });
 export const machine = () => call<Machine>("GET", "/api/machine");
-export const layoutFor = (size: number, system: number) => call<Layout>("POST", "/api/layout", { size, system });
 export const install = (settings: Settings, confirm: string) =>
     call<unknown>("POST", "/api/install", { ...settings, confirm });
-export const recoveryKey = () => call<{ key: string }>("GET", "/api/recovery-key");
 export const progress = () => call<Progress>("GET", "/api/progress");
 export const reboot = () => call<unknown>("POST", "/api/reboot");
 

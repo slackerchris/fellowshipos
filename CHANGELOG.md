@@ -19,6 +19,13 @@ bump.
   `fellowship-nas-issue` screen and its timer, and the NAS path in the
   first-boot wizard. The wizard's roles are now 1–4 and 5 to skip. Nothing in
   this repository could build a NAS image any more, so none of it ran.
+- The installer's NAS edition: the system/data split and its slider, root's
+  own password and the NAS-admin account, the recovery key, the Secure Boot
+  refusal, and the `install-role` file. Every image now gives the system the
+  whole disk and makes an ordinary sudo account. A boot entry with no
+  `fellowship.installer=` value now means the multi-purpose image, not the
+  NAS, and the summary names the Desktop image correctly instead of calling
+  it Multi-purpose.
 
 ### Changed
 

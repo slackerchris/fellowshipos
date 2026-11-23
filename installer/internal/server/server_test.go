@@ -20,7 +20,7 @@ type fakeMachine struct {
 }
 
 func setup() (*Server, *fakeMachine) {
-	return setupEdition(edition.NAS)
+	return setupEdition(edition.Multi)
 }
 
 func setupEdition(which edition.Edition) (*Server, *fakeMachine) {
@@ -42,9 +42,6 @@ func setupEdition(which edition.Edition) (*Server, *fakeMachine) {
 		},
 		Reboot: func() error { return nil },
 	}, fstest.MapFS{"index.html": {Data: []byte("installer")}}, which)
-	if s.recoveryKey != "" {
-		s.recoveryKey = testKey
-	}
 	return s, f
 }
 
@@ -58,9 +55,9 @@ type req struct {
 }
 
 func send(s *Server, r req) *httptest.ResponseRecorder {
-	target := "http://nas.local"
+	target := "http://fellowship.local"
 	if r.secure {
-		target = "https://nas.local"
+		target = "https://fellowship.local"
 	}
 	request := httptest.NewRequest(r.method, target+r.path, strings.NewReader(r.body))
 	request.RemoteAddr = r.remote
@@ -173,13 +170,7 @@ func TestOtherSitesAreRefused(t *testing.T) {
 	}
 }
 
-// A separated NAS also needs root's own password; the multi-purpose image
-// ignores it. The recovery key is shown once and never typed back.
-const good = `"hostname":"vault","timezone":"UTC","user":"chris","full_name":"Chris","password":"correct horse","system":34359738368,` +
-	`"root_password":"root's own one"`
-
-// testKey stands in for the key the server makes in tests
-const testKey = "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH"
+const good = `"hostname":"vault","timezone":"UTC","user":"chris","full_name":"Chris","password":"correct horse"`
 
 func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 	s, f := setup()
@@ -201,7 +192,7 @@ func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 	}
 	select {
 	case settings := <-f.installed:
-		if settings.Disk != "/dev/sda" || settings.Role != "nas" {
+		if settings.Disk != "/dev/sda" {
 			t.Fatalf("installed %+v", settings)
 		}
 	case <-time.After(time.Second):
@@ -221,134 +212,34 @@ func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 }
 
 func TestThePageKnowsWhichImageItIs(t *testing.T) {
-	for _, c := range []struct {
-		which edition.Edition
-		title string
-		whole bool
-	}{
-		{edition.NAS, "FellowshipOS NAS", false},
-		{edition.Multi, "FellowshipOS Multi-purpose", true},
+	for which, title := range map[edition.Edition]string{
+		edition.Multi:   "FellowshipOS Multi-purpose",
+		edition.Desktop: "FellowshipOS Desktop",
 	} {
-		s, _ := setupEdition(c.which)
+		s, _ := setupEdition(which)
 		var info map[string]any
 		json.Unmarshal(send(s, req{method: "GET", path: "/api/machine", remote: screen}).Body.Bytes(), &info)
-		if info["edition"] != c.which.String() || info["title"] != c.title || info["whole_disk"] != c.whole {
-			t.Errorf("%s told the page %v", c.which, info)
+		if info["edition"] != which.String() || info["title"] != title {
+			t.Errorf("%s told the page %v", which, info)
 		}
 	}
 }
 
-func TestTheMultiPurposeImageGivesTheSystemTheWholeDisk(t *testing.T) {
-	s, _ := setupEdition(edition.Multi)
-	response := send(s, req{method: "POST", path: "/api/layout", remote: screen,
-		body: `{"size":536870912000,"system":107374182400}`})
-	var chosen layout.Layout
-	json.Unmarshal(response.Body.Bytes(), &chosen)
-	// On a 500 GB disk the NAS image keeps about 100 GB for the system and the
-	// rest for a pool; this image keeps no pool and gives the system everything
-	if chosen.Data != 0 || chosen.System <= 100*layout.GiB {
-		t.Fatalf("the multi-purpose layout was %+v", chosen)
-	}
-}
-
-func TestTheMultiPurposeImageRecordsNoRole(t *testing.T) {
-	s, f := setupEdition(edition.Multi)
-	response := send(s, req{method: "POST", path: "/api/install", remote: screen,
-		body: `{"disk":"/dev/sda",` + good + `,"confirm":"erase sda"}`})
-	if response.Code != 202 {
-		t.Fatalf("install: %d %s", response.Code, response.Body)
-	}
-	select {
-	case settings := <-f.installed:
-		// Nothing is chosen here: first boot offers the machine's choices
-		if settings.Role != "" {
-			t.Fatalf("the multi-purpose image recorded the role %q", settings.Role)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the install never started")
-	}
-}
-
-func TestLayoutFollowsTheSlider(t *testing.T) {
+// Each usable disk comes with its layout: the system takes all of it
+func TestEachDiskIsOfferedWhole(t *testing.T) {
 	s, _ := setup()
-	var chosen layout.Layout
-	response := send(s, req{method: "POST", path: "/api/layout", remote: screen, body: `{"size":536870912000,"system":107374182400}`})
-	json.Unmarshal(response.Body.Bytes(), &chosen)
-	if chosen.System != 100*layout.GiB || chosen.Data == 0 {
-		t.Fatalf("%d %+v", response.Code, chosen)
-	}
-}
-
-func TestTheNASWontInstallWithSecureBootOn(t *testing.T) {
-	for _, c := range []struct {
-		which   edition.Edition
-		on      bool
-		blocked bool
-	}{
-		{edition.NAS, true, true},
-		{edition.NAS, false, false},
-		// Only the NAS needs the ZFS module
-		{edition.Multi, true, false},
-	} {
-		s, _ := setupEdition(c.which)
-		s.machine.SecureBoot = func() bool { return c.on }
-		var info struct{ Blocked string }
-		json.Unmarshal(send(s, req{method: "GET", path: "/api/machine", remote: screen}).Body.Bytes(), &info)
-		if (info.Blocked != "") != c.blocked {
-			t.Errorf("%s, Secure Boot %v: blocked %q", c.which, c.on, info.Blocked)
-		}
-		response := send(s, req{method: "POST", path: "/api/install", remote: screen,
-			body: `{"disk":"/dev/sda",` + good + `,"confirm":"erase sda"}`})
-		if c.blocked && (response.Code != 409 || !strings.Contains(response.Body.String(), "Secure Boot")) {
-			t.Errorf("%s: install answered %d %s", c.which, response.Code, response.Body)
-		}
-		if !c.blocked && response.Code != 202 {
-			t.Errorf("%s: install answered %d %s", c.which, response.Code, response.Body)
+	var info struct {
+		Disks []struct {
+			Path   string
+			Layout *layout.Layout
 		}
 	}
-}
-
-func TestTheRecoveryKeyIsShownOnceAndInstallNeedsNoTypeBack(t *testing.T) {
-	s, f := setup()
-	got := send(s, req{method: "GET", path: "/api/recovery-key", remote: screen})
-	if got.Code != 200 || !strings.Contains(got.Body.String(), testKey) || got.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("key: %d %s", got.Code, got.Body)
+	json.Unmarshal(send(s, req{method: "GET", path: "/api/machine", remote: screen}).Body.Bytes(), &info)
+	want, _ := layout.WholeDisk(500*layout.GiB, 3*layout.GiB, 8*layout.GiB)
+	if len(info.Disks) != 2 || info.Disks[0].Layout == nil || *info.Disks[0].Layout != want {
+		t.Fatalf("disks %+v", info.Disks)
 	}
-	// Another computer that hasn't paired doesn't get it
-	if code := send(s, req{method: "GET", path: "/api/recovery-key", remote: "192.168.1.30:5000", secure: true}).Code; code == 200 {
-		t.Fatal("an unpaired browser got the recovery key")
-	}
-	for _, c := range []struct{ body, want string }{
-		{strings.Replace(good, `"root_password":"root's own one"`, `"root_password":"correct horse"`, 1), "different"},
-	} {
-		response := send(s, req{method: "POST", path: "/api/install", remote: screen,
-			body: `{"disk":"/dev/sda",` + c.body + `,"confirm":"erase sda"}`})
-		if response.Code != 422 || !strings.Contains(response.Body.String(), c.want) {
-			t.Errorf("%s: %d %s", c.want, response.Code, response.Body)
-		}
-	}
-	response := send(s, req{method: "POST", path: "/api/install", remote: screen,
-		body: `{"disk":"/dev/sda",` + good + `,"confirm":"erase sda"}`})
-	if response.Code != 202 {
-		t.Fatalf("install: %d %s", response.Code, response.Body)
-	}
-	select {
-	case settings := <-f.installed:
-		// The page never sends the key; the server puts in the one it made
-		if settings.RecoveryKey != testKey || settings.RootPassword != "root's own one" {
-			t.Fatalf("installed %+v", settings)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("the install never started")
-	}
-}
-
-func TestEachRunMakesItsOwnKey(t *testing.T) {
-	a, b := NewRecoveryKey(), NewRecoveryKey()
-	if a == b || len(a) != 47 || strings.ContainsAny(a, "ILOU01") {
-		t.Fatalf("keys %q %q", a, b)
-	}
-	if strings.ToUpper(a) != a || strings.Count(a, "-") != 7 {
-		t.Fatalf("key shape %q", a)
+	if info.Disks[1].Layout != nil {
+		t.Errorf("a refused disk got a layout: %+v", info.Disks[1].Layout)
 	}
 }

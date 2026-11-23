@@ -81,9 +81,7 @@ body { overflow: auto; }
 .layout-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; }
 .layout-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .layout-system { background: var(--gold); }
-.layout-reserve { background: color-mix(in srgb, var(--gold) 40%, var(--surface-sunk)); }
 .layout-swap { background: var(--muted); }
-.layout-data { background: var(--good); }
 
 input[type="range"] { padding: 0; min-height: 28px; background: none; border: 0; accent-color: var(--accent); }
 
@@ -143,8 +141,3 @@ th { width: 120px; }
 @media (max-width: 600px) {
     .installer-card { padding: 18px; }
 }
-
-/* Shown once, to be written down: large, spaced and easy to copy by hand */
-.recovery-key { border: 1px solid var(--gold); border-radius: 9px; padding: 14px; background: var(--surface-sunk); }
-.recovery-key-text { font-size: 1.35rem; letter-spacing: 0.08em; word-spacing: 0.2em; user-select: all; }
-.recovery-steps { margin: 0; padding-left: 18px; display: grid; gap: 6px; }

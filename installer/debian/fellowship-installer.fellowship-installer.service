@@ -2,7 +2,7 @@
 Description=FellowshipOS installer
 # Only when one of the boot menu's graphical install entries was chosen. A bare
 # word matches the key of any assignment, so this starts for
-# fellowship.installer=nas and fellowship.installer=multi alike; the installer
+# fellowship.installer=multi and fellowship.installer=desktop alike; the installer
 # itself reads the value to know which image it is.
 ConditionKernelCommandLine=fellowship.installer
 After=local-fs.target
