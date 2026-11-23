@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to FellowshipOS and its FellowshipNAS role.
+All notable changes to FellowshipOS Multi-purpose, and, until they became
+their own projects, FellowshipNAS (2026-11-20) and FellowshipOS Desktop
+(2026-11-23).
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
 version numbers in a release heading match the `debian/changelog` files under
@@ -13,6 +15,19 @@ bump.
 ## [Unreleased]
 
 ### Removed
+
+- FellowshipOS Desktop is its own project. Its image build moved to the
+  fellowship-desktop repository (`image/` there): `desktop/`,
+  `publish-apt.sh`, the `desktop` edition in `auto/config` and `build.sh`, the
+  `0760-desktop-defaults` hook, the update feed's design, the 0.4.2 and 0.4.3
+  release records and the November 14 image handoff. It carries its own copy
+  of the installer, the live-build profile, the themes and `VERSION`, and
+  builds without this checkout. Here the installer knows only the
+  Multi-purpose image, the first-boot wizard is always enabled, and the live
+  image always drops cage. A checkout that built the Desktop image before has
+  its leftover package list, Chromium flags and package removed by the build.
+  The Desktop entries below are kept as the record of what changed while it
+  was built here.
 
 - The NAS pieces the shared live-build profile still carried after
   FellowshipNAS moved out: the NAS role hook, the `nas-node` flavor, the

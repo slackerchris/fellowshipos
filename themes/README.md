@@ -1,16 +1,12 @@
 # FellowshipOS themes
 
-One file per theme. Every part of FellowshipOS that draws in colour reads
-these files: the graphical installer (Fellowship only, through
-`installer/web/themes.mjs` at build time) and the Rust
-desktop for the desktop role (`fellowship-theme` in the fellowship-desktop
-repository, at run time). Installed systems get them in
-`/usr/share/fellowship/themes`.
+One file per theme. Here they colour the graphical installer (Fellowship
+only, through `installer/web/themes.mjs` at build time), and the boot menu
+uses `branding/`. FellowshipOS Desktop (the fellowship-desktop repository)
+and FellowshipNAS keep their own copies, read with the same rules; a change
+wanted in all of them is made in each.
 
-Fellowship (`fellowship.toml`) is the default and must exist. The Rust desktop
-also carries a copy of it, built in, for when this folder can't be read; its
-tests fail when the copy differs, so a change to `fellowship.toml` is copied
-to fellowship-desktop's `assets/themes/fellowship.toml` too.
+Fellowship (`fellowship.toml`) is the default and must exist.
 
 ## A theme file
 

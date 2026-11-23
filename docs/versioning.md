@@ -1,9 +1,12 @@
 # Versioning
 
 One file, `VERSION` at the repository root, holds the release version of the
-Multi-purpose and Desktop images, the LXC template and the installer package.
+Multi-purpose image, the LXC template and the installer package.
 FellowshipNAS keeps its own `VERSION` in the FellowshipOS-NAS repository since
-it became its own project on 2026-11-20; both stood at 0.3.0 then. It is a
+it became its own project on 2026-11-20; both stood at 0.3.0 then. FellowshipOS
+Desktop keeps its own in the fellowship-desktop repository since it left on
+2026-11-23, at 0.4.6 like this one; the history below up to then is shared,
+and the numbers move separately from here. It is a
 **prerelease** scheme, `0.major.minor` (Chris, 2026-11-17): while FellowshipOS is
 pre-release the major stays 0; the middle number bumps per release or tour
 batch, the last number for fixes within one. `1.0.0` is reserved for the first
@@ -42,7 +45,7 @@ be said so in its release notes: the lock screen, idle
 dimming, suspend and lid close, more than one monitor and HiDPI, X11 apps,
 battery and brightness, and any run on real hardware. Updates to the
 desktop itself come from a signed apt repository on GitHub Pages
-([desktop-update-feed.md](desktop-update-feed.md)).
+(`docs/desktop-update-feed.md` in fellowship-desktop).
 
 Before it, **0.3.0** was the desktop tour batch (Chris, 2026-11-20): Strider
 (Fellowship Files) in the desktop image beside Nemo, with its GVfs backends,
@@ -79,11 +82,11 @@ installer recovery-key gate removal).
 
 ## Where it flows
 
-- `build.sh` reads `VERSION` and names the ISOs
-  `fellowshipos-<edition>-amd64-<version>.hybrid.iso` and the LXC template
+- `build.sh` reads `VERSION` and names the ISO
+  `fellowshipos-multi-amd64-<version>.hybrid.iso` and the LXC template
   `fellowshipos-trixie-amd64-<version>_lxc.tar.gz`.
-- Each build keeps one ISO per edition in the repository folder: it deletes
-  that edition's older ISOs (renamed test builds too) and hands the new one to
+- Each build keeps one ISO in the repository folder: it deletes the older
+  ones (renamed test builds too) and hands the new one to
   the user who ran the build, not root. Copy an ISO to `../fellowship/build/`
   to keep it; `FELLOWSHIP_KEEP_OLD_ISOS=1` keeps them all.
 - `installer/build.sh` stamps the **temporary build copy's** `debian/changelog`

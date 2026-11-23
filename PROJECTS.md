@@ -1,62 +1,53 @@
 # The products, and where they live
 
-FellowshipOS is one Debian live-build tree with two editions, plus a separate
-repository for the desktop environment. FellowshipNAS, once the third edition,
-is its own project since 2026-11-20, in the FellowshipOS-NAS repository
-(`~/Git/FellowshipOS-NAS`), with its own installer copy, live-build profile,
-themes and version. Neither repository's build may need the other. This file is the map: which product a
-folder belongs to, which branch ships it, and how to keep a push to one product.
+FellowshipOS is three products in three repositories. This one builds
+**FellowshipOS Multi-purpose**. FellowshipNAS left on 2026-11-20 for the
+FellowshipOS-NAS repository (`~/Git/FellowshipOS-NAS`), and FellowshipOS
+Desktop on 2026-11-23 for the fellowship-desktop repository
+(`~/Git/fellowship-desktop`, its image build in `image/`). Each has its own
+installer copy, live-build profile, themes and version, and neither
+repository's build may need another's checkout. This file is the map.
 
-| Product | What it is | Code | Edition |
-| --- | --- | --- | --- |
-| **FellowshipOS Multi-purpose** | Task-specific Debian for Proxmox LXC and general machines | `config/`, `proxmox/`, `installer/` | `multi` |
-| **FellowshipNAS** | NAS appliance with the browser desktop | the FellowshipOS-NAS repository | — |
-| **FellowshipOS Desktop** | Own distro with the Fellowship desktop | `desktop/` (integration) and the [fellowship-desktop](../fellowship-desktop) checkout (the desktop itself) | `desktop` |
-
-Multi-purpose and Desktop are editions of one build, not separate codebases. `auto/config`
-sets the ISO name, boot entry and installer role from `FELLOWSHIP_EDITION`, and
-all editions share `config/`, `installer/` and `themes/`.
+| Product | What it is | Repository |
+| --- | --- | --- |
+| **FellowshipOS Multi-purpose** | Task-specific Debian for Proxmox LXC and general machines | this one: `config/`, `proxmox/`, `installer/` |
+| **FellowshipNAS** | NAS appliance with the browser desktop | FellowshipOS-NAS |
+| **FellowshipOS Desktop** | Own distro with the Fellowship desktop | fellowship-desktop (the Rust desktop and `image/`) |
 
 ## What belongs where
 
-| Path | Product | Notes |
-| --- | --- | --- |
-| `auto/config`, `build.sh` | all | Edition switch and build entry point |
-| `config/` | all | Live-build profile, package lists, first-boot wizard, role scripts |
-| `installer/` | all | Graphical installer; the desktop edition preselects its role |
-| `proxmox/` | Multi-purpose | LXC templates and `create-ct.sh` |
-| `desktop/` | Desktop | Session starter, package list, Chromium flags, seat tests |
-| `publish-apt.sh`, `desktop/apt/` | Desktop | Signed update feed at `slackerchris/fellowshipos-apt` ([design](docs/desktop-update-feed.md)) |
-| `themes/` | Multi-purpose + Desktop | Themes and wallpapers; FellowshipNAS keeps its own copy |
-| `docs/` | all | Indexed in [docs/README.md](docs/README.md) |
-| `../fellowship-desktop/` | Desktop | The Rust compositor, shell and apps, in its own repository |
+| Path | Notes |
+| --- | --- |
+| `auto/config`, `build.sh` | Build entry point; `FELLOWSHIP_EDITION` is `multi` |
+| `config/` | Live-build profile, package lists, first-boot wizard, role scripts |
+| `installer/` | Graphical installer, Multi-purpose edition only |
+| `proxmox/` | LXC templates and `create-ct.sh` |
+| `themes/` | Themes and wallpapers for the installer page and boot menu; the other products keep their own copies |
+| `docs/` | Indexed in [docs/README.md](docs/README.md) |
 
-Build output does not belong in either checkout. ISOs go to
+Build output does not belong in the checkout. ISOs go to
 `../fellowship/build/`; `chroot/`, `cache/`, `binary/`, `config/packages.chroot/`
 and the generated `config/binary`–`config/source` files are recreated by the
 next build.
 
-## Building one product
+## Building
 
 ```bash
-FELLOWSHIP_EDITIONS=multi   ./build.sh   # Multi-purpose ISO and LXC template
-FELLOWSHIP_EDITIONS=desktop ./build.sh   # Desktop ISO; needs ../fellowship-desktop
+./build.sh   # Multi-purpose ISO and LXC template
 ```
 
-`./build.sh` with no variable builds `multi`. FellowshipNAS is built with
-`./build.sh` in the FellowshipOS-NAS checkout.
+FellowshipNAS is built with `./build.sh` in the FellowshipOS-NAS checkout,
+FellowshipOS Desktop with `image/build.sh` in the fellowship-desktop checkout.
 
 ## Branch and push rules
 
 - **One long-lived branch per repository.** `fellowshipos` ships from
   `nas-edition`, which is the GitHub default since 2026-11-15. `master` is an
   ancestor and is no longer the default. `fellowship-desktop` ships from `main`.
-- **Short-lived branches only.** Name them for the product
-  (`installer/...`, `desktop/...`), merge them, delete them. The two desktop
-  branches `notifications-design` and `shared-themes` were merged and removed on
-  2026-11-15.
-- **One commit, one product.** Prefix the subject with the area
-  (`installer:`, `desktop:`, `themes:`, `docs:`). Stage by path, never with
+- **Short-lived branches only.** Name them for the area
+  (`installer/...`, `proxmox/...`), merge them, delete them.
+- **One commit, one area.** Prefix the subject with the area
+  (`installer:`, `build:`, `proxmox:`, `docs:`). Stage by path, never with
   `git add -A` while another session's changes are in the tree.
 - **`nas-edition` is shared with concurrent sessions.** Before pushing, list
   what a push would publish and separate your commits from anyone else's:
@@ -74,24 +65,19 @@ FELLOWSHIP_EDITIONS=desktop ./build.sh   # Desktop ISO; needs ../fellowship-desk
   A push of a specific SHA is an ordinary fast-forward and leaves later commits
   local.
 
-## The contract between the two repositories
+## Between the repositories
 
-- `desktop/build.sh` mounts the desktop checkout at `../fellowship-desktop`
-  (override with `FELLOWSHIP_DESKTOP_SRC`).
-- The desktop's CI checks out `fellowshipos@nas-edition` with a sparse
-  `themes/` checkout, then points the theme tests at it with
-  `FELLOWSHIP_THEMES_DIR`.
-- `themes/fellowship.toml` is the default theme. The Rust desktop also carries
-  a built-in copy in `assets/themes/fellowship.toml`; its tests fail when the
-  two differ, so copy a change to both.
+There is no build-time contract any more: nothing here reads another
+checkout, and the other repositories read nothing here. What was shared was
+copied when each product left — the installer, the live-build profile and
+`themes/` — so a fix wanted in more than one product is made in each.
 
 ## Documentation
 
-Both repositories keep their documents where they are linked from, because
+Each repository keeps its documents where they are linked from, because
 READMEs, the CHANGELOG and source comments refer to them by filename. Use the
 indexes instead of moving files:
 
-- [docs/README.md](docs/README.md) — installer records, desktop-image
-  sessions.
-- [../fellowship-desktop/docs/README.md](../fellowship-desktop/docs/README.md) —
-  desktop design documents and session records.
+- [docs/README.md](docs/README.md) — installer and image records.
+- fellowship-desktop's `docs/README.md` — the desktop's design documents,
+  session records and the Desktop image's release records.
