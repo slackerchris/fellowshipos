@@ -1,7 +1,8 @@
-// Package edition says which image the installer is running from. One
-// installer serves both: the multi-purpose and desktop images install the same
-// way, giving the system the whole disk and choosing no role, so the first
-// start offers the usual choices.
+// Package edition says which image the installer is running from. This copy
+// of the installer belongs to FellowshipOS Multi-purpose and knows only that
+// image; FellowshipOS Desktop and FellowshipNAS keep their own copies. The
+// type stays so the boot menu's fellowship.installer= value is still read and
+// a wrong one is reported, and so the page keeps its edition field.
 package edition
 
 import (
@@ -12,29 +13,22 @@ import (
 // Edition is one of the images the boot menu can start.
 type Edition string
 
-const (
-	// Multi is the FellowshipOS Multi-purpose image.
-	Multi Edition = "multi"
-	// Desktop is the FellowshipOS Desktop image: the same live system with
-	// the Fellowship desktop, its portals and its apps in it.
-	Desktop Edition = "desktop"
-)
+// Multi is the FellowshipOS Multi-purpose image.
+const Multi Edition = "multi"
 
 // Parse reads an edition name. An empty value is the multi-purpose image.
 func Parse(value string) (Edition, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "multi", "multi-purpose", "multipurpose", "standard":
 		return Multi, nil
-	case "desktop":
-		return Desktop, nil
 	}
-	return "", fmt.Errorf("there is no %q image: this installer has multi and desktop", value)
+	return "", fmt.Errorf("there is no %q image: this installer is FellowshipOS Multi-purpose's", value)
 }
 
 // FromCmdline reads fellowship.installer=<edition> from a kernel command line,
 // which is how the boot menu says which image was started. Anything it can't
-// read is the multi-purpose image, so a machine booted without the option
-// still installs something that works.
+// read is still the multi-purpose image, so a machine booted without the
+// option still installs something that works.
 func FromCmdline(cmdline string) Edition {
 	for _, field := range strings.Fields(cmdline) {
 		if value, found := strings.CutPrefix(field, "fellowship.installer="); found {
@@ -59,12 +53,7 @@ func RemoteFromCmdline(cmdline string) string {
 }
 
 // Title is the image's name, as the boot menu and the console print it.
-func (e Edition) Title() string {
-	if e == Desktop {
-		return "FellowshipOS Desktop"
-	}
-	return "FellowshipOS Multi-purpose"
-}
+func (e Edition) Title() string { return "FellowshipOS Multi-purpose" }
 
 // String is the name the command line and the page use.
 func (e Edition) String() string { return string(e) }

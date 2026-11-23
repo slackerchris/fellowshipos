@@ -35,7 +35,7 @@ var (
 	squashfs = flag.String("squashfs", "/run/live/medium/live/filesystem.squashfs", "the live system's image")
 	rootfs   = flag.String("rootfs", "/run/live/rootfs/filesystem.squashfs", "where the live image is mounted")
 	target   = flag.String("target", "/target", "where the new system is assembled")
-	which    = flag.String("edition", "", "which image this is: multi or desktop (default: from the boot menu)")
+	which    = flag.String("edition", "", "which image this is: multi, the only one this installer has (default: from the boot menu)")
 	demo     = flag.Bool("demo", false, "show sample disks and pretend to install, touching nothing")
 )
 

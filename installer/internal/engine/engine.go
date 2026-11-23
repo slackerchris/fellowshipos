@@ -343,19 +343,7 @@ func (e *Engine) configure(s Settings, group string) error {
 	for _, name := range bootPackages {
 		e.chroot("", "apt-mark", "manual", name)
 	}
-	removeList := LivePackages
-	if _, err := os.Stat(filepath.Join(e.Target, "usr/bin/fellowship-greeter")); err == nil {
-		// Desktop editions use cage to host fellowship-greeter under greetd.
-		e.chroot("", "apt-mark", "manual", "cage")
-		filtered := make([]string, 0, len(LivePackages))
-		for _, pkg := range LivePackages {
-			if pkg != "cage" {
-				filtered = append(filtered, pkg)
-			}
-		}
-		removeList = filtered
-	}
-	if err := e.chroot("", append([]string{"apt-get", "purge", "-y"}, e.installedOf(removeList)...)...); err != nil {
+	if err := e.chroot("", append([]string{"apt-get", "purge", "-y"}, e.installedOf(LivePackages)...)...); err != nil {
 		return err
 	}
 	if err := e.chroot("", "apt-get", "autoremove", "--purge", "-y"); err != nil {
@@ -364,9 +352,9 @@ func (e *Engine) configure(s Settings, group string) error {
 	_ = os.Remove(policyRC)
 
 	// The live system set its network up itself; the installed one needs settings.
-	// On desktop installs where NetworkManager is installed, let NetworkManager
-	// manage wired and wireless interfaces directly instead of writing ifupdown
-	// stanzas that conflict with it.
+	// Where NetworkManager is in the target (a role or person may have added it
+	// to the image), it manages the interfaces, and ifupdown stanzas would
+	// conflict with it.
 	if _, err := os.Stat(filepath.Join(e.Target, "usr/sbin/NetworkManager")); err != nil {
 		for _, port := range e.Network {
 			config := fmt.Sprintf("# Written by the FellowshipOS installer\nallow-hotplug %[1]s\niface %[1]s inet dhcp\niface %[1]s inet6 auto\n", port)

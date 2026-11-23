@@ -22,7 +22,7 @@ func Wired(sysClassNet string) []string {
 		if _, err := os.Stat(filepath.Join(base, "device")); err != nil {
 			continue
 		}
-		// Wi-Fi needs a network name and password, which the desktop will ask for
+		// Wi-Fi needs a network name and password, which this installer doesn't ask for
 		if _, err := os.Stat(filepath.Join(base, "wireless")); err == nil {
 			continue
 		}

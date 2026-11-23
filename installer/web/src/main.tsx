@@ -188,8 +188,7 @@ function AboutYou({ info, settings, again, onChange, onAgain }: {
                 <Field label="Your name">
                     <input value={settings.full_name} autoComplete="name" onInput={event => setName(event.currentTarget.value)} />
                 </Field>
-                <Field label="User name" hint={info.edition === "desktop"
-                    ? "For logging in to the desktop and over SSH" : "For logging in here and over SSH"}>
+                <Field label="User name" hint="For logging in here and over SSH">
                     <input value={settings.user} autoComplete="username" autoCapitalize="none" spellcheck={false}
                            onInput={event => set({ user: event.currentTarget.value.toLowerCase() })} />
                 </Field>
@@ -258,8 +257,8 @@ function Confirm({ disk, layout, settings, title, onInstall }: {
     );
 }
 
-function Installing({ state, edition, onRetry }: {
-    state: Progress; edition?: string; onRetry: () => void;
+function Installing({ state, onRetry }: {
+    state: Progress; onRetry: () => void;
 }) {
     const [restarting, setRestarting] = useState(false);
     const log = state.log || [];
@@ -281,9 +280,7 @@ function Installing({ state, edition, onRetry }: {
             )}
             {state.phase === "done" && (
                 <>
-                    <Notice kind="done">FellowshipOS is installed. Restart now; the USB stick or disc can come out once the screen goes dark. {edition === "desktop"
-                        ? "After the first start, sign in with the account you just made."
-                        : "After the first start, the setup on screen finishes the machine and asks what it will do."}</Notice>
+                    <Notice kind="done">FellowshipOS is installed. Restart now; the USB stick or disc can come out once the screen goes dark. After the first start, the setup on screen finishes the machine and asks what it will do.</Notice>
                     <div class="row">
                         <button class="button button-primary" type="button" disabled={restarting}
                                 onClick={() => { setRestarting(true); reboot().catch(() => {}); }}>
@@ -355,7 +352,7 @@ function Installer({ greeting }: { greeting: Hello }) {
 
     if (state && state.phase !== "choose") {
         return <Frame step={3} title={info?.title}>
-            <Installing state={state} edition={info?.edition} onRetry={() => { setState(null); load(); }} />
+            <Installing state={state} onRetry={() => { setState(null); load(); }} />
         </Frame>;
     }
     if (error) {

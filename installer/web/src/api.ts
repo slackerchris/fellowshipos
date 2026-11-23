@@ -23,14 +23,14 @@ export interface Machine {
     memory: number;
     min_system: number;
     // Which image this is, and what it calls itself
-    edition: "multi" | "desktop";
+    edition: "multi";
     title: string;
 }
 
 export interface Hello {
     allowed: boolean;
     local: boolean;
-    edition?: "multi" | "desktop";
+    edition?: "multi";
     title?: string;
     code?: string;
     addresses?: string[];

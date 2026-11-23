@@ -1,7 +1,6 @@
-// The desktop's themes, read from FellowshipOS's shared theme files
-// (themes/*.toml at the top of the repository, installed to
-// /usr/share/fellowship/themes). The Rust desktop reads the same files with
-// the same rules; see themes/README.md.
+// The Fellowship themes, read from this repository's theme files
+// (themes/*.toml at its top). FellowshipOS Desktop and FellowshipNAS keep
+// their own copies and read them with the same rules; see themes/README.md.
 //
 // Each theme gives four colours per mode (window, panel, text and accent) and
 // a wallpaper; the rest is worked out from those. A theme can pin any

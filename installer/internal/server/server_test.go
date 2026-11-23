@@ -213,8 +213,7 @@ func TestInstallNeedsAnOfferedDiskAndTheWords(t *testing.T) {
 
 func TestThePageKnowsWhichImageItIs(t *testing.T) {
 	for which, title := range map[edition.Edition]string{
-		edition.Multi:   "FellowshipOS Multi-purpose",
-		edition.Desktop: "FellowshipOS Desktop",
+		edition.Multi: "FellowshipOS Multi-purpose",
 	} {
 		s, _ := setupEdition(which)
 		var info map[string]any
